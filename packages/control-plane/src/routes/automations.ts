@@ -15,6 +15,7 @@ import {
 import { AutomationStore, toAutomation, toAutomationRun } from "../db/automation-store";
 import { generateId } from "../auth/crypto";
 import { createLogger } from "../logger";
+import { isGitHubCopilotModel, validateModelCredentialsForRepo } from "../model-credentials";
 import {
   type Route,
   type RequestContext,
@@ -167,6 +168,25 @@ async function handleCreateAutomation(
 
   const baseBranch = body.baseBranch || defaultBranch;
 
+  try {
+    const credentialError = await validateModelCredentialsForRepo(env, model, {
+      repoId,
+      repoOwner,
+      repoName,
+    });
+    if (credentialError) {
+      return error(credentialError, 422);
+    }
+  } catch (e) {
+    logger.error("Failed to validate automation model credentials", {
+      error: e instanceof Error ? e.message : String(e),
+      repo_owner: repoOwner,
+      repo_name: repoName,
+      model,
+    });
+    return error("Failed to validate model credentials", 500);
+  }
+
   // Compute next run
   const nextRunAt = nextCronOccurrence(body.scheduleCron, body.scheduleTz).getTime();
 
@@ -303,6 +323,28 @@ async function handleUpdateAutomation(
     resolvedReasoningEffort === null
   ) {
     return error("Invalid reasoning effort for selected model", 400);
+  }
+
+  if (body.model !== undefined && isGitHubCopilotModel(nextModel)) {
+    try {
+      const credentialError = await validateModelCredentialsForRepo(env, nextModel, {
+        repoId: existing.repo_id,
+        repoOwner: existing.repo_owner,
+        repoName: existing.repo_name,
+      });
+      if (credentialError) {
+        return error(credentialError, 422);
+      }
+    } catch (e) {
+      logger.error("Failed to validate automation model credentials", {
+        error: e instanceof Error ? e.message : String(e),
+        automation_id: id,
+        repo_owner: existing.repo_owner,
+        repo_name: existing.repo_name,
+        model: nextModel,
+      });
+      return error("Failed to validate model credentials", 500);
+    }
   }
 
   // Build update fields

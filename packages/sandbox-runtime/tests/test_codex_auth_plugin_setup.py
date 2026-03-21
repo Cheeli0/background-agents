@@ -1,4 +1,4 @@
-"""Tests for codex auth proxy plugin deployment in SandboxSupervisor."""
+"""Tests for managed OpenAI auth entries used by the Codex auth proxy plugin."""
 
 import json
 from pathlib import Path
@@ -28,7 +28,7 @@ def _auth_file(tmp_path: Path) -> Path:
 
 
 class TestCodexAuthPluginSetup:
-    """Cases for codex auth proxy plugin deployment."""
+    """Cases for managed OpenAI auth entries."""
 
     def test_auth_json_uses_sentinel_token(self, tmp_path):
         """auth.json should contain the sentinel, not the real refresh token."""
@@ -42,7 +42,7 @@ class TestCodexAuthPluginSetup:
             ),
             patch("pathlib.Path.home", return_value=tmp_path),
         ):
-            sup._setup_openai_oauth()
+            sup._setup_opencode_auth("openai")
 
         data = json.loads(_auth_file(tmp_path).read_text())
         assert data["openai"]["refresh"] == "managed-by-control-plane"
@@ -65,7 +65,7 @@ class TestCodexAuthPluginSetup:
             ),
             patch("pathlib.Path.home", return_value=tmp_path),
         ):
-            sup._setup_openai_oauth()
+            sup._setup_opencode_auth("openai")
 
         data = json.loads(_auth_file(tmp_path).read_text())
         assert data["openai"]["refresh"] == "managed-by-control-plane"

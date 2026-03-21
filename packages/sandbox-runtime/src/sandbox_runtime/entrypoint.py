@@ -307,42 +307,79 @@ class SandboxSupervisor:
         if not package_json.exists():
             package_json.write_text('{"name": "opencode-tools", "type": "module"}')
 
-    def _setup_openai_oauth(self) -> None:
-        """Write OpenCode auth.json for ChatGPT OAuth if refresh token is configured."""
+    def _build_openai_auth_entry(self) -> dict[str, object] | None:
+        """Build the managed OpenAI auth entry for direct ChatGPT/Codex sessions."""
         refresh_token = os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN")
         if not refresh_token:
-            return
+            return None
+
+        openai_entry: dict[str, object] = {
+            "type": "oauth",
+            "refresh": "managed-by-control-plane",
+            "access": "",
+            "expires": 0,
+        }
+
+        account_id = os.environ.get("OPENAI_OAUTH_ACCOUNT_ID")
+        if account_id:
+            openai_entry["accountId"] = account_id
+
+        return openai_entry
+
+    def _write_opencode_auth(self, auth_data: dict[str, object]) -> None:
+        """Write OpenCode auth.json atomically with secure permissions."""
+        auth_dir = Path.home() / ".local" / "share" / "opencode"
+        auth_dir.mkdir(parents=True, exist_ok=True)
+
+        auth_file = auth_dir / "auth.json"
+        tmp_file = auth_dir / ".auth.json.tmp"
+
+        fd = os.open(str(tmp_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, json.dumps(auth_data).encode())
+        finally:
+            os.close(fd)
+        tmp_file.replace(auth_file)
+
+    def _setup_opencode_auth(self, selected_provider: str) -> None:
+        """Write OpenCode auth.json from repo secrets and managed OpenAI config."""
+        auth_data: dict[str, object] = {}
+
+        auth_json = os.environ.get("OPENCODE_AUTH_JSON")
+        if auth_json:
+            try:
+                parsed = json.loads(auth_json)
+            except json.JSONDecodeError as e:
+                raise RuntimeError("OPENCODE_AUTH_JSON must be valid JSON.") from e
+
+            if not isinstance(parsed, dict):
+                raise RuntimeError("OPENCODE_AUTH_JSON must be a JSON object.")
+
+            auth_data = parsed
 
         try:
-            auth_dir = Path.home() / ".local" / "share" / "opencode"
-            auth_dir.mkdir(parents=True, exist_ok=True)
+            openai_entry = self._build_openai_auth_entry()
+            if openai_entry:
+                auth_data["openai"] = openai_entry
 
-            openai_entry = {
-                "type": "oauth",
-                "refresh": "managed-by-control-plane",
-                "access": "",
-                "expires": 0,
-            }
+            if selected_provider == "github-copilot":
+                copilot_entry = auth_data.get("github-copilot")
+                if not isinstance(copilot_entry, dict):
+                    raise RuntimeError(
+                        "GitHub Copilot credentials are not configured. "
+                        "Add OPENCODE_AUTH_JSON in repository Settings."
+                    )
 
-            account_id = os.environ.get("OPENAI_OAUTH_ACCOUNT_ID")
-            if account_id:
-                openai_entry["accountId"] = account_id
+            if not auth_data:
+                return
 
-            auth_file = auth_dir / "auth.json"
-            tmp_file = auth_dir / ".auth.json.tmp"
-
-            # Write to a temp file created with 0o600 from the start, then
-            # atomically rename so the target is never world-readable.
-            fd = os.open(str(tmp_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            try:
-                os.write(fd, json.dumps({"openai": openai_entry}).encode())
-            finally:
-                os.close(fd)
-            tmp_file.replace(auth_file)
-
-            self.log.info("openai_oauth.setup")
+            self._write_opencode_auth(auth_data)
+            self.log.info("opencode_auth.setup", providers=sorted(auth_data.keys()))
+        except RuntimeError:
+            raise
         except Exception as e:
-            self.log.warn("openai_oauth.setup_error", exc=e)
+            self.log.warn("opencode_auth.setup_error", exc=e)
+            raise RuntimeError("Failed to configure OpenCode credentials.") from e
 
     async def start_code_server(self) -> None:
         """Start code-server for browser-based VS Code editing."""
@@ -386,12 +423,12 @@ class SandboxSupervisor:
 
     async def start_opencode(self) -> None:
         """Start OpenCode server with configuration."""
-        self._setup_openai_oauth()
+        provider = self.session_config.get("provider", "anthropic")
+        self._setup_opencode_auth(provider)
         self.log.info("opencode.start")
 
         # Build OpenCode config from session settings
         # Model format is "provider/model", e.g. "anthropic/claude-sonnet-4-6"
-        provider = self.session_config.get("provider", "anthropic")
         model = self.session_config.get("model", "claude-sonnet-4-6")
         opencode_config = {
             "model": f"{provider}/{model}",
@@ -412,7 +449,11 @@ class SandboxSupervisor:
         # Deploy codex auth proxy plugin if OpenAI OAuth is configured
         opencode_dir = workdir / ".opencode"
         plugin_source = Path("/app/sandbox_runtime/plugins/codex-auth-plugin.ts")
-        if plugin_source.exists() and os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN"):
+        if (
+            plugin_source.exists()
+            and provider == "openai"
+            and os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN")
+        ):
             plugin_dir = opencode_dir / "plugins"
             plugin_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy(plugin_source, plugin_dir / "codex-auth-plugin.ts")

@@ -4,6 +4,9 @@ Open-Inspect supports OpenAI Codex models in addition to Anthropic Claude models
 how to configure your deployment to use them.
 
 > **Note**: This setup process is temporary and will be streamlined in a future release.
+>
+> Direct OpenAI models use the ChatGPT/OpenAI OAuth path and the sandbox Codex auth plugin. If you
+> want GitHub Copilot-backed GPT or Claude models instead, see **[COPILOT_MODELS.md](./COPILOT_MODELS.md)**.
 
 ---
 

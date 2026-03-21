@@ -20,6 +20,10 @@ export const VALID_MODELS = [
   "openai/gpt-5.2-codex",
   "openai/gpt-5.3-codex",
   "openai/gpt-5.3-codex-spark",
+  "github-copilot/gpt-4.1",
+  "github-copilot/gpt-5",
+  "github-copilot/gpt-5-mini",
+  "github-copilot/claude-sonnet-4",
   "opencode/kimi-k2.5",
   "opencode/minimax-m2.5",
   "opencode/glm-5",
@@ -123,6 +127,31 @@ export const MODEL_OPTIONS: ModelCategory[] = [
     ],
   },
   {
+    category: "GitHub Copilot",
+    models: [
+      {
+        id: "github-copilot/gpt-4.1",
+        name: "GPT 4.1",
+        description: "Copilot-backed OpenAI model",
+      },
+      {
+        id: "github-copilot/gpt-5",
+        name: "GPT 5",
+        description: "Copilot-backed reasoning model",
+      },
+      {
+        id: "github-copilot/gpt-5-mini",
+        name: "GPT 5 Mini",
+        description: "Copilot-backed fast reasoning model",
+      },
+      {
+        id: "github-copilot/claude-sonnet-4",
+        name: "Claude Sonnet 4",
+        description: "Copilot-backed Claude model",
+      },
+    ],
+  },
+  {
     category: "OpenCode Zen",
     models: [
       { id: "opencode/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
@@ -134,7 +163,7 @@ export const MODEL_OPTIONS: ModelCategory[] = [
 
 /**
  * Models enabled by default when no preferences are stored.
- * Excludes zen models which must be opted into via settings.
+ * Excludes GitHub Copilot and zen models, which must be opted into via settings.
  */
 export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
   "anthropic/claude-haiku-4-5",

@@ -26,6 +26,7 @@ import {
 } from "@open-inspect/shared";
 import { createRequestMetrics, instrumentD1 } from "./db/instrumented-d1";
 import { createLogger } from "./logger";
+import { validateModelCredentialsForRepo } from "./model-credentials";
 import {
   type Route,
   type RequestContext,
@@ -729,6 +730,25 @@ async function handleCreateSession(
       ? body.reasoningEffort
       : null;
 
+  try {
+    const credentialError = await validateModelCredentialsForRepo(env, model, {
+      repoId,
+      repoOwner,
+      repoName,
+    });
+    if (credentialError) {
+      return error(credentialError, 422);
+    }
+  } catch (e) {
+    logger.error("Failed to validate model credentials", {
+      error: e instanceof Error ? e.message : String(e),
+      repo_owner: repoOwner,
+      repo_name: repoName,
+      model,
+    });
+    return error("Failed to validate model credentials", 500);
+  }
+
   // Resolve code-server integration setting for this repo
   const codeServerEnabled = await resolveCodeServerEnabled(env.DB, repoOwner, repoName);
 
@@ -1416,6 +1436,26 @@ async function handleSpawnChild(
     body.reasoningEffort && isValidReasoningEffort(model, body.reasoningEffort)
       ? body.reasoningEffort
       : spawnContext.reasoningEffort;
+
+  try {
+    const credentialError = await validateModelCredentialsForRepo(env, model, {
+      repoId: spawnContext.repoId,
+      repoOwner: spawnContext.repoOwner,
+      repoName: spawnContext.repoName,
+    });
+    if (credentialError) {
+      return error(credentialError, 422);
+    }
+  } catch (e) {
+    logger.error("Failed to validate child session model credentials", {
+      error: e instanceof Error ? e.message : String(e),
+      parent_id: parentId,
+      repo_owner: spawnContext.repoOwner,
+      repo_name: spawnContext.repoName,
+      model,
+    });
+    return error("Failed to validate model credentials", 500);
+  }
 
   const childDepth = parentDepth + 1;
 

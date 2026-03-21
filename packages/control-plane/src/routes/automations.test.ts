@@ -26,6 +26,8 @@ const mockStore = {
   getRunById: vi.fn(),
 };
 
+const mockValidateModelCredentialsForRepo = vi.fn();
+
 vi.mock("../db/automation-store", () => ({
   AutomationStore: vi.fn().mockImplementation(() => mockStore),
   toAutomation: vi.fn((row: unknown) => row),
@@ -34,6 +36,11 @@ vi.mock("../db/automation-store", () => ({
 
 vi.mock("../auth/crypto", () => ({
   generateId: vi.fn(() => "generated-id"),
+}));
+
+vi.mock("../model-credentials", () => ({
+  isGitHubCopilotModel: vi.fn((model: string) => model.startsWith("github-copilot/")),
+  validateModelCredentialsForRepo: mockValidateModelCredentialsForRepo,
 }));
 
 vi.mock("./shared", async (importOriginal) => {
@@ -75,6 +82,7 @@ function createEnv(): Env {
     } as unknown as DurableObjectNamespace,
     DEPLOYMENT_NAME: "test",
     TOKEN_ENCRYPTION_KEY: "test-key",
+    REPO_SECRETS_ENCRYPTION_KEY: "repo-secret-key",
   } as Env;
 }
 
@@ -142,6 +150,7 @@ const sampleRow = {
 describe("automation route handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockValidateModelCredentialsForRepo.mockResolvedValue(null);
   });
 
   describe("GET /automations (list)", () => {
@@ -283,6 +292,20 @@ describe("automation route handlers", () => {
       const body = await res.json<{ error: string }>();
       expect(body.error).toContain("timezone");
     });
+
+    it("returns 422 when a Copilot model is selected without credentials", async () => {
+      mockValidateModelCredentialsForRepo.mockResolvedValue(
+        "GitHub Copilot credentials are not configured."
+      );
+
+      const res = await callRoute("POST", "/automations", {
+        body: { ...validBody, model: "github-copilot/gpt-5" },
+      });
+
+      expect(res.status).toBe(422);
+      const body = await res.json<{ error: string }>();
+      expect(body.error).toContain("GitHub Copilot credentials");
+    });
   });
 
   describe("GET /automations/:id (get)", () => {
@@ -407,6 +430,21 @@ describe("automation route handlers", () => {
           next_run_at: expect.any(Number),
         })
       );
+    });
+
+    it("returns 422 when updating to a Copilot model without credentials", async () => {
+      mockStore.getById.mockResolvedValue(sampleRow);
+      mockValidateModelCredentialsForRepo.mockResolvedValue(
+        "GitHub Copilot credentials are not configured."
+      );
+
+      const res = await callRoute("PUT", "/automations/auto-1", {
+        body: { model: "github-copilot/gpt-5" },
+      });
+
+      expect(res.status).toBe(422);
+      const body = await res.json<{ error: string }>();
+      expect(body.error).toContain("GitHub Copilot credentials");
     });
   });
 
