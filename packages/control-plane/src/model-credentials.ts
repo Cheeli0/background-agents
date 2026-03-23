@@ -16,6 +16,20 @@ export function isGitHubCopilotModel(model: string): boolean {
   return extractProviderAndModel(model).provider === "github-copilot";
 }
 
+function hasCopilotAuthEntry(authObject: Record<string, unknown>): boolean {
+  const directEntry = authObject["github-copilot"] ?? authObject["copilot"];
+  if (directEntry && typeof directEntry === "object" && !Array.isArray(directEntry)) {
+    return true;
+  }
+
+  // Accept a provider entry pasted directly instead of a full auth.json object.
+  return (
+    ("type" in authObject || "access" in authObject || "refresh" in authObject) &&
+    !("openai" in authObject) &&
+    !("anthropic" in authObject)
+  );
+}
+
 export async function validateModelCredentialsForRepo(
   env: Pick<Env, "DB" | "REPO_SECRETS_ENCRYPTION_KEY">,
   model: string,
@@ -57,11 +71,12 @@ export async function validateModelCredentialsForRepo(
     return "OPENCODE_AUTH_JSON must be a JSON object.";
   }
 
-  const copilotAuth = (parsed as Record<string, unknown>)["github-copilot"];
-  if (!copilotAuth || typeof copilotAuth !== "object" || Array.isArray(copilotAuth)) {
+  const authObject = parsed as Record<string, unknown>;
+  if (!hasCopilotAuthEntry(authObject)) {
     return (
       "OPENCODE_AUTH_JSON does not contain GitHub Copilot credentials. " +
-      "Authenticate OpenCode with GitHub Copilot and store that provider entry."
+      "Store either the full auth object with a github-copilot/copilot entry " +
+      "or the provider entry itself."
     );
   }
 

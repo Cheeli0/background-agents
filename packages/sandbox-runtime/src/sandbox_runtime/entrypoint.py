@@ -341,6 +341,28 @@ class SandboxSupervisor:
             os.close(fd)
         tmp_file.replace(auth_file)
 
+    def _normalize_copilot_auth(self, auth_data: dict[str, object]) -> dict[str, object]:
+        """Normalize Copilot auth blobs from either full auth.json or direct provider entries."""
+        copilot_entry = auth_data.get("github-copilot") or auth_data.get("copilot")
+        if isinstance(copilot_entry, dict):
+            normalized = dict(auth_data)
+            normalized["github-copilot"] = copilot_entry
+            normalized["copilot"] = copilot_entry
+            return normalized
+
+        # Accept a provider entry pasted directly instead of the whole auth file.
+        if (
+            ("type" in auth_data or "access" in auth_data or "refresh" in auth_data)
+            and "openai" not in auth_data
+            and "anthropic" not in auth_data
+        ):
+            return {
+                "github-copilot": dict(auth_data),
+                "copilot": dict(auth_data),
+            }
+
+        return auth_data
+
     def _setup_opencode_auth(self, selected_provider: str) -> None:
         """Write OpenCode auth.json from repo secrets and managed OpenAI config."""
         auth_data: dict[str, object] = {}
@@ -356,6 +378,8 @@ class SandboxSupervisor:
                 raise RuntimeError("OPENCODE_AUTH_JSON must be a JSON object.")
 
             auth_data = parsed
+            if selected_provider == "github-copilot":
+                auth_data = self._normalize_copilot_auth(auth_data)
 
         try:
             openai_entry = self._build_openai_auth_entry()
@@ -363,7 +387,7 @@ class SandboxSupervisor:
                 auth_data["openai"] = openai_entry
 
             if selected_provider == "github-copilot":
-                copilot_entry = auth_data.get("github-copilot")
+                copilot_entry = auth_data.get("github-copilot") or auth_data.get("copilot")
                 if not isinstance(copilot_entry, dict):
                     raise RuntimeError(
                         "GitHub Copilot credentials are not configured. "
@@ -430,8 +454,9 @@ class SandboxSupervisor:
         # Build OpenCode config from session settings
         # Model format is "provider/model", e.g. "anthropic/claude-sonnet-4-6"
         model = self.session_config.get("model", "claude-sonnet-4-6")
+        opencode_provider = "copilot" if provider == "github-copilot" else provider
         opencode_config = {
-            "model": f"{provider}/{model}",
+            "model": f"{opencode_provider}/{model}",
             "permission": {
                 "*": {
                     "*": "allow",

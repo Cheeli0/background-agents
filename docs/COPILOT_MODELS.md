@@ -28,10 +28,54 @@ OpenAI or Anthropic credentials.
    ```bash
    cat ~/.local/share/opencode/auth.json
    ```
-6. Copy the minimal JSON object that includes your `github-copilot` provider entry.
+6. Copy the minimal JSON object that includes your GitHub Copilot provider credentials.
 7. Add that JSON as the `OPENCODE_AUTH_JSON` secret in Open-Inspect settings.
 
 `OPENCODE_AUTH_JSON` can be stored as either a repository secret or a global secret.
+
+## Expected Secret Structure
+
+Preferred format:
+
+```json
+{
+  "github-copilot": {
+    "type": "oauth",
+    "access": "...",
+    "refresh": "...",
+    "expires": 0
+  }
+}
+```
+
+Also accepted:
+
+Full auth object using `copilot`:
+
+```json
+{
+  "copilot": {
+    "type": "oauth",
+    "access": "...",
+    "refresh": "...",
+    "expires": 0
+  }
+}
+```
+
+Direct provider entry pasted by itself:
+
+```json
+{
+  "type": "oauth",
+  "access": "...",
+  "refresh": "...",
+  "expires": 0
+}
+```
+
+The wrapped `github-copilot` form is preferred because it matches the provider naming used by the
+Open-Inspect model registry.
 
 ## Notes
 
@@ -44,8 +88,9 @@ OpenAI or Anthropic credentials.
 
 ### Session creation fails with missing credentials
 
-Set `OPENCODE_AUTH_JSON` in Open-Inspect settings. The value must be a JSON object and must contain
-the `github-copilot` provider entry from your local OpenCode auth file.
+Set `OPENCODE_AUTH_JSON` in Open-Inspect settings. The value must be a JSON object. The preferred
+shape is an object containing a `github-copilot` entry, but the backend also accepts a `copilot`
+entry or the provider entry pasted directly.
 
 ### A model is missing from the dropdown
 

@@ -206,3 +206,57 @@ class TestOpenCodeAuthSetup:
 
         data = json.loads(_auth_file(tmp_path).read_text())
         assert data["github-copilot"]["access"] == "copilot-access"
+
+    def test_accepts_direct_copilot_provider_entry(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENCODE_AUTH_JSON": json.dumps(
+                        {
+                            "type": "oauth",
+                            "access": "copilot-access",
+                            "refresh": "copilot-refresh",
+                            "expires": 123,
+                        }
+                    )
+                },
+                clear=False,
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            sup._setup_opencode_auth("github-copilot")
+
+        data = json.loads(_auth_file(tmp_path).read_text())
+        assert data["github-copilot"]["access"] == "copilot-access"
+        assert data["copilot"]["access"] == "copilot-access"
+
+    def test_accepts_full_auth_blob_with_copilot_key(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENCODE_AUTH_JSON": json.dumps(
+                        {
+                            "copilot": {
+                                "type": "oauth",
+                                "access": "copilot-access",
+                                "refresh": "copilot-refresh",
+                                "expires": 123,
+                            }
+                        }
+                    )
+                },
+                clear=False,
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            sup._setup_opencode_auth("github-copilot")
+
+        data = json.loads(_auth_file(tmp_path).read_text())
+        assert data["github-copilot"]["access"] == "copilot-access"
+        assert data["copilot"]["access"] == "copilot-access"

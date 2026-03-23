@@ -93,6 +93,40 @@ describe("model-credentials", () => {
       expect(result).toBeNull();
     });
 
+    it("accepts a full auth blob with a copilot key", async () => {
+      mockGetRepoSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
+          copilot: { type: "oauth", access: "token" },
+        }),
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "github-copilot/gpt-5", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("accepts a provider entry pasted directly", async () => {
+      mockGetRepoSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
+          type: "oauth",
+          access: "token",
+          refresh: "refresh-token",
+        }),
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "github-copilot/gpt-5-mini", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
     it("accepts a global GitHub Copilot auth blob", async () => {
       mockGetGlobalSecrets.mockResolvedValue({
         [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({

@@ -50,6 +50,7 @@ export default function Home() {
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const sessionCreationPromise = useRef<Promise<string | null> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lastSessionCreationErrorRef = useRef<string>("");
   const pendingConfigRef = useRef<{ repo: string; model: string; branch: string } | null>(null);
   const [hasHydratedModelPreferences, setHasHydratedModelPreferences] = useState(false);
   const { enabledModels, enabledModelOptions } = useEnabledModels();
@@ -117,6 +118,7 @@ export default function Home() {
     setIsCreatingSession(false);
     sessionCreationPromise.current = null;
     pendingConfigRef.current = null;
+    lastSessionCreationErrorRef.current = "";
   }, [selectedRepo, selectedModel, selectedBranch]);
 
   const createSessionForWarming = useCallback(async () => {
@@ -149,6 +151,7 @@ export default function Home() {
 
         if (res.ok) {
           const data = await res.json();
+          lastSessionCreationErrorRef.current = "";
           if (
             pendingConfigRef.current?.repo === currentConfig.repo &&
             pendingConfigRef.current?.model === currentConfig.model &&
@@ -159,12 +162,16 @@ export default function Home() {
           }
           return null;
         }
+        const data = await res.json().catch(() => ({ error: "Failed to create session" }));
+        lastSessionCreationErrorRef.current = data.error || "Failed to create session";
         return null;
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           return null;
         }
         console.error("Failed to create session for warming:", error);
+        lastSessionCreationErrorRef.current =
+          error instanceof Error ? error.message : "Failed to create session";
         return null;
       } finally {
         if (abortControllerRef.current === abortController) {
@@ -235,7 +242,7 @@ export default function Home() {
       }
 
       if (!sessionId) {
-        setError("Failed to create session");
+        setError(lastSessionCreationErrorRef.current || "Failed to create session");
         setCreating(false);
         return;
       }
@@ -258,8 +265,8 @@ export default function Home() {
         setError(data.error || "Failed to send prompt");
         setCreating(false);
       }
-    } catch (_error) {
-      setError("Failed to create session");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to create session");
       setCreating(false);
     }
   };
