@@ -6,7 +6,7 @@ import { mutate } from "swr";
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useSidebarContext } from "@/components/sidebar-layout";
-import { formatModelNameLower } from "@/lib/format";
+import { formatModelNameLower, formatModelOptionDescription } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 import {
@@ -495,7 +495,7 @@ function HomeContent({
                           options: group.models.map((model) => ({
                             value: model.id,
                             label: model.name,
-                            description: model.description,
+                            description: formatModelOptionDescription(model),
                           })),
                         })) as ComboboxGroup[]
                       }

@@ -10,7 +10,7 @@ import {
 import { useRepos } from "@/hooks/use-repos";
 import { useBranches } from "@/hooks/use-branches";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
-import { formatModelNameLower } from "@/lib/format";
+import { formatModelNameLower, formatModelOptionDescription } from "@/lib/format";
 import { Combobox, type ComboboxGroup } from "@/components/ui/combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -217,7 +217,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
               options: group.models.map((m) => ({
                 value: m.id,
                 label: m.name,
-                description: m.description,
+                description: formatModelOptionDescription(m),
               })),
             })) as ComboboxGroup[]
           }

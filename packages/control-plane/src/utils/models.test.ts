@@ -43,7 +43,7 @@ describe("model utilities", () => {
 
     it("returns true for GitHub Copilot-backed models", () => {
       expect(isValidModel("github-copilot/gpt-4.1")).toBe(true);
-      expect(isValidModel("github-copilot/gpt-5")).toBe(true);
+      expect(isValidModel("github-copilot/gpt-5.1")).toBe(true);
       expect(isValidModel("github-copilot/gpt-5-mini")).toBe(true);
       expect(isValidModel("github-copilot/claude-sonnet-4")).toBe(true);
     });
@@ -124,9 +124,9 @@ describe("model utilities", () => {
     });
 
     it("extracts GitHub Copilot provider from Copilot-backed models", () => {
-      expect(extractProviderAndModel("github-copilot/gpt-5")).toEqual({
+      expect(extractProviderAndModel("github-copilot/gpt-5.1")).toEqual({
         provider: "github-copilot",
-        model: "gpt-5",
+        model: "gpt-5.1",
       });
 
       expect(extractProviderAndModel("github-copilot/claude-sonnet-4")).toEqual({
@@ -262,7 +262,7 @@ describe("model utilities", () => {
 
     it("returns false for invalid models", () => {
       expect(supportsReasoning("gpt-4")).toBe(false);
-      expect(supportsReasoning("github-copilot/gpt-5")).toBe(false);
+      expect(supportsReasoning("github-copilot/gpt-5.1")).toBe(false);
       expect(supportsReasoning("invalid")).toBe(false);
       expect(supportsReasoning("")).toBe(false);
     });

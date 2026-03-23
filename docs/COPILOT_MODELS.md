@@ -5,15 +5,39 @@ direct Anthropic and OpenAI paths.
 
 ## Supported Model IDs
 
-This repo currently exposes a conservative static subset:
+This repo currently exposes the following static Copilot-backed model IDs:
 
 - `github-copilot/gpt-4.1`
-- `github-copilot/gpt-5`
+- `github-copilot/gpt-4o`
 - `github-copilot/gpt-5-mini`
+- `github-copilot/gpt-5.1`
+- `github-copilot/gpt-5.1-codex`
+- `github-copilot/gpt-5.1-codex-mini`
+- `github-copilot/gpt-5.1-codex-max`
+- `github-copilot/gpt-5.2`
+- `github-copilot/gpt-5.2-codex`
+- `github-copilot/gpt-5.3-codex`
+- `github-copilot/gpt-5.4`
+- `github-copilot/gpt-5.4-mini`
+- `github-copilot/claude-haiku-4-5`
 - `github-copilot/claude-sonnet-4`
+- `github-copilot/claude-sonnet-4-5`
+- `github-copilot/claude-sonnet-4-6`
+- `github-copilot/claude-opus-4-5`
+- `github-copilot/claude-opus-4-6`
+- `github-copilot/claude-opus-4-6-fast`
+- `github-copilot/gemini-2.5-pro`
+- `github-copilot/gemini-3-flash`
+- `github-copilot/gemini-3-pro`
+- `github-copilot/gemini-3.1-pro`
 
 These are billed and authorized through your GitHub Copilot subscription, not through direct
 OpenAI or Anthropic credentials.
+
+https://docs.github.com/en/copilot/concepts/billing/copilot-requests
+
+The UI shows the Copilot premium request multiplier in the model picker description and on the
+settings page. A label of `Free` means the multiplier is `0`.
 
 ## Setup
 

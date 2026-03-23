@@ -299,7 +299,7 @@ describe("automation route handlers", () => {
       );
 
       const res = await callRoute("POST", "/automations", {
-        body: { ...validBody, model: "github-copilot/gpt-5" },
+        body: { ...validBody, model: "github-copilot/gpt-5.1" },
       });
 
       expect(res.status).toBe(422);
@@ -439,7 +439,7 @@ describe("automation route handlers", () => {
       );
 
       const res = await callRoute("PUT", "/automations/auto-1", {
-        body: { model: "github-copilot/gpt-5" },
+        body: { model: "github-copilot/gpt-5.1" },
       });
 
       expect(res.status).toBe(422);

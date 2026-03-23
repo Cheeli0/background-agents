@@ -2,11 +2,18 @@
  * Utility functions for formatting display values
  */
 
-import { MODEL_OPTIONS, normalizeModelId } from "@open-inspect/shared";
+import {
+  MODEL_OPTIONS,
+  normalizeModelId,
+  type ModelDisplayInfo,
+} from "@open-inspect/shared";
 
 // Build a lookup map once at module level
 const MODEL_DISPLAY_NAMES = new Map<string, string>(
   MODEL_OPTIONS.flatMap((g) => g.models.map((m) => [m.id, m.name]))
+);
+const MODEL_DISPLAY_INFO = new Map<string, ModelDisplayInfo>(
+  MODEL_OPTIONS.flatMap((g) => g.models.map((m) => [m.id, m]))
 );
 
 /**
@@ -26,6 +33,32 @@ export function formatModelName(modelId: string): string {
 export function formatModelNameLower(modelId: string): string {
   if (!modelId) return "unknown model";
   return (MODEL_DISPLAY_NAMES.get(normalizeModelId(modelId)) ?? modelId).toLowerCase();
+}
+
+function formatMultiplierNumber(multiplier: number): string {
+  return Number.isInteger(multiplier)
+    ? String(multiplier)
+    : multiplier.toFixed(2).replace(/\.?0+$/, "");
+}
+
+export function formatPremiumMultiplierLabel(multiplier?: number): string | null {
+  if (multiplier === undefined) return null;
+  if (multiplier === 0) return "Free";
+  return `Premium x${formatMultiplierNumber(multiplier)}`;
+}
+
+export function formatModelOptionDescription(
+  model: Pick<ModelDisplayInfo, "description" | "premiumMultiplier">
+): string {
+  const multiplierLabel = formatPremiumMultiplierLabel(model.premiumMultiplier);
+  if (!multiplierLabel) return model.description;
+  return `${model.description} · ${multiplierLabel}`;
+}
+
+export function getModelOptionDescription(modelId: string): string | null {
+  if (!modelId) return null;
+  const model = MODEL_DISPLAY_INFO.get(normalizeModelId(modelId));
+  return model ? formatModelOptionDescription(model) : null;
 }
 
 /**

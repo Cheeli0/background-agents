@@ -22,7 +22,11 @@ import {
   SessionRightSidebarContent,
 } from "@/components/session-right-sidebar";
 import { ActionBar } from "@/components/action-bar";
-import { copyToClipboard, formatModelNameLower } from "@/lib/format";
+import {
+  copyToClipboard,
+  formatModelNameLower,
+  formatModelOptionDescription,
+} from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -962,7 +966,7 @@ function SessionContent({
                       options: group.models.map((model) => ({
                         value: model.id,
                         label: model.name,
-                        description: model.description,
+                        description: formatModelOptionDescription(model),
                       })),
                     })) as ComboboxGroup[]
                   }

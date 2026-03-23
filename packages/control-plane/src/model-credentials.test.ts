@@ -29,7 +29,7 @@ describe("model-credentials", () => {
 
   describe("isGitHubCopilotModel", () => {
     it("detects GitHub Copilot-backed models", () => {
-      expect(isGitHubCopilotModel("github-copilot/gpt-5")).toBe(true);
+      expect(isGitHubCopilotModel("github-copilot/gpt-5.1")).toBe(true);
       expect(isGitHubCopilotModel("github-copilot/claude-sonnet-4")).toBe(true);
       expect(isGitHubCopilotModel("openai/gpt-5.4")).toBe(false);
     });
@@ -56,7 +56,7 @@ describe("model-credentials", () => {
     it("returns an error when secrets storage is unavailable", async () => {
       const result = await validateModelCredentialsForRepo(
         { DB: {} as D1Database, REPO_SECRETS_ENCRYPTION_KEY: undefined },
-        "github-copilot/gpt-5",
+        "github-copilot/gpt-5.1",
         {
           repoId: 1,
           repoOwner: "acme",
@@ -68,7 +68,7 @@ describe("model-credentials", () => {
     });
 
     it("returns an error when OPENCODE_AUTH_JSON is missing", async () => {
-      const result = await validateModelCredentialsForRepo(env, "github-copilot/gpt-5", {
+      const result = await validateModelCredentialsForRepo(env, "github-copilot/gpt-5.1", {
         repoId: 1,
         repoOwner: "acme",
         repoName: "widgets",
@@ -100,7 +100,7 @@ describe("model-credentials", () => {
         }),
       });
 
-      const result = await validateModelCredentialsForRepo(env, "github-copilot/gpt-5", {
+      const result = await validateModelCredentialsForRepo(env, "github-copilot/gpt-5.1", {
         repoId: 1,
         repoOwner: "acme",
         repoName: "widgets",
@@ -148,7 +148,7 @@ describe("model-credentials", () => {
         [OPENCODE_AUTH_JSON_SECRET]: "{invalid",
       });
 
-      const result = await validateModelCredentialsForRepo(env, "github-copilot/gpt-5", {
+      const result = await validateModelCredentialsForRepo(env, "github-copilot/gpt-5.1", {
         repoId: 1,
         repoOwner: "acme",
         repoName: "widgets",

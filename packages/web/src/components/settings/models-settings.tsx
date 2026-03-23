@@ -5,6 +5,7 @@ import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import { MODEL_OPTIONS, DEFAULT_ENABLED_MODELS } from "@open-inspect/shared";
 import { MODEL_PREFERENCES_KEY } from "@/hooks/use-enabled-models";
+import { formatPremiumMultiplierLabel } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
@@ -91,6 +92,10 @@ export function ModelsSettings() {
       <p className="text-sm text-muted-foreground mb-6">
         Choose which models appear in the model selector across the web UI and Slack bot.
       </p>
+      <p className="text-sm text-muted-foreground mb-6">
+        GitHub Copilot models show their premium request multiplier here. Free means the
+        multiplier is <code>0</code>.
+      </p>
 
       <div className="space-y-6">
         {MODEL_OPTIONS.map((group) => {
@@ -113,6 +118,7 @@ export function ModelsSettings() {
               <div className="space-y-2">
                 {group.models.map((model) => {
                   const isEnabled = enabledModels.has(model.id);
+                  const premiumMultiplierLabel = formatPremiumMultiplierLabel(model.premiumMultiplier);
                   return (
                     <label
                       key={model.id}
@@ -120,10 +126,15 @@ export function ModelsSettings() {
                       className="flex items-center justify-between px-4 py-3 border border-border hover:bg-muted/50 transition cursor-pointer"
                     >
                       <div>
-                        <span className="text-sm font-medium text-foreground">{model.name}</span>
-                        <span className="text-sm text-muted-foreground ml-2">
-                          {model.description}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-foreground">{model.name}</span>
+                          {premiumMultiplierLabel && (
+                            <span className="rounded-full border border-border-muted px-2 py-0.5 text-xs text-muted-foreground">
+                              {premiumMultiplierLabel}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm text-muted-foreground">{model.description}</div>
                       </div>
                       <Switch
                         id={`model-toggle-${model.id}`}
