@@ -16,7 +16,7 @@ interface ModelPreferencesResponse {
 export function useEnabledModels() {
   const { data, isLoading } = useSWR<ModelPreferencesResponse>(MODEL_PREFERENCES_KEY);
 
-  const enabledModels = useMemo(
+  const enabledModels = useMemo<string[]>(
     () =>
       (data?.enabledModels ?? (isLoading ? [] : (DEFAULT_ENABLED_MODELS as string[]))).filter(
         (modelId) => isValidModel(modelId)
