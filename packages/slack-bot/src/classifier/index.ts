@@ -20,6 +20,7 @@ import { getClassifierRuntimeConfig } from "./config";
 const log = createLogger("classifier");
 const CLASSIFY_REPO_TOOL_NAME = "classify_repository";
 const CONFIDENCE_LEVELS: ClassificationResult["confidence"][] = ["high", "medium", "low"];
+const CLASSIFIER_DEBUG_VERSION = "2026-03-24-gpt5-request-shape-debug-1";
 
 const CLASSIFY_REPO_TOOL: Anthropic.Messages.Tool = {
   name: CLASSIFY_REPO_TOOL_NAME,
@@ -131,6 +132,28 @@ const COPILOT_MODEL_MAP: Record<string, string> = {
   "gpt-5-mini": "openai/gpt-5-mini",
 };
 
+export function buildGitHubModelsTokenLimit(
+  model: string,
+  tokenLimit: number
+): {
+  max_tokens?: number;
+  max_completion_tokens?: number;
+} {
+  if (model.startsWith("openai/gpt-5")) {
+    return { max_completion_tokens: tokenLimit };
+  }
+
+  return { max_tokens: tokenLimit };
+}
+
+export function buildGitHubModelsTemperature(model: string): { temperature?: number } {
+  if (model.startsWith("openai/gpt-5")) {
+    return {};
+  }
+
+  return { temperature: 0 };
+}
+
 function normalizeModelResponse(raw: unknown): LLMResponse {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("LLM response was not an object");
@@ -189,10 +212,7 @@ function extractStructuredResponse(response: Anthropic.Messages.Message): LLMRes
   return normalizeModelResponse(toolUseBlock.input);
 }
 
-function resolveClassifierModel(
-  envModel: string | undefined,
-  preferredModel: string
-): string {
+function resolveClassifierModel(envModel: string | undefined, preferredModel: string): string {
   const normalizedEnvModel = envModel?.trim() ? normalizeModelId(envModel.trim()) : "";
   const isLegacyDefault =
     normalizedEnvModel === "" ||
@@ -214,7 +234,8 @@ function createAnthropicClient(apiKey: string | undefined): Anthropic {
 async function classifyWithGitHubModels(
   model: string,
   accessToken: string | null,
-  prompt: string
+  prompt: string,
+  traceId?: string
 ): Promise<LLMResponse> {
   if (!accessToken) {
     throw new Error("GitHub Copilot classifier token is not configured");
@@ -224,6 +245,20 @@ async function classifyWithGitHubModels(
   if (!mappedModel) {
     throw new Error(`Unsupported GitHub Copilot classifier model: ${model}`);
   }
+  const tokenLimit = buildGitHubModelsTokenLimit(mappedModel, 500);
+  const tokenLimitParam = Object.keys(tokenLimit)[0] ?? "unknown";
+  const temperature = buildGitHubModelsTemperature(mappedModel);
+  const temperatureValue = temperature.temperature ?? null;
+
+  log.info("classifier.github_models.request", {
+    trace_id: traceId,
+    debug_version: CLASSIFIER_DEBUG_VERSION,
+    source_model: model,
+    mapped_model: mappedModel,
+    token_limit_param: tokenLimitParam,
+    token_limit_value: tokenLimit.max_completion_tokens ?? tokenLimit.max_tokens ?? null,
+    temperature_value: temperatureValue,
+  });
 
   const response = await fetch("https://models.github.ai/inference/chat/completions", {
     method: "POST",
@@ -235,8 +270,8 @@ async function classifyWithGitHubModels(
     },
     body: JSON.stringify({
       model: mappedModel,
-      temperature: 0,
-      max_tokens: 500,
+      ...temperature,
+      ...tokenLimit,
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -280,6 +315,16 @@ async function classifyWithGitHubModels(
 
   if (!response.ok) {
     const body = await response.text();
+    log.error("classifier.github_models.response_error", {
+      trace_id: traceId,
+      debug_version: CLASSIFIER_DEBUG_VERSION,
+      source_model: model,
+      mapped_model: mappedModel,
+      token_limit_param: tokenLimitParam,
+      temperature_value: temperatureValue,
+      http_status: response.status,
+      response_body: body,
+    });
     throw new Error(`GitHub Models API error ${response.status}: ${body}`);
   }
 
@@ -356,9 +401,24 @@ export class RepoClassifier {
       );
       const { provider, model } = extractProviderAndModel(classifierModel);
 
+      log.info("classifier.model_selection", {
+        trace_id: traceId,
+        debug_version: CLASSIFIER_DEBUG_VERSION,
+        configured_model: this.env.CLASSIFICATION_MODEL ?? null,
+        runtime_preferred_model: runtimeConfig.preferredModel,
+        resolved_classifier_model: classifierModel,
+        provider,
+        provider_model: model,
+      });
+
       const llmResult =
         provider === "github-copilot"
-          ? await classifyWithGitHubModels(model, runtimeConfig.githubCopilotAccessToken, prompt)
+          ? await classifyWithGitHubModels(
+              model,
+              runtimeConfig.githubCopilotAccessToken,
+              prompt,
+              traceId
+            )
           : extractStructuredResponse(
               await createAnthropicClient(this.env.ANTHROPIC_API_KEY).messages.create({
                 model,
