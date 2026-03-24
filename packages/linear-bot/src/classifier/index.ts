@@ -249,11 +249,7 @@ function resolveClassifierModel(
   preferredModel: string
 ): string {
   const normalizedConfigured = configuredModel?.trim() ? normalizeModelId(configuredModel) : "";
-  const isLegacyDefault =
-    normalizedConfigured === "" ||
-    normalizedConfigured === "claude-haiku-4-5" ||
-    normalizedConfigured === "anthropic/claude-haiku-4-5";
-  const candidate = isLegacyDefault ? preferredModel : normalizedConfigured;
+  const candidate = normalizedConfigured === "" ? preferredModel : normalizedConfigured;
   return isSupportedClassifierModel(candidate) ? candidate : "anthropic/claude-haiku-4-5";
 }
 

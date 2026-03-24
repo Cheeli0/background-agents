@@ -5,6 +5,7 @@ import { mergeSecrets } from "./db/secrets-validation";
 import type { Env } from "./types";
 
 export const OPENCODE_AUTH_JSON_SECRET = "OPENCODE_AUTH_JSON";
+const COPILOT_ACCESS_TOKEN_EXPIRY_BUFFER_MS = 60 * 1000;
 
 interface RepoSecretContext {
   repoId?: number | null;
@@ -68,7 +69,22 @@ export function extractCopilotAccessTokenFromAuthJson(authJson: string): string 
   }
 
   const access = entry.access;
-  return typeof access === "string" && access.trim().length > 0 ? access.trim() : null;
+  const expires = entry.expires;
+  if (typeof access !== "string" || access.trim().length === 0) {
+    return null;
+  }
+
+  if (typeof expires !== "number" || !Number.isFinite(expires)) {
+    return null;
+  }
+
+  const normalizedExpiresAt =
+    expires > 0 && expires < 1_000_000_000_000 ? expires * 1000 : expires;
+  if (normalizedExpiresAt <= Date.now() + COPILOT_ACCESS_TOKEN_EXPIRY_BUFFER_MS) {
+    return null;
+  }
+
+  return access.trim();
 }
 
 export async function getGlobalCopilotAccessToken(
