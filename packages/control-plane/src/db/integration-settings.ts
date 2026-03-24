@@ -1,6 +1,7 @@
 import {
   isValidModel,
   isValidReasoningEffort,
+  isSupportedClassifierModel,
   INTEGRATION_DEFINITIONS,
   type IntegrationId,
   type IntegrationSettingsMap,
@@ -240,6 +241,15 @@ export class IntegrationSettingsStore {
 
   private validateLinearSettings(settings: LinearBotSettings): void {
     this.validateModelAndEffort(settings);
+
+    if (
+      settings.classificationModel !== undefined &&
+      !isSupportedClassifierModel(settings.classificationModel)
+    ) {
+      throw new IntegrationSettingsValidationError(
+        `Invalid classifier model ID: ${settings.classificationModel}`
+      );
+    }
 
     if (
       settings.allowUserPreferenceOverride !== undefined &&

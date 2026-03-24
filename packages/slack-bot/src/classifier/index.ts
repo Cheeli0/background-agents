@@ -7,9 +7,15 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { Env, RepoConfig, ThreadContext, ClassificationResult } from "../types";
-import type { ConfidenceLevel } from "@open-inspect/shared";
+import {
+  extractProviderAndModel,
+  isSupportedClassifierModel,
+  normalizeModelId,
+  type ConfidenceLevel,
+} from "@open-inspect/shared";
 import { getAvailableRepos, buildRepoDescriptions, getReposByChannel } from "./repos";
 import { createLogger } from "../logger";
+import { getClassifierRuntimeConfig } from "./config";
 
 const log = createLogger("classifier");
 const CLASSIFY_REPO_TOOL_NAME = "classify_repository";
@@ -113,6 +119,18 @@ interface LLMResponse {
   alternatives: string[];
 }
 
+interface GitHubModelsResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
+const COPILOT_MODEL_MAP: Record<string, string> = {
+  "gpt-5-mini": "openai/gpt-5-mini",
+};
+
 function normalizeModelResponse(raw: unknown): LLMResponse {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("LLM response was not an object");
@@ -171,18 +189,117 @@ function extractStructuredResponse(response: Anthropic.Messages.Message): LLMRes
   return normalizeModelResponse(toolUseBlock.input);
 }
 
+function resolveClassifierModel(
+  envModel: string | undefined,
+  preferredModel: string
+): string {
+  const normalizedEnvModel = envModel?.trim() ? normalizeModelId(envModel.trim()) : "";
+  const isLegacyDefault =
+    normalizedEnvModel === "" ||
+    normalizedEnvModel === "claude-haiku-4-5" ||
+    normalizedEnvModel === "anthropic/claude-haiku-4-5";
+
+  const candidate = isLegacyDefault ? preferredModel : normalizedEnvModel;
+  return isSupportedClassifierModel(candidate) ? candidate : "anthropic/claude-haiku-4-5";
+}
+
+function createAnthropicClient(apiKey: string | undefined): Anthropic {
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY is not configured");
+  }
+
+  return new Anthropic({ apiKey });
+}
+
+async function classifyWithGitHubModels(
+  model: string,
+  accessToken: string | null,
+  prompt: string
+): Promise<LLMResponse> {
+  if (!accessToken) {
+    throw new Error("GitHub Copilot classifier token is not configured");
+  }
+
+  const mappedModel = COPILOT_MODEL_MAP[model];
+  if (!mappedModel) {
+    throw new Error(`Unsupported GitHub Copilot classifier model: ${model}`);
+  }
+
+  const response = await fetch("https://models.github.ai/inference/chat/completions", {
+    method: "POST",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": "2026-03-10",
+    },
+    body: JSON.stringify({
+      model: mappedModel,
+      temperature: 0,
+      max_tokens: 500,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "repo_classification",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              repoId: {
+                type: ["string", "null"],
+              },
+              confidence: {
+                type: "string",
+                enum: CONFIDENCE_LEVELS,
+              },
+              reasoning: {
+                type: "string",
+              },
+              alternatives: {
+                type: "array",
+                items: { type: "string" },
+              },
+            },
+            required: ["repoId", "confidence", "reasoning", "alternatives"],
+          },
+        },
+      },
+      messages: [
+        {
+          role: "developer",
+          content:
+            "You are a repository classifier. Return only JSON matching the requested schema.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`GitHub Models API error ${response.status}: ${body}`);
+  }
+
+  const data = (await response.json()) as GitHubModelsResponse;
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error("GitHub Models response did not contain structured content");
+  }
+
+  return normalizeModelResponse(JSON.parse(content));
+}
+
 /**
  * Repository classifier class.
  */
 export class RepoClassifier {
-  private client: Anthropic;
   private env: Env;
 
   constructor(env: Env) {
     this.env = env;
-    this.client = new Anthropic({
-      apiKey: env.ANTHROPIC_API_KEY,
-    });
   }
 
   /**
@@ -232,26 +349,35 @@ export class RepoClassifier {
     // Use LLM for classification
     try {
       const prompt = await buildClassificationPrompt(this.env, message, context, traceId);
+      const runtimeConfig = await getClassifierRuntimeConfig(this.env, traceId);
+      const classifierModel = resolveClassifierModel(
+        this.env.CLASSIFICATION_MODEL,
+        runtimeConfig.preferredModel
+      );
+      const { provider, model } = extractProviderAndModel(classifierModel);
 
-      const response = await this.client.messages.create({
-        model: this.env.CLASSIFICATION_MODEL || "claude-haiku-4-5",
-        max_tokens: 500,
-        temperature: 0,
-        tools: [CLASSIFY_REPO_TOOL],
-        tool_choice: {
-          type: "tool",
-          name: CLASSIFY_REPO_TOOL_NAME,
-          disable_parallel_tool_use: true,
-        },
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      });
-
-      const llmResult = extractStructuredResponse(response);
+      const llmResult =
+        provider === "github-copilot"
+          ? await classifyWithGitHubModels(model, runtimeConfig.githubCopilotAccessToken, prompt)
+          : extractStructuredResponse(
+              await createAnthropicClient(this.env.ANTHROPIC_API_KEY).messages.create({
+                model,
+                max_tokens: 500,
+                temperature: 0,
+                tools: [CLASSIFY_REPO_TOOL],
+                tool_choice: {
+                  type: "tool",
+                  name: CLASSIFY_REPO_TOOL_NAME,
+                  disable_parallel_tool_use: true,
+                },
+                messages: [
+                  {
+                    role: "user",
+                    content: prompt,
+                  },
+                ],
+              })
+            );
 
       // Find the matched repo
       let matchedRepo: RepoConfig | null = null;

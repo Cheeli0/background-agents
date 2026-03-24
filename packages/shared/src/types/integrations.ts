@@ -24,6 +24,7 @@ export interface GitHubBotSettings {
 /** Overridable behavior settings for the Linear bot. Used at both global (defaults) and per-repo (overrides) levels. */
 export interface LinearBotSettings {
   model?: string;
+  classificationModel?: string;
   reasoningEffort?: string;
   allowUserPreferenceOverride?: boolean;
   allowLabelModelOverride?: boolean;

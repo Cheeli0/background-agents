@@ -1,8 +1,10 @@
 import type { Env } from "../types";
 import { generateInternalToken } from "./internal";
+import type { LinearGlobalConfig } from "@open-inspect/shared";
 
 export interface ResolvedLinearConfig {
   model: string | null;
+  classificationModel: string | null;
   reasoningEffort: string | null;
   allowUserPreferenceOverride: boolean;
   allowLabelModelOverride: boolean;
@@ -13,6 +15,7 @@ export interface ResolvedLinearConfig {
 
 const DEFAULT_CONFIG: ResolvedLinearConfig = {
   model: null,
+  classificationModel: null,
   reasoningEffort: null,
   allowUserPreferenceOverride: true,
   allowLabelModelOverride: true,
@@ -53,4 +56,28 @@ export async function getLinearConfig(env: Env, repo: string): Promise<ResolvedL
   }
 
   return data.config;
+}
+
+export async function getLinearGlobalClassificationModel(env: Env): Promise<string | null> {
+  if (!env.INTERNAL_CALLBACK_SECRET) {
+    return null;
+  }
+
+  const token = await generateInternalToken(env.INTERNAL_CALLBACK_SECRET);
+
+  let response: Response;
+  try {
+    response = await env.CONTROL_PLANE.fetch("https://internal/integration-settings/linear", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = (await response.json()) as { settings: LinearGlobalConfig | null };
+  return data.settings?.defaults?.classificationModel ?? null;
 }

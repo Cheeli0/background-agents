@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   OPENCODE_AUTH_JSON_SECRET,
+  extractCopilotAccessTokenFromAuthJson,
   isGitHubCopilotModel,
   validateModelCredentialsForRepo,
 } from "./model-credentials";
@@ -21,6 +22,9 @@ vi.mock("./db/repo-secrets", () => ({
 }));
 
 describe("model-credentials", () => {
+  const futureExpiresAt = Date.now() + 10 * 60 * 1000;
+  const pastExpiresAt = Date.now() - 10 * 60 * 1000;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetGlobalSecrets.mockResolvedValue({});
@@ -80,7 +84,7 @@ describe("model-credentials", () => {
     it("accepts a repo-scoped GitHub Copilot auth blob", async () => {
       mockGetRepoSecrets.mockResolvedValue({
         [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          "github-copilot": { type: "oauth", access: "token" },
+          "github-copilot": { type: "oauth", access: "token", expires: futureExpiresAt },
         }),
       });
 
@@ -96,7 +100,7 @@ describe("model-credentials", () => {
     it("accepts a full auth blob with a copilot key", async () => {
       mockGetRepoSecrets.mockResolvedValue({
         [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          copilot: { type: "oauth", access: "token" },
+          copilot: { type: "oauth", access: "token", expires: futureExpiresAt },
         }),
       });
 
@@ -115,6 +119,7 @@ describe("model-credentials", () => {
           type: "oauth",
           access: "token",
           refresh: "refresh-token",
+          expires: futureExpiresAt,
         }),
       });
 
@@ -130,7 +135,7 @@ describe("model-credentials", () => {
     it("accepts a global GitHub Copilot auth blob", async () => {
       mockGetGlobalSecrets.mockResolvedValue({
         [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          "github-copilot": { type: "oauth", access: "token" },
+          "github-copilot": { type: "oauth", access: "token", expires: futureExpiresAt },
         }),
       });
 
@@ -171,6 +176,66 @@ describe("model-credentials", () => {
       });
 
       expect(result).toContain("GitHub Copilot credentials");
+    });
+  });
+
+  describe("extractCopilotAccessTokenFromAuthJson", () => {
+    it("extracts the access token from a full auth blob", () => {
+      expect(
+        extractCopilotAccessTokenFromAuthJson(
+          JSON.stringify({
+            "github-copilot": { type: "oauth", access: "copilot-token", expires: futureExpiresAt },
+          })
+        )
+      ).toBe("copilot-token");
+    });
+
+    it("extracts the access token from a direct provider entry", () => {
+      expect(
+        extractCopilotAccessTokenFromAuthJson(
+          JSON.stringify({
+            type: "oauth",
+            access: "copilot-token",
+            refresh: "refresh-token",
+            expires: futureExpiresAt,
+          })
+        )
+      ).toBe("copilot-token");
+    });
+
+    it("returns null when the auth blob has no usable access token", () => {
+      expect(
+        extractCopilotAccessTokenFromAuthJson(
+          JSON.stringify({
+            "github-copilot": { type: "oauth", refresh: "refresh-token" },
+          })
+        )
+      ).toBeNull();
+    });
+
+    it("returns null when the auth blob does not include an expiry", () => {
+      expect(
+        extractCopilotAccessTokenFromAuthJson(
+          JSON.stringify({
+            "github-copilot": { type: "oauth", access: "copilot-token" },
+          })
+        )
+      ).toBeNull();
+    });
+
+    it("returns null when the Copilot access token is expired", () => {
+      expect(
+        extractCopilotAccessTokenFromAuthJson(
+          JSON.stringify({
+            "github-copilot": {
+              type: "oauth",
+              access: "copilot-token",
+              refresh: "refresh-token",
+              expires: pastExpiresAt,
+            },
+          })
+        )
+      ).toBeNull();
     });
   });
 });
