@@ -659,6 +659,7 @@ describe("IntegrationSettingsStore", () => {
         enabledRepos: ["acme/platform"],
         defaults: {
           model: "anthropic/claude-sonnet-4-6",
+          classificationModel: "github-copilot/gpt-5-mini",
           reasoningEffort: "high",
           allowUserPreferenceOverride: true,
           allowLabelModelOverride: false,
@@ -671,6 +672,7 @@ describe("IntegrationSettingsStore", () => {
         enabledRepos: ["acme/platform"],
         defaults: {
           model: "anthropic/claude-sonnet-4-6",
+          classificationModel: "github-copilot/gpt-5-mini",
           reasoningEffort: "high",
           allowUserPreferenceOverride: true,
           allowLabelModelOverride: false,
@@ -692,6 +694,14 @@ describe("IntegrationSettingsStore", () => {
         reasoningEffort: "high",
         allowLabelModelOverride: false,
       });
+    });
+
+    it("rejects unsupported linear classifier models", async () => {
+      await expect(
+        store.setGlobal("linear", {
+          defaults: { classificationModel: "openai/gpt-5.4" },
+        })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
     });
 
     it("rejects invalid linear boolean setting", async () => {

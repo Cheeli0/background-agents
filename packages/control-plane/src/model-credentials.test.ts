@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   OPENCODE_AUTH_JSON_SECRET,
+  extractCopilotAccessTokenFromAuthJson,
   isGitHubCopilotModel,
   validateModelCredentialsForRepo,
 } from "./model-credentials";
@@ -171,6 +172,40 @@ describe("model-credentials", () => {
       });
 
       expect(result).toContain("GitHub Copilot credentials");
+    });
+  });
+
+  describe("extractCopilotAccessTokenFromAuthJson", () => {
+    it("extracts the access token from a full auth blob", () => {
+      expect(
+        extractCopilotAccessTokenFromAuthJson(
+          JSON.stringify({
+            "github-copilot": { type: "oauth", access: "copilot-token" },
+          })
+        )
+      ).toBe("copilot-token");
+    });
+
+    it("extracts the access token from a direct provider entry", () => {
+      expect(
+        extractCopilotAccessTokenFromAuthJson(
+          JSON.stringify({
+            type: "oauth",
+            access: "copilot-token",
+            refresh: "refresh-token",
+          })
+        )
+      ).toBe("copilot-token");
+    });
+
+    it("returns null when the auth blob has no usable access token", () => {
+      expect(
+        extractCopilotAccessTokenFromAuthJson(
+          JSON.stringify({
+            "github-copilot": { type: "oauth", refresh: "refresh-token" },
+          })
+        )
+      ).toBeNull();
     });
   });
 });

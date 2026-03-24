@@ -37,6 +37,7 @@ import {
   resolveInstalledRepo,
 } from "./routes/shared";
 import { integrationSettingsRoutes } from "./routes/integration-settings";
+import { classifierConfigRoutes } from "./routes/classifier-config";
 import { modelPreferencesRoutes } from "./routes/model-preferences";
 import { reposRoutes } from "./routes/repos";
 import { repoImageRoutes } from "./routes/repo-images";
@@ -467,6 +468,9 @@ const routes: Route[] = [
 
   // Model preferences
   ...modelPreferencesRoutes,
+
+  // Classifier config
+  ...classifierConfigRoutes,
 
   // Integration settings
   ...integrationSettingsRoutes,

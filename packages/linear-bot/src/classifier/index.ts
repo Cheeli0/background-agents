@@ -4,13 +4,23 @@
  */
 
 import type { Env, RepoConfig, ClassificationResult } from "../types";
-import type { ConfidenceLevel } from "@open-inspect/shared";
+import {
+  extractProviderAndModel,
+  isSupportedClassifierModel,
+  normalizeModelId,
+  type ConfidenceLevel,
+} from "@open-inspect/shared";
 import { getAvailableRepos, buildRepoDescriptions } from "./repos";
 import { createLogger } from "../logger";
+import { getClassifierRuntimeConfig } from "./config";
 
 const log = createLogger("classifier");
 
 const CLASSIFY_REPO_TOOL_NAME = "classify_repository";
+const GITHUB_MODELS_API_VERSION = "2026-03-10";
+const COPILOT_MODEL_MAP: Record<string, string> = {
+  "gpt-5-mini": "openai/gpt-5-mini",
+};
 
 interface ClassifyToolInput {
   repoId: string | null;
@@ -29,6 +39,14 @@ interface AnthropicContentBlock {
 
 interface AnthropicResponse {
   content: AnthropicContentBlock[];
+}
+
+interface GitHubModelsResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
 }
 
 /**
@@ -144,6 +162,101 @@ async function callAnthropic(apiKey: string, prompt: string): Promise<ClassifyTo
   };
 }
 
+async function callGitHubModels(
+  model: string,
+  accessToken: string | null,
+  prompt: string
+): Promise<ClassifyToolInput> {
+  if (!accessToken) {
+    throw new Error("GitHub Copilot classifier token is not configured");
+  }
+
+  const mappedModel = COPILOT_MODEL_MAP[model];
+  if (!mappedModel) {
+    throw new Error(`Unsupported GitHub Copilot classifier model: ${model}`);
+  }
+
+  const response = await fetch("https://models.github.ai/inference/chat/completions", {
+    method: "POST",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": GITHUB_MODELS_API_VERSION,
+    },
+    body: JSON.stringify({
+      model: mappedModel,
+      temperature: 0,
+      max_tokens: 500,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "repo_classification",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              repoId: { type: ["string", "null"] },
+              confidence: { type: "string", enum: ["high", "medium", "low"] },
+              reasoning: { type: "string" },
+              alternatives: {
+                type: "array",
+                items: { type: "string" },
+              },
+            },
+            required: ["repoId", "confidence", "reasoning", "alternatives"],
+          },
+        },
+      },
+      messages: [
+        {
+          role: "developer",
+          content:
+            "You are a repository classifier. Return only JSON matching the requested schema.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`GitHub Models API error ${response.status}: ${errText}`);
+  }
+
+  const data = (await response.json()) as GitHubModelsResponse;
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || content.trim().length === 0) {
+    throw new Error("GitHub Models response did not contain structured content");
+  }
+
+  const input = JSON.parse(content) as Record<string, unknown>;
+  return {
+    repoId: input.repoId === null ? null : typeof input.repoId === "string" ? input.repoId : null,
+    confidence: (input.confidence as ConfidenceLevel) || "low",
+    reasoning: String(input.reasoning || ""),
+    alternatives: Array.isArray(input.alternatives)
+      ? input.alternatives.filter((a): a is string => typeof a === "string")
+      : [],
+  };
+}
+
+function resolveClassifierModel(
+  configuredModel: string | null | undefined,
+  preferredModel: string
+): string {
+  const normalizedConfigured = configuredModel?.trim() ? normalizeModelId(configuredModel) : "";
+  const isLegacyDefault =
+    normalizedConfigured === "" ||
+    normalizedConfigured === "claude-haiku-4-5" ||
+    normalizedConfigured === "anthropic/claude-haiku-4-5";
+  const candidate = isLegacyDefault ? preferredModel : normalizedConfigured;
+  return isSupportedClassifierModel(candidate) ? candidate : "anthropic/claude-haiku-4-5";
+}
+
 /**
  * Classify which repository a Linear issue belongs to.
  */
@@ -153,6 +266,7 @@ export async function classifyRepo(
   issueDescription: string | null | undefined,
   labels: string[],
   projectName: string | null | undefined,
+  configuredModel?: string | null,
   traceId?: string
 ): Promise<ClassificationResult> {
   const repos = await getAvailableRepos(env, traceId);
@@ -176,6 +290,7 @@ export async function classifyRepo(
   }
 
   try {
+    const runtimeConfig = await getClassifierRuntimeConfig(env, traceId);
     const prompt = await buildClassificationPrompt(
       env,
       issueTitle,
@@ -184,8 +299,13 @@ export async function classifyRepo(
       projectName,
       traceId
     );
+    const classifierModel = resolveClassifierModel(configuredModel, runtimeConfig.preferredModel);
+    const { provider, model } = extractProviderAndModel(classifierModel);
 
-    const result = await callAnthropic(env.ANTHROPIC_API_KEY, prompt);
+    const result =
+      provider === "github-copilot"
+        ? await callGitHubModels(model, runtimeConfig.githubCopilotAccessToken, prompt)
+        : await callAnthropic(env.ANTHROPIC_API_KEY || "", prompt);
 
     let matchedRepo: RepoConfig | null = null;
     if (result.repoId) {
@@ -220,6 +340,7 @@ export async function classifyRepo(
   } catch (e) {
     log.error("classifier.classify", {
       trace_id: traceId,
+      method: "llm",
       outcome: "error",
       error: e instanceof Error ? e : new Error(String(e)),
     });

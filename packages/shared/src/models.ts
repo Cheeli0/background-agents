@@ -54,6 +54,13 @@ export const VALID_MODELS = [
 
 export type ValidModel = (typeof VALID_MODELS)[number];
 
+export const SUPPORTED_CLASSIFIER_MODELS = [
+  "anthropic/claude-haiku-4-5",
+  "github-copilot/gpt-5-mini",
+] as const satisfies readonly ValidModel[];
+
+export type SupportedClassifierModel = (typeof SUPPORTED_CLASSIFIER_MODELS)[number];
+
 /**
  * Default model to use when none specified or invalid.
  */
@@ -413,4 +420,10 @@ export function getValidModelOrDefault(model: string | undefined | null): ValidM
     return normalizeModelId(model) as ValidModel;
   }
   return DEFAULT_MODEL;
+}
+
+export function isSupportedClassifierModel(model: string): model is SupportedClassifierModel {
+  return SUPPORTED_CLASSIFIER_MODELS.includes(
+    normalizeModelId(model) as SupportedClassifierModel
+  );
 }

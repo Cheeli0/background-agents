@@ -30,6 +30,64 @@ function hasCopilotAuthEntry(authObject: Record<string, unknown>): boolean {
   );
 }
 
+function getCopilotAuthEntry(
+  authObject: Record<string, unknown>
+): Record<string, unknown> | null {
+  const directEntry = authObject["github-copilot"] ?? authObject["copilot"];
+  if (directEntry && typeof directEntry === "object" && !Array.isArray(directEntry)) {
+    return directEntry as Record<string, unknown>;
+  }
+
+  if (
+    ("type" in authObject || "access" in authObject || "refresh" in authObject) &&
+    !("openai" in authObject) &&
+    !("anthropic" in authObject)
+  ) {
+    return authObject;
+  }
+
+  return null;
+}
+
+export function extractCopilotAccessTokenFromAuthJson(authJson: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(authJson);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const authObject = parsed as Record<string, unknown>;
+  const entry = getCopilotAuthEntry(authObject);
+  if (!entry) {
+    return null;
+  }
+
+  const access = entry.access;
+  return typeof access === "string" && access.trim().length > 0 ? access.trim() : null;
+}
+
+export async function getGlobalCopilotAccessToken(
+  env: Pick<Env, "DB" | "REPO_SECRETS_ENCRYPTION_KEY">
+): Promise<string | null> {
+  if (!env.DB || !env.REPO_SECRETS_ENCRYPTION_KEY) {
+    return null;
+  }
+
+  const globalStore = new GlobalSecretsStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
+  const globalSecrets = await globalStore.getDecryptedSecrets();
+  const authJson = globalSecrets[OPENCODE_AUTH_JSON_SECRET];
+  if (!authJson?.trim()) {
+    return null;
+  }
+
+  return extractCopilotAccessTokenFromAuthJson(authJson);
+}
+
 export async function validateModelCredentialsForRepo(
   env: Pick<Env, "DB" | "REPO_SECRETS_ENCRYPTION_KEY">,
   model: string,

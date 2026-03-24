@@ -112,6 +112,7 @@ Project mappings take the highest priority during repo resolution.
 In the Open-Inspect web UI, go to **Settings → Integrations → Linear** to configure:
 
 - Default model and reasoning effort
+- Classifier model for repository resolution
 - Whether users can override the model via preferences or issue labels
 - Whether real-time tool progress activities are shown in Linear
 - Which repos the Linear agent is enabled for (allowlist or all)
@@ -188,3 +189,4 @@ Built on Linear's [Agents API](https://linear.app/developers/agents):
 - **Hono** for HTTP routing
 - **KV** for OAuth tokens, issue-to-session mapping, and configuration
 - **Service binding** to the control plane for session management
+

@@ -5,6 +5,8 @@ import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import {
   MODEL_REASONING_CONFIG,
+  MODEL_OPTIONS,
+  SUPPORTED_CLASSIFIER_MODELS,
   isValidReasoningEffort,
   type EnrichedRepository,
   type LinearBotSettings,
@@ -125,6 +127,9 @@ function GlobalSettingsSection({
   enabledModelOptions: { category: string; models: { id: string; name: string }[] }[];
 }) {
   const [model, setModel] = useState(settings?.defaults?.model ?? "");
+  const [classificationModel, setClassificationModel] = useState(
+    settings?.defaults?.classificationModel ?? ""
+  );
   const [effort, setEffort] = useState(settings?.defaults?.reasoningEffort ?? "");
   const [enabledRepos, setEnabledRepos] = useState<string[]>(settings?.enabledRepos ?? []);
   const [repoScopeMode, setRepoScopeMode] = useState<"all" | "selected">(
@@ -152,6 +157,7 @@ function GlobalSettingsSection({
     if (settings !== undefined && !initialized) {
       if (settings) {
         setModel(settings.defaults?.model ?? "");
+        setClassificationModel(settings.defaults?.classificationModel ?? "");
         setEffort(settings.defaults?.reasoningEffort ?? "");
         setEnabledRepos(settings.enabledRepos ?? []);
         setRepoScopeMode(settings.enabledRepos === undefined ? "all" : "selected");
@@ -184,6 +190,7 @@ function GlobalSettingsSection({
       if (res.ok) {
         mutate(GLOBAL_SETTINGS_KEY);
         setModel("");
+        setClassificationModel("");
         setEffort("");
         setEnabledRepos([]);
         setRepoScopeMode("all");
@@ -215,6 +222,7 @@ function GlobalSettingsSection({
     };
 
     if (model) defaults.model = model;
+    if (classificationModel) defaults.classificationModel = classificationModel;
     if (effort) defaults.reasoningEffort = effort;
     if (issueSessionInstructions) defaults.issueSessionInstructions = issueSessionInstructions;
 
@@ -291,6 +299,33 @@ function GlobalSettingsSection({
               ))}
             </SelectContent>
           </Select>
+        </label>
+
+        <label className="text-sm">
+          <span className="block text-foreground font-medium mb-1">Classifier model</span>
+          <Select
+            value={classificationModel}
+            onValueChange={(nextModel) => {
+              setClassificationModel(nextModel);
+              setDirty(true);
+              setError("");
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Auto-select based on configured providers" />
+            </SelectTrigger>
+            <SelectContent>
+              {getClassifierModelOptions().map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground mt-1">
+            Auto uses Copilot `gpt-5-mini` when global Copilot auth is enabled; otherwise it uses
+            Claude Haiku 4.5.
+          </p>
         </label>
 
         <label className="text-sm">
@@ -757,5 +792,17 @@ function Message({ tone, text }: { tone: "error" | "success"; text: string }) {
     <div className={classes} aria-live="polite">
       {text}
     </div>
+  );
+}
+
+function getClassifierModelOptions() {
+  const supportedModels = new Set<string>(SUPPORTED_CLASSIFIER_MODELS);
+  return MODEL_OPTIONS.flatMap((group) =>
+    group.models
+      .filter((model) => supportedModels.has(model.id))
+      .map((model) => ({
+        id: model.id,
+        name: model.name,
+      }))
   );
 }

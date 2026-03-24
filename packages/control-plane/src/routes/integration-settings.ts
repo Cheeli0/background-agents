@@ -329,6 +329,7 @@ async function handleGetResolvedConfig(
       repo,
       config: {
         model: linearSettings.model ?? null,
+        classificationModel: linearSettings.classificationModel ?? null,
         reasoningEffort: linearReasoningEffort,
         allowUserPreferenceOverride: linearSettings.allowUserPreferenceOverride ?? true,
         allowLabelModelOverride: linearSettings.allowLabelModelOverride ?? true,

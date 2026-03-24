@@ -20,7 +20,7 @@ import {
 import { generateInternalToken } from "./utils/internal";
 import { classifyRepo } from "./classifier";
 import { getAvailableRepos } from "./classifier/repos";
-import { getLinearConfig } from "./utils/integration-config";
+import { getLinearConfig, getLinearGlobalClassificationModel } from "./utils/integration-config";
 import { createLogger } from "./logger";
 import { makePlan } from "./plan";
 import {
@@ -381,14 +381,18 @@ async function handleNewSession(
       true
     );
 
-    const classification = await classifyRepo(
-      env,
-      issue.title,
-      issue.description,
-      labelNames,
-      projectInfo?.name,
-      traceId
-    );
+      const globalClassificationModel =
+        (await getLinearGlobalClassificationModel(env)) ?? env.CLASSIFICATION_MODEL ?? null;
+
+      const classification = await classifyRepo(
+        env,
+        issue.title,
+        issue.description,
+        labelNames,
+        projectInfo?.name,
+        globalClassificationModel,
+        traceId
+      );
 
     if (classification.needsClarification || !classification.repo) {
       const altList = (classification.alternatives || [])
