@@ -18,6 +18,7 @@ const log = createLogger("classifier");
 
 const CLASSIFY_REPO_TOOL_NAME = "classify_repository";
 const GITHUB_MODELS_API_VERSION = "2026-03-10";
+const CLASSIFIER_DEBUG_VERSION = "2026-03-24-gpt5-request-shape-debug-2";
 const COPILOT_MODEL_MAP: Record<string, string> = {
   "gpt-5-mini": "openai/gpt-5-mini",
 };
@@ -47,6 +48,28 @@ interface GitHubModelsResponse {
       content?: string;
     };
   }>;
+}
+
+export function buildGitHubModelsTokenLimit(
+  model: string,
+  tokenLimit: number
+): {
+  max_tokens?: number;
+  max_completion_tokens?: number;
+} {
+  if (model.startsWith("openai/gpt-5")) {
+    return { max_completion_tokens: tokenLimit };
+  }
+
+  return { max_tokens: tokenLimit };
+}
+
+export function buildGitHubModelsTemperature(model: string): { temperature?: number } {
+  if (model.startsWith("openai/gpt-5")) {
+    return {};
+  }
+
+  return { temperature: 0 };
 }
 
 /**
@@ -165,7 +188,8 @@ async function callAnthropic(apiKey: string, prompt: string): Promise<ClassifyTo
 async function callGitHubModels(
   model: string,
   accessToken: string | null,
-  prompt: string
+  prompt: string,
+  traceId?: string
 ): Promise<ClassifyToolInput> {
   if (!accessToken) {
     throw new Error("GitHub Copilot classifier token is not configured");
@@ -175,6 +199,20 @@ async function callGitHubModels(
   if (!mappedModel) {
     throw new Error(`Unsupported GitHub Copilot classifier model: ${model}`);
   }
+  const tokenLimit = buildGitHubModelsTokenLimit(mappedModel, 500);
+  const tokenLimitParam = Object.keys(tokenLimit)[0] ?? "unknown";
+  const temperature = buildGitHubModelsTemperature(mappedModel);
+  const temperatureValue = temperature.temperature ?? null;
+
+  log.info("classifier.github_models.request", {
+    trace_id: traceId,
+    debug_version: CLASSIFIER_DEBUG_VERSION,
+    source_model: model,
+    mapped_model: mappedModel,
+    token_limit_param: tokenLimitParam,
+    token_limit_value: tokenLimit.max_completion_tokens ?? tokenLimit.max_tokens ?? null,
+    temperature_value: temperatureValue,
+  });
 
   const response = await fetch("https://models.github.ai/inference/chat/completions", {
     method: "POST",
@@ -186,8 +224,8 @@ async function callGitHubModels(
     },
     body: JSON.stringify({
       model: mappedModel,
-      temperature: 0,
-      max_tokens: 500,
+      ...tokenLimit,
+      ...temperature,
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -224,6 +262,16 @@ async function callGitHubModels(
 
   if (!response.ok) {
     const errText = await response.text();
+    log.error("classifier.github_models.response_error", {
+      trace_id: traceId,
+      debug_version: CLASSIFIER_DEBUG_VERSION,
+      source_model: model,
+      mapped_model: mappedModel,
+      token_limit_param: tokenLimitParam,
+      temperature_value: temperatureValue,
+      http_status: response.status,
+      response_body: errText,
+    });
     throw new Error(`GitHub Models API error ${response.status}: ${errText}`);
   }
 
@@ -298,9 +346,19 @@ export async function classifyRepo(
     const classifierModel = resolveClassifierModel(configuredModel, runtimeConfig.preferredModel);
     const { provider, model } = extractProviderAndModel(classifierModel);
 
+    log.info("classifier.model_selection", {
+      trace_id: traceId,
+      debug_version: CLASSIFIER_DEBUG_VERSION,
+      configured_model: configuredModel ?? null,
+      runtime_preferred_model: runtimeConfig.preferredModel,
+      resolved_classifier_model: classifierModel,
+      provider,
+      provider_model: model,
+    });
+
     const result =
       provider === "github-copilot"
-        ? await callGitHubModels(model, runtimeConfig.githubCopilotAccessToken, prompt)
+        ? await callGitHubModels(model, runtimeConfig.githubCopilotAccessToken, prompt, traceId)
         : await callAnthropic(env.ANTHROPIC_API_KEY || "", prompt);
 
     let matchedRepo: RepoConfig | null = null;

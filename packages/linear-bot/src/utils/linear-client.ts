@@ -144,7 +144,8 @@ async function linearGraphQL(
   });
 
   if (!res.ok) {
-    throw new Error(`Linear API error: ${res.status}`);
+    const errText = await res.text();
+    throw new Error(`Linear API error: ${res.status}: ${errText}`);
   }
 
   return (await res.json()) as Record<string, unknown>;
