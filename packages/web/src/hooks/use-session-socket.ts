@@ -109,19 +109,113 @@ function toUiSandboxEvent(event: SharedSandboxEvent): SandboxEvent {
   };
 }
 
-function toUiArtifact(artifact: {
+interface RawArtifact {
   id: string;
   type: string;
-  url: string;
+  url: string | null;
   prNumber?: number;
-}): Artifact {
+  metadata?: Record<string, unknown> | null;
+  createdAt?: number;
+}
+
+interface SessionArtifactsResponse {
+  artifacts?: RawArtifact[];
+}
+
+type ArtifactMetadata = NonNullable<Artifact["metadata"]>;
+type ArtifactPrState = NonNullable<ArtifactMetadata["prState"]>;
+type ArtifactPreviewStatus = NonNullable<ArtifactMetadata["previewStatus"]>;
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function toStringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function toNumberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function toPrStateOrUndefined(value: unknown): ArtifactPrState | undefined {
+  if (value === "open" || value === "merged" || value === "closed" || value === "draft") {
+    return value;
+  }
+  return undefined;
+}
+
+function toPreviewStatusOrUndefined(value: unknown): ArtifactPreviewStatus | undefined {
+  if (value === "active" || value === "outdated" || value === "stopped") {
+    return value;
+  }
+  return undefined;
+}
+
+function toUiArtifact(artifact: RawArtifact): Artifact {
+  const rawMetadata = toRecord(artifact.metadata) ?? {};
+  const prNumber =
+    toNumberOrUndefined(artifact.prNumber) ??
+    toNumberOrUndefined(rawMetadata.prNumber) ??
+    toNumberOrUndefined(rawMetadata.number);
+  const prState =
+    toPrStateOrUndefined(rawMetadata.prState) ?? toPrStateOrUndefined(rawMetadata.state);
+  const mode = rawMetadata.mode === "manual_pr" ? "manual_pr" : undefined;
+  const createPrUrl = toStringOrUndefined(rawMetadata.createPrUrl);
+  const head = toStringOrUndefined(rawMetadata.head);
+  const base = toStringOrUndefined(rawMetadata.base);
+  const provider = toStringOrUndefined(rawMetadata.provider);
+  const filename = toStringOrUndefined(rawMetadata.filename);
+  const previewStatus = toPreviewStatusOrUndefined(rawMetadata.previewStatus);
+
+  const metadata: Artifact["metadata"] = {
+    ...(prNumber !== undefined ? { prNumber } : {}),
+    ...(prState ? { prState } : {}),
+    ...(mode ? { mode } : {}),
+    ...(createPrUrl ? { createPrUrl } : {}),
+    ...(head ? { head } : {}),
+    ...(base ? { base } : {}),
+    ...(provider ? { provider } : {}),
+    ...(filename ? { filename } : {}),
+    ...(previewStatus ? { previewStatus } : {}),
+  };
+
   return {
     id: artifact.id,
     type: artifact.type as Artifact["type"],
-    url: artifact.url,
-    createdAt: Date.now(),
-    metadata: artifact.prNumber ? { prNumber: artifact.prNumber } : undefined,
+    url: artifact.url ?? null,
+    createdAt: typeof artifact.createdAt === "number" ? artifact.createdAt : Date.now(),
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
   };
+}
+
+function mergeArtifacts(existing: Artifact[], incoming: Artifact[]): Artifact[] {
+  const byId = new Map<string, Artifact>();
+
+  for (const artifact of existing) {
+    byId.set(artifact.id, artifact);
+  }
+  for (const artifact of incoming) {
+    const current = byId.get(artifact.id);
+    byId.set(
+      artifact.id,
+      current
+        ? {
+            ...current,
+            ...artifact,
+            metadata: {
+              ...(current.metadata ?? {}),
+              ...(artifact.metadata ?? {}),
+            },
+          }
+        : artifact
+    );
+  }
+
+  return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
@@ -197,6 +291,29 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
     }
   }, []);
 
+  const fetchArtifacts = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/artifacts`);
+      if (!response.ok) {
+        console.error("Failed to fetch session artifacts:", response.status);
+        return;
+      }
+
+      const data = (await response.json()) as SessionArtifactsResponse;
+      const fetchedArtifacts = Array.isArray(data.artifacts)
+        ? data.artifacts.map(toUiArtifact)
+        : [];
+
+      if (!mountedRef.current) {
+        return;
+      }
+
+      setArtifacts((prev) => mergeArtifacts(prev, fetchedArtifacts));
+    } catch (error) {
+      console.error("Failed to fetch session artifacts:", error);
+    }
+  }, [sessionId]);
+
   const handleMessage = useCallback(
     (data: WsMessage) => {
       switch (data.type) {
@@ -231,6 +348,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
           setHasMoreHistory(data.replay?.hasMore ?? false);
           cursorRef.current = data.replay?.cursor ?? null;
           setReplaying(false);
+          void fetchArtifacts();
 
           if (data.spawnError) {
             console.error("Sandbox spawn error:", data.spawnError);
@@ -374,7 +492,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
           break;
       }
     },
-    [processSandboxEvent, sessionId]
+    [fetchArtifacts, processSandboxEvent, sessionId]
   );
 
   const fetchWsToken = useCallback(async (): Promise<string | null> => {
