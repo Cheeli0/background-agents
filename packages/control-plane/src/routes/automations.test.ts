@@ -26,7 +26,9 @@ const mockStore = {
   getRunById: vi.fn(),
 };
 
-const mockValidateModelCredentialsForRepo = vi.fn();
+const { mockValidateModelCredentialsForRepo } = vi.hoisted(() => ({
+  mockValidateModelCredentialsForRepo: vi.fn(),
+}));
 
 vi.mock("../db/automation-store", () => ({
   AutomationStore: vi.fn().mockImplementation(() => mockStore),

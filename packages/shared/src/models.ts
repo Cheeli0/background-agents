@@ -340,12 +340,14 @@ export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
 
 /**
  * Normalize a model ID to canonical "provider/model" format.
- * Adds "anthropic/" prefix to bare Claude model names for backward compat
- * with existing data in D1, SQLite, and Slack KV.
+ * Adds "anthropic/" prefix to bare Claude model names and "openai/" prefix
+ * to bare GPT model names for backward compat with existing data in D1,
+ * SQLite, and Slack KV.
  */
 export function normalizeModelId(modelId: string): string {
   if (modelId.includes("/")) return modelId;
   if (modelId.startsWith("claude-")) return `anthropic/${modelId}`;
+  if (modelId.startsWith("gpt-")) return `openai/${modelId}`;
   return modelId;
 }
 
