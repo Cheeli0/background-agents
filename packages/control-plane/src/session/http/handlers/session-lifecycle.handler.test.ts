@@ -330,6 +330,26 @@ describe("createSessionLifecycleHandler", () => {
     expect(linearBot.fetch).not.toHaveBeenCalled();
   });
 
+  it("returns null when the Linear pull request lookup throws", async () => {
+    const { handler, repository, linearBot, log } = createHandler();
+    repository.getLatestLinearCallbackContext.mockReturnValue({
+      callback_context: JSON.stringify({
+        agentSessionId: "agent-session-1",
+        organizationId: "org-1",
+      }),
+    });
+    linearBot.fetch.mockRejectedValue(new Error("service unavailable"));
+
+    const response = await handler.getAssociatedPr();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ pullRequest: null });
+    expect(log.warn).toHaveBeenCalledWith("Failed to fetch associated Linear pull requests", {
+      agent_session_id: "agent-session-1",
+      error: "service unavailable",
+    });
+  });
+
   it("logs invalid model warning and stores normalized model", async () => {
     const { handler, repository, validateReasoningEffort, generateId, log } = createHandler();
     validateReasoningEffort.mockReturnValue(null);

@@ -238,15 +238,25 @@ export function createSessionLifecycleHandler(
         return Response.json({ pullRequest: null } satisfies AssociatedPrResponse);
       }
 
-      const token = await generateInternalToken(deps.internalCallbackSecret);
-      const linearResponse = await deps.linearBot.fetch(
-        `https://internal/internal/agent-sessions/${callbackContext.agentSessionId}/pull-requests?organizationId=${encodeURIComponent(callbackContext.organizationId)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      let linearResponse: Response;
+
+      try {
+        const token = await generateInternalToken(deps.internalCallbackSecret);
+        linearResponse = await deps.linearBot.fetch(
+          `https://internal/internal/agent-sessions/${callbackContext.agentSessionId}/pull-requests?organizationId=${encodeURIComponent(callbackContext.organizationId)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+      } catch (error) {
+        deps.getLog().warn("Failed to fetch associated Linear pull requests", {
+          agent_session_id: callbackContext.agentSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return Response.json({ pullRequest: null } satisfies AssociatedPrResponse);
+      }
 
       if (!linearResponse.ok) {
         deps.getLog().warn("Failed to fetch associated Linear pull requests", {
