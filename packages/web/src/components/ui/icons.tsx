@@ -251,12 +251,20 @@ export function GitHubIcon({ className }: IconProps) {
 
 export function GitPrIcon({ className }: IconProps) {
   return (
+    <svg className={className} fill="currentColor" viewBox="0 0 16 16">
+      <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5A1 1 0 0 0 11 4h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z" />
+    </svg>
+  );
+}
+
+export function GitBranchWorkIcon({ className }: IconProps) {
+  return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={2}
-        d="M6 3v12M18 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6zM18 9a9 9 0 01-9 9"
+        d="M6 3v12M18 9a3 3 0 100-6 3 3 0 000 6M6 21a3 3 0 100-6 3 3 0 000 6M18 9a9 9 0 01-9 9"
       />
     </svg>
   );

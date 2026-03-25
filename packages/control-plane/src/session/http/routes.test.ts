@@ -11,6 +11,7 @@ describe("createSessionInternalRoutes", () => {
     const routes = createSessionInternalRoutes({
       init: noopHandler(),
       state: noopHandler(),
+      associatedPr: noopHandler(),
       prompt: noopHandler(),
       stop: noopHandler(),
       sandboxEvent: noopHandler(),
@@ -38,6 +39,7 @@ describe("createSessionInternalRoutes", () => {
       new Set([
         `POST ${SessionInternalPaths.init}`,
         `GET ${SessionInternalPaths.state}`,
+        `GET ${SessionInternalPaths.associatedPr}`,
         `POST ${SessionInternalPaths.prompt}`,
         `POST ${SessionInternalPaths.stop}`,
         `POST ${SessionInternalPaths.sandboxEvent}`,

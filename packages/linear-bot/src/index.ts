@@ -10,6 +10,8 @@ import type { Env, UserPreferences, AgentSessionWebhook } from "./types";
 import {
   buildOAuthAuthorizeUrl,
   exchangeCodeForToken,
+  fetchAgentSessionPullRequests,
+  getLinearClient,
   verifyLinearWebhook,
 } from "./utils/linear-client";
 import { callbacksRouter } from "./callbacks";
@@ -175,6 +177,14 @@ app.post("/webhook", async (c) => {
 
 // ─── Config Auth Middleware ───────────────────────────────────────────────────
 
+app.use("/internal/*", async (c, next) => {
+  const secret = c.env.INTERNAL_CALLBACK_SECRET;
+  if (!secret) return c.json({ error: "Auth not configured" }, 500);
+  const isValid = await verifyInternalToken(c.req.header("Authorization") ?? null, secret);
+  if (!isValid) return c.json({ error: "Unauthorized" }, 401);
+  return next();
+});
+
 app.use("/config/*", async (c, next) => {
   const secret = c.env.INTERNAL_CALLBACK_SECRET;
   if (!secret) return c.json({ error: "Auth not configured" }, 500);
@@ -184,6 +194,23 @@ app.use("/config/*", async (c, next) => {
 });
 
 // ─── Config Endpoints ────────────────────────────────────────────────────────
+
+app.get("/internal/agent-sessions/:id/pull-requests", async (c) => {
+  const agentSessionId = c.req.param("id");
+  const organizationId = c.req.query("organizationId");
+
+  if (!organizationId) {
+    return c.json({ error: "organizationId is required" }, 400);
+  }
+
+  const client = await getLinearClient(c.env, organizationId);
+  if (!client) {
+    return c.json({ error: "Linear workspace token unavailable" }, 404);
+  }
+
+  const pullRequests = await fetchAgentSessionPullRequests(client, agentSessionId);
+  return c.json({ pullRequests });
+});
 
 app.get("/config/team-repos", async (c) => {
   return c.json(await getTeamRepoMapping(c.env));

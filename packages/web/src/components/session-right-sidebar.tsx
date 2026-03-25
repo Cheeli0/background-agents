@@ -12,6 +12,7 @@ import {
 import { ChildSessionsSection } from "./sidebar/child-sessions-section";
 import { extractLatestTasks } from "@/lib/tasks";
 import { extractChangedFiles } from "@/lib/files";
+import { useSessionAssociatedPr } from "@/hooks/use-session-associated-pr";
 import type { Artifact, SandboxEvent } from "@/types/session";
 import type { ParticipantPresence, SessionState } from "@open-inspect/shared";
 
@@ -32,6 +33,7 @@ export function SessionRightSidebarContent({
 }: SessionRightSidebarContentProps) {
   const tasks = useMemo(() => extractLatestTasks(events), [events]);
   const filesChanged = useMemo(() => extractChangedFiles(events), [events]);
+  const { associatedPr } = useSessionAssociatedPr(sessionState?.id ?? null);
 
   if (!sessionState) {
     return (
@@ -64,6 +66,7 @@ export function SessionRightSidebarContent({
           repoName={sessionState.repoName}
           artifacts={artifacts}
           parentSessionId={sessionState.parentSessionId}
+          associatedPr={associatedPr}
         />
       </div>
 

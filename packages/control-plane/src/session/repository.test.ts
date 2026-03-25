@@ -888,4 +888,30 @@ describe("SessionRepository", () => {
       });
     });
   });
+
+  describe("getLatestLinearCallbackContext", () => {
+    it("returns null when no linear callback context exists", () => {
+      mock.setData(
+        `SELECT callback_context FROM messages
+       WHERE source = 'linear' AND callback_context IS NOT NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+        []
+      );
+      expect(repo.getLatestLinearCallbackContext()).toBeNull();
+    });
+
+    it("returns the latest linear callback context", () => {
+      mock.setData(
+        `SELECT callback_context FROM messages
+       WHERE source = 'linear' AND callback_context IS NOT NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+        [{ callback_context: '{"agentSessionId":"agent-1"}' }]
+      );
+      expect(repo.getLatestLinearCallbackContext()).toEqual({
+        callback_context: '{"agentSessionId":"agent-1"}',
+      });
+    });
+  });
 });

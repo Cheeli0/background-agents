@@ -3,8 +3,27 @@ import type { ParticipantRow, SandboxRow, SessionRow } from "../../types";
 import type { SandboxStatus, ServerMessage, SessionStatus, SpawnSource } from "../../../types";
 import type { SessionRepository } from "../../repository";
 import { getValidModelOrDefault, isValidModel } from "../../../utils/models";
+import { generateInternalToken } from "@open-inspect/shared";
 
 const TERMINAL_STATUSES = new Set<SessionStatus>(["completed", "archived", "cancelled", "failed"]);
+
+interface LinearCallbackContextLike {
+  agentSessionId?: string;
+  organizationId?: string;
+}
+
+interface ServiceBinding {
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+}
+
+interface AssociatedPrResponse {
+  pullRequest: {
+    number: number;
+    title: string;
+    url: string;
+    status: "open" | "merged" | "closed" | "draft";
+  } | null;
+}
 
 interface InitRequest {
   sessionName: string;
@@ -34,7 +53,11 @@ interface InitRequest {
 export interface SessionLifecycleHandlerDeps {
   repository: Pick<
     SessionRepository,
-    "upsertSession" | "createSandbox" | "createParticipant" | "updateSessionTitle"
+    | "upsertSession"
+    | "createSandbox"
+    | "createParticipant"
+    | "updateSessionTitle"
+    | "getLatestLinearCallbackContext"
   >;
   getDurableObjectId: () => string;
   tokenEncryptionKey?: string;
@@ -54,11 +77,14 @@ export interface SessionLifecycleHandlerDeps {
   sendToSandbox: (ws: WebSocket, message: string | object) => boolean;
   updateSandboxStatus: (status: SandboxStatus) => void;
   broadcast: (message: ServerMessage) => void;
+  linearBot?: ServiceBinding;
+  internalCallbackSecret?: string;
 }
 
 export interface SessionLifecycleHandler {
   init: (request: Request) => Promise<Response>;
   getState: () => Response;
+  getAssociatedPr: () => Promise<Response>;
   updateTitle: (request: Request) => Promise<Response>;
   archive: (request: Request) => Promise<Response>;
   unarchive: (request: Request) => Promise<Response>;
@@ -67,6 +93,19 @@ export interface SessionLifecycleHandler {
 
 function parseUserIdBody(body: unknown): { userId?: string } {
   return body as { userId?: string };
+}
+
+function parseLinearCallbackContext(
+  raw: string | null | undefined
+): LinearCallbackContextLike | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as LinearCallbackContextLike;
+    return typeof parsed === "object" && parsed !== null ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export function createSessionLifecycleHandler(
@@ -184,6 +223,55 @@ export function createSessionLifecycleHandler(
             }
           : null,
       });
+    },
+
+    async getAssociatedPr(): Promise<Response> {
+      const callbackContext = parseLinearCallbackContext(
+        deps.repository.getLatestLinearCallbackContext()?.callback_context
+      );
+
+      if (!callbackContext?.agentSessionId || !callbackContext.organizationId) {
+        return Response.json({ pullRequest: null } satisfies AssociatedPrResponse);
+      }
+
+      if (!deps.linearBot || !deps.internalCallbackSecret) {
+        return Response.json({ pullRequest: null } satisfies AssociatedPrResponse);
+      }
+
+      let linearResponse: Response;
+
+      try {
+        const token = await generateInternalToken(deps.internalCallbackSecret);
+        linearResponse = await deps.linearBot.fetch(
+          `https://internal/internal/agent-sessions/${callbackContext.agentSessionId}/pull-requests?organizationId=${encodeURIComponent(callbackContext.organizationId)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+      } catch (error) {
+        deps.getLog().warn("Failed to fetch associated Linear pull requests", {
+          agent_session_id: callbackContext.agentSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return Response.json({ pullRequest: null } satisfies AssociatedPrResponse);
+      }
+
+      if (!linearResponse.ok) {
+        deps.getLog().warn("Failed to fetch associated Linear pull requests", {
+          agent_session_id: callbackContext.agentSessionId,
+          status: linearResponse.status,
+        });
+        return Response.json({ pullRequest: null } satisfies AssociatedPrResponse);
+      }
+
+      const body = (await linearResponse.json()) as {
+        pullRequests?: Array<AssociatedPrResponse["pullRequest"]>;
+      };
+      const pullRequest = Array.isArray(body.pullRequests) ? (body.pullRequests[0] ?? null) : null;
+
+      return Response.json({ pullRequest } satisfies AssociatedPrResponse);
     },
 
     async updateTitle(request: Request): Promise<Response> {
