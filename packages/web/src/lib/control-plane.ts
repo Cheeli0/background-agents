@@ -102,6 +102,8 @@ export async function controlPlaneFetch(
   options: RequestInit = {}
 ): Promise<Response> {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const baseUrl = getControlPlaneUrl().replace(/\/+$/, "");
+  const requestUrl = `${baseUrl}${normalizedPath}`;
   const headers = await getControlPlaneHeaders();
   const fetchOptions: RequestInit = {
     ...options,
@@ -114,11 +116,23 @@ export async function controlPlaneFetch(
   // On Cloudflare Workers, use the service binding to call the control plane
   const binding = await getServiceBinding();
   if (binding) {
-    const baseUrl = getControlPlaneUrl().replace(/\/+$/, "");
-    return binding.fetch(`${baseUrl}${normalizedPath}`, fetchOptions);
+    const response = await binding.fetch(requestUrl, fetchOptions);
+
+    // During `next dev`, open-next can expose service bindings from wrangler.toml.
+    // If the referenced local worker isn't running, fall back to direct URL fetch.
+    if (process.env.NODE_ENV === "development" && response.status === 503) {
+      const body = await response.clone().text();
+      if (body.includes("Couldn't find a local dev session")) {
+        console.warn(
+          "[control-plane] Local service binding unavailable in dev; falling back to URL fetch"
+        );
+        return fetch(requestUrl, fetchOptions);
+      }
+    }
+
+    return response;
   }
 
   // Fallback: direct fetch (works on Vercel / local dev)
-  const baseUrl = getControlPlaneUrl().replace(/\/+$/, "");
-  return fetch(`${baseUrl}${normalizedPath}`, fetchOptions);
+  return fetch(requestUrl, fetchOptions);
 }
