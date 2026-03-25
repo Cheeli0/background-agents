@@ -182,4 +182,58 @@ describe("SessionSidebar", () => {
 
     expect(screen.getByText("Rename")).toBeInTheDocument();
   });
+
+  it("groups sessions by repository and falls back for missing repository info", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(2_000_000_000_000);
+
+    const sessions = [
+      {
+        ...createSession(1),
+        title: "Newest Background Session",
+        updatedAt: 2_000_000_000_000,
+      },
+      {
+        ...createSession(2),
+        title: "Older Background Session",
+        updatedAt: 1_999_999_999_000,
+      },
+      {
+        ...createSession(3),
+        title: "Docs Session",
+        repoName: "docs",
+        updatedAt: 1_999_999_998_000,
+      },
+      {
+        ...createSession(4),
+        title: "Unknown Repo Session",
+        repoOwner: "",
+        repoName: "",
+        updatedAt: 1_999_000_000_000,
+      },
+    ];
+
+    render(
+      <SWRConfig
+        value={{
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    const repositoryHeadings = await screen.findAllByRole("heading", {
+      name: /repository /i,
+    });
+
+    expect(repositoryHeadings.map((heading) => heading.textContent)).toEqual([
+      "open-inspect/background-agents",
+      "open-inspect/docs",
+      "Unknown repository",
+    ]);
+    expect(screen.getByText("Inactive")).toBeInTheDocument();
+    expect(screen.getByText("Unknown Repo Session")).toBeInTheDocument();
+  });
 });
