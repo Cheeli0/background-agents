@@ -17,7 +17,9 @@ import { buildSessionInternalUrl, SessionInternalPaths } from "./session/contrac
 
 import {
   getValidModelOrDefault,
+  isValidModel,
   isValidReasoningEffort,
+  VALID_MODELS,
   type CodeServerSettings,
   type SessionStatus,
   type CallbackContext,
@@ -43,6 +45,7 @@ import { reposRoutes } from "./routes/repos";
 import { repoImageRoutes } from "./routes/repo-images";
 import { secretsRoutes } from "./routes/secrets";
 import { automationRoutes } from "./routes/automations";
+import { webhookRoutes } from "./webhooks";
 
 const logger = createLogger("router");
 
@@ -130,7 +133,11 @@ function getSessionStub(env: Env, match: RegExpMatchArray): DurableObjectStub | 
 /**
  * Routes that do not require authentication.
  */
-const PUBLIC_ROUTES: RegExp[] = [/^\/health$/];
+const PUBLIC_ROUTES: RegExp[] = [
+  /^\/health$/,
+  /^\/webhooks\/sentry\/[^/]+$/,
+  /^\/webhooks\/automation\/[^/]+$/,
+];
 
 /**
  * Routes that accept sandbox authentication.
@@ -480,6 +487,9 @@ const routes: Route[] = [
 
   // Automations
   ...automationRoutes,
+
+  // Webhooks (public routes — auth handled per-route)
+  ...webhookRoutes,
 ];
 
 /**
@@ -1435,7 +1445,13 @@ async function handleSpawnChild(
   const childDoId = env.SESSION.idFromName(childId);
   const childStub = env.SESSION.get(childDoId);
 
-  const model = getValidModelOrDefault(body.model || spawnContext.model);
+  // Validate explicit model from the agent; reject invalid names so the agent
+  // can self-correct instead of silently falling back to the default model.
+  const rawModel = body.model ?? spawnContext.model;
+  if (body.model !== undefined && !isValidModel(body.model)) {
+    return error(`Invalid model "${body.model}". Valid models: ${VALID_MODELS.join(", ")}`, 400);
+  }
+  const model = getValidModelOrDefault(rawModel);
   const reasoningEffort =
     body.reasoningEffort && isValidReasoningEffort(model, body.reasoningEffort)
       ? body.reasoningEffort
