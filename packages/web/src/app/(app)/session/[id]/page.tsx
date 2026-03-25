@@ -22,17 +22,14 @@ import {
   SessionRightSidebarContent,
 } from "@/components/session-right-sidebar";
 import { ActionBar } from "@/components/action-bar";
-import {
-  copyToClipboard,
-  formatModelNameLower,
-  formatModelOptionDescription,
-} from "@/lib/format";
+import { copyToClipboard, formatModelNameLower, formatModelOptionDescription } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { DEFAULT_MODEL, getDefaultReasoningEffort, type ModelCategory } from "@open-inspect/shared";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { ReasoningEffortPills } from "@/components/reasoning-effort-pills";
+import { SessionConnectionBanner } from "@/components/session-connection-banner";
 import type { SandboxEvent } from "@/types/session";
 import {
   SidebarIcon,
@@ -753,15 +750,10 @@ function SessionContent({
 
       {/* Connection error banner */}
       {(authError || connectionError) && (
-        <div className="bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 px-4 py-3 flex items-center justify-between">
-          <p className="text-sm text-red-700 dark:text-red-400">{authError || connectionError}</p>
-          <button
-            onClick={reconnect}
-            className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition"
-          >
-            Reconnect
-          </button>
-        </div>
+        <SessionConnectionBanner
+          message={authError || connectionError || ""}
+          onReconnect={reconnect}
+        />
       )}
 
       {/* Main content */}
