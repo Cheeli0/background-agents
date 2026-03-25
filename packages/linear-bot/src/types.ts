@@ -172,8 +172,16 @@ export interface LinearIssueDetails {
   labels: Array<{ id: string; name: string }>;
   project?: { id: string; name: string } | null;
   assignee?: { id: string; name: string } | null;
+  state?: LinearWorkflowState | null;
   team: { id: string; key: string; name: string };
   comments: Array<{ body: string; user?: { name: string } }>;
+}
+
+export interface LinearWorkflowState {
+  id: string;
+  name: string;
+  type: string;
+  position?: number;
 }
 
 // ─── Webhook Payload Types ──────────────────────────────────────────────────

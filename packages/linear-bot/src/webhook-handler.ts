@@ -14,6 +14,7 @@ import {
   getLinearClient,
   emitAgentActivity,
   fetchIssueDetails,
+  moveIssueToStartedStateIfNeeded,
   updateAgentSession,
   getRepoSuggestions,
 } from "./utils/linear-client";
@@ -313,6 +314,14 @@ async function handleNewSession(
   const labels = issueDetails?.labels || issue.labels || [];
   const labelNames = labels.map((l) => l.name);
   const projectInfo = issueDetails?.project || issue.project;
+  const startedTransitionInput =
+    webhook.action === "created" && issueDetails?.state
+      ? {
+          teamId: issueDetails.team.id,
+          currentStateId: issueDetails.state.id,
+          currentStateType: issueDetails.state.type,
+        }
+      : null;
 
   // ─── Resolve repo ─────────────────────────────────────────────────────
 
@@ -600,6 +609,32 @@ async function handleNewSession(
       duration_ms: Date.now() - startTime,
     });
     return;
+  }
+
+  if (startedTransitionInput) {
+    const startedTransition = await moveIssueToStartedStateIfNeeded(client, {
+      issueId: issue.id,
+      ...startedTransitionInput,
+    });
+
+    if (startedTransition.status === "updated") {
+      log.info("agent_session.issue_moved_to_started", {
+        trace_id: traceId,
+        issue_id: issue.id,
+        issue_identifier: issue.identifier,
+        previous_state_type: startedTransitionInput.currentStateType,
+        target_state_id: startedTransition.targetState?.id ?? null,
+        target_state_name: startedTransition.targetState?.name ?? null,
+      });
+    } else if (startedTransition.status === "failed") {
+      log.warn("agent_session.issue_move_to_started_failed", {
+        trace_id: traceId,
+        issue_id: issue.id,
+        issue_identifier: issue.identifier,
+        current_state_type: startedTransitionInput.currentStateType,
+        reason: startedTransition.reason,
+      });
+    }
   }
 
   await emitAgentActivity(client, agentSessionId, {

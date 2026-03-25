@@ -2,7 +2,13 @@
  * Linear API client utilities — OAuth + raw GraphQL.
  */
 
-import type { Env, OAuthTokenResponse, StoredTokenData, LinearIssueDetails } from "../types";
+import type {
+  Env,
+  OAuthTokenResponse,
+  StoredTokenData,
+  LinearIssueDetails,
+  LinearWorkflowState,
+} from "../types";
 import { timingSafeEqual } from "@open-inspect/shared";
 import { computeHmacHex } from "./crypto";
 import { createLogger } from "../logger";
@@ -11,6 +17,7 @@ const log = createLogger("linear-client");
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const OAUTH_TOKEN_KEY_PREFIX = "oauth:token:";
+const NON_TRANSITIONABLE_STATE_TYPES = new Set(["started", "completed", "canceled"]);
 
 // ─── OAuth Helpers ───────────────────────────────────────────────────────────
 
@@ -148,7 +155,17 @@ async function linearGraphQL(
     throw new Error(`Linear API error: ${res.status}: ${errText}`);
   }
 
-  return (await res.json()) as Record<string, unknown>;
+  const payload = (await res.json()) as {
+    data?: Record<string, unknown>;
+    errors?: Array<{ message?: string }>;
+  };
+
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    const messages = payload.errors.map((error) => error.message || "Unknown GraphQL error");
+    throw new Error(`Linear GraphQL error: ${messages.join("; ")}`);
+  }
+
+  return payload as Record<string, unknown>;
 }
 
 // ─── Agent Activities ────────────────────────────────────────────────────────
@@ -206,6 +223,7 @@ export async function fetchIssueDetails(
           labels { nodes { id name } }
           project { id name }
           assignee { id name }
+          state { id name type }
           team { id key name }
           comments(first: 10, orderBy: createdAt) {
             nodes {
@@ -233,6 +251,7 @@ export async function fetchIssueDetails(
       labels: (issue.labels as { nodes: Array<{ id: string; name: string }> })?.nodes || [],
       project: issue.project as { id: string; name: string } | null,
       assignee: issue.assignee as { id: string; name: string } | null,
+      state: (issue.state as LinearWorkflowState | undefined) ?? null,
       team: issue.team as { id: string; key: string; name: string },
       comments:
         (issue.comments as { nodes: Array<{ body: string; user?: { name: string } }> })?.nodes ||
@@ -244,6 +263,143 @@ export async function fetchIssueDetails(
       error: err instanceof Error ? err : new Error(String(err)),
     });
     return null;
+  }
+}
+
+export interface StartedWorkflowStateResult {
+  status: "found" | "not_found" | "failed";
+  reason: string;
+  state?: LinearWorkflowState | null;
+}
+
+export async function getFirstStartedWorkflowState(
+  client: LinearApiClient,
+  teamId: string
+): Promise<StartedWorkflowStateResult> {
+  try {
+    const data = await linearGraphQL(
+      client,
+      `
+      query TeamStartedStates($teamId: String!) {
+        team(id: $teamId) {
+          states(filter: { type: { eq: "started" } }) {
+            nodes {
+              id
+              name
+              type
+              position
+            }
+          }
+        }
+      }
+    `,
+      { teamId }
+    );
+
+    const states =
+      ((data as {
+        data?: {
+          team?: {
+            states?: { nodes?: LinearWorkflowState[] };
+          };
+        };
+      }).data?.team?.states?.nodes ?? []
+    )
+      .slice()
+      .sort(
+        (a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER)
+      );
+
+    const state = states[0] ?? null;
+    if (!state) {
+      return { status: "not_found", reason: "no_started_state", state: null };
+    }
+
+    return { status: "found", reason: "started_state_found", state };
+  } catch (err) {
+    log.error("linear.fetch_started_state_failed", {
+      team_id: teamId,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+    return { status: "failed", reason: "started_state_lookup_failed", state: null };
+  }
+}
+
+export interface MoveIssueToStartedResult {
+  status: "updated" | "skipped" | "failed";
+  reason: string;
+  targetState?: LinearWorkflowState | null;
+}
+
+export async function moveIssueToStartedStateIfNeeded(
+  client: LinearApiClient,
+  params: {
+    issueId: string;
+    teamId: string;
+    currentStateId?: string | null;
+    currentStateType?: string | null;
+  }
+): Promise<MoveIssueToStartedResult> {
+  const currentStateType = params.currentStateType?.toLowerCase() ?? null;
+  if (!currentStateType) {
+    return { status: "skipped", reason: "missing_current_state" };
+  }
+
+  if (NON_TRANSITIONABLE_STATE_TYPES.has(currentStateType)) {
+    return {
+      status: "skipped",
+      reason:
+        currentStateType === "started" ? "already_started" : `already_${currentStateType}`,
+    };
+  }
+
+  const startedStateResult = await getFirstStartedWorkflowState(client, params.teamId);
+  if (startedStateResult.status === "failed") {
+    return { status: "failed", reason: startedStateResult.reason };
+  }
+
+  const targetState = startedStateResult.state ?? null;
+  if (!targetState) {
+    return { status: "skipped", reason: startedStateResult.reason, targetState };
+  }
+
+  if (params.currentStateId && params.currentStateId === targetState.id) {
+    return { status: "skipped", reason: "already_in_target_state", targetState };
+  }
+
+  try {
+    const data = await linearGraphQL(
+      client,
+      `
+      mutation MoveIssueToStarted($id: String!, $input: IssueUpdateInput!) {
+        issueUpdate(id: $id, input: $input) {
+          success
+        }
+      }
+    `,
+      { id: params.issueId, input: { stateId: targetState.id } }
+    );
+
+    const success = (data as { data?: { issueUpdate?: { success?: boolean } } }).data?.issueUpdate
+      ?.success;
+
+    if (!success) {
+      log.warn("linear.move_issue_to_started_unsuccessful", {
+        issue_id: params.issueId,
+        target_state_id: targetState.id,
+      });
+      return { status: "failed", reason: "issue_update_unsuccessful", targetState };
+    }
+
+    return { status: "updated", reason: "issue_moved_to_started", targetState };
+  } catch (err) {
+    log.error("linear.move_issue_to_started_failed", {
+      issue_id: params.issueId,
+      team_id: params.teamId,
+      target_state_id: targetState.id,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+    return { status: "failed", reason: "issue_update_failed", targetState };
   }
 }
 
