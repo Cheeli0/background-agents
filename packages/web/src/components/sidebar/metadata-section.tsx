@@ -11,6 +11,7 @@ import {
   SparkleIcon,
   GitHubIcon,
   GitPrIcon,
+  GitBranchWorkIcon,
   BranchIcon,
   CopyIcon,
   CheckIcon,
@@ -122,7 +123,7 @@ export function MetadataSection({
       {/* PR Badge */}
       {(prNumber || prUrl) && (
         <div className="flex items-center gap-2 text-sm">
-          <GitHubIcon className="w-4 h-4 text-muted-foreground" />
+          <GitPrIcon className="w-4 h-4 text-muted-foreground" />
           {prUrl ? (
             <a
               href={prUrl}
@@ -145,7 +146,7 @@ export function MetadataSection({
 
       {associatedPrLink && (
         <div className="flex items-center gap-2 text-sm">
-          <GitHubIcon className="w-4 h-4 text-muted-foreground" />
+          <GitPrIcon className="w-4 h-4 text-muted-foreground" />
           <a
             href={associatedPrLink.url}
             target="_blank"
@@ -186,7 +187,7 @@ export function MetadataSection({
       {/* Working Branch */}
       {branchName && (
         <div className="flex items-center gap-2 text-sm">
-          <GitPrIcon className="w-4 h-4 text-muted-foreground" />
+          <GitBranchWorkIcon className="w-4 h-4 text-muted-foreground" />
           {branchUrl ? (
             <a
               href={branchUrl}
