@@ -27,6 +27,7 @@ import {
   ChevronRightIcon,
   FolderIcon,
   KeyboardIcon,
+  GitPrIcon,
 } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +51,7 @@ type RepositorySessionGroup = {
   activeSessions: SessionItem[];
   inactiveSessions: SessionItem[];
 };
+type AssociatedPrStatus = "open" | "merged" | "closed";
 
 export const MOBILE_LONG_PRESS_MS = 450;
 const MOBILE_LONG_PRESS_MOVE_THRESHOLD_PX = 10;
@@ -76,6 +78,67 @@ function getSessionRepositoryInfo(
   }
 
   return { key: "unknown", label: UNKNOWN_REPOSITORY_LABEL };
+}
+
+function associatedPrStatusClassName(status: AssociatedPrStatus) {
+  switch (status) {
+    case "open":
+      return "text-success";
+    case "merged":
+      return "text-[#8250df]";
+    case "closed":
+      return "text-muted-foreground";
+  }
+}
+
+function sessionAssociatedPrStatusKey(sessionId: string) {
+  return `/api/sessions/${sessionId}/associated-pr`;
+}
+
+async function fetchAssociatedPrStatus(url: string): Promise<AssociatedPrStatus | null> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch associated PR: ${response.status}`);
+  }
+
+  const data = (await response.json()) as {
+    pullRequest?: {
+      status?: "open" | "merged" | "closed" | "draft";
+    } | null;
+  };
+
+  const status = data.pullRequest?.status;
+  if (status === "open" || status === "merged" || status === "closed") {
+    return status;
+  }
+
+  return null;
+}
+
+function SessionPrStatusIndicator({ sessionId }: { sessionId: string }) {
+  const { data: prStatus } = useSWR<AssociatedPrStatus | null>(
+    sessionAssociatedPrStatusKey(sessionId),
+    fetchAssociatedPrStatus,
+    {
+      refreshInterval: (latestStatus) => (latestStatus === "open" ? 10_000 : 0),
+      revalidateOnFocus: true,
+      dedupingInterval: 10_000,
+    }
+  );
+
+  if (!prStatus) {
+    return null;
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center ${associatedPrStatusClassName(prStatus)}`}
+      title={`PR ${prStatus}`}
+      aria-label={`PR ${prStatus}`}
+    >
+      <GitPrIcon className="w-3 h-3" />
+    </span>
+  );
 }
 
 export function buildSessionHref(session: SessionItem) {
@@ -745,7 +808,7 @@ function SessionListItem({
           onTouchCancel={handleTouchEnd}
           className="block pr-8"
         >
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 min-w-0">
             <div className="truncate text-sm font-medium text-foreground">{displayTitle}</div>
             {showCompletedIndicator && (
               <span
@@ -765,6 +828,7 @@ function SessionListItem({
                 <KeyboardIcon className="h-3.5 w-3.5" />
               </span>
             )}
+            <SessionPrStatusIndicator sessionId={session.id} />
           </div>
           <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
             <span>{relativeTime}</span>
@@ -840,6 +904,7 @@ function ChildSessionListItem({
       <div className="flex items-center gap-1.5 text-xs">
         <span className="shrink-0 text-muted-foreground">{relativeTime}</span>
         <span className="truncate font-medium text-foreground">{displayTitle}</span>
+        <SessionPrStatusIndicator sessionId={session.id} />
       </div>
     </Link>
   );

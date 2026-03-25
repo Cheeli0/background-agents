@@ -89,6 +89,10 @@ describe("SessionSidebar", () => {
         return jsonResponse({ sessions: secondPage, hasMore: false });
       }
 
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
       throw new Error(`Unexpected fetch for ${url}`);
     });
 
@@ -145,6 +149,17 @@ describe("SessionSidebar", () => {
   it("navigates directly on mobile tap without opening rename actions", async () => {
     mockUseIsMobile.mockReturnValue(true);
 
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
     render(
       <SWRConfig
         value={{
@@ -165,6 +180,17 @@ describe("SessionSidebar", () => {
 
   it("opens rename actions on mobile long press", async () => {
     mockUseIsMobile.mockReturnValue(true);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <SWRConfig
@@ -240,6 +266,59 @@ describe("SessionSidebar", () => {
     ]);
     expect(screen.getByText("Inactive")).toBeInTheDocument();
     expect(screen.getByText("Unknown Repo Session")).toBeInTheDocument();
+  });
+
+  it("shows merged and closed PR status indicators in the sessions list", async () => {
+    const sessions = [createSession(1), createSession(2), createSession(3)];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === SIDEBAR_SESSIONS_KEY) {
+        return jsonResponse({ sessions, hasMore: false });
+      }
+
+      if (url.endsWith("/session-1/associated-pr")) {
+        return jsonResponse({ pullRequest: { status: "open" } });
+      }
+
+      if (url.endsWith("/session-2/associated-pr")) {
+        return jsonResponse({ pullRequest: { status: "merged" } });
+      }
+
+      if (url.endsWith("/session-3/associated-pr")) {
+        return jsonResponse({ pullRequest: { status: "closed" } });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+          fetcher: async (url: string) => {
+            const response = await fetch(url);
+            return response.json();
+          },
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    expect(await screen.findByText("Session 1")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("PR merged")).toBeInTheDocument();
+      expect(screen.getByLabelText("PR closed")).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText("PR open")).toBeInTheDocument();
   });
 
   it("collapses and expands repository groups", async () => {
