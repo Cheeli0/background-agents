@@ -5,7 +5,7 @@ import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import { MODEL_OPTIONS, DEFAULT_ENABLED_MODELS, isValidModel } from "@open-inspect/shared";
 import { MODEL_PREFERENCES_KEY } from "@/hooks/use-enabled-models";
-import { formatPremiumMultiplierLabel } from "@/lib/format";
+import { formatRequestMultiplierLabel } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
@@ -100,8 +100,8 @@ export function ModelsSettings() {
         Choose which models appear in the model selector across the web UI and Slack bot.
       </p>
       <p className="text-sm text-muted-foreground mb-6">
-        GitHub Copilot models show their premium request multiplier here. Free means the
-        multiplier is <code>0</code>.
+        Models can define a request multiplier to represent multi-call operations. For example,
+        <code>Requests x3</code> means one operation is counted as three requests.
       </p>
 
       <div className="space-y-6">
@@ -125,7 +125,9 @@ export function ModelsSettings() {
               <div className="space-y-2">
                 {group.models.map((model) => {
                   const isEnabled = enabledModels.has(model.id);
-                  const premiumMultiplierLabel = formatPremiumMultiplierLabel(model.premiumMultiplier);
+                  const requestMultiplierLabel = formatRequestMultiplierLabel(
+                    model.requestMultiplier
+                  );
                   return (
                     <label
                       key={model.id}
@@ -135,9 +137,9 @@ export function ModelsSettings() {
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-medium text-foreground">{model.name}</span>
-                          {premiumMultiplierLabel && (
+                          {requestMultiplierLabel && (
                             <span className="rounded-full border border-border-muted px-2 py-0.5 text-xs text-muted-foreground">
-                              {premiumMultiplierLabel}
+                              {requestMultiplierLabel}
                             </span>
                           )}
                         </div>
