@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinearApiClient } from "./linear-client";
 import {
+  fetchAgentSessionPullRequests,
   fetchIssueDetails,
   getFirstStartedWorkflowState,
   moveIssueToStartedStateIfNeeded,
@@ -52,6 +53,58 @@ describe("linear-client workflow helpers", () => {
     const issue = await fetchIssueDetails(client, "issue-1");
 
     expect(issue?.state).toEqual({ id: "state-backlog", name: "Backlog", type: "backlog" });
+  });
+
+  it("fetchAgentSessionPullRequests normalizes linked pull requests", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      jsonResponse({
+        data: {
+          agentSession: {
+            pullRequests: {
+              nodes: [
+                {
+                  pullRequest: {
+                    id: "pr-1",
+                    number: 42,
+                    title: "Fix session panel",
+                    url: "https://github.com/acme/repo/pull/42",
+                    status: "inReview",
+                  },
+                },
+                {
+                  pullRequest: {
+                    id: "pr-2",
+                    number: 43,
+                    title: "Follow-up",
+                    url: "https://github.com/acme/repo/pull/43",
+                    status: "merged",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+
+    const pullRequests = await fetchAgentSessionPullRequests(client, "agent-session-1");
+
+    expect(pullRequests).toEqual([
+      {
+        id: "pr-1",
+        number: 42,
+        title: "Fix session panel",
+        url: "https://github.com/acme/repo/pull/42",
+        status: "open",
+      },
+      {
+        id: "pr-2",
+        number: 43,
+        title: "Follow-up",
+        url: "https://github.com/acme/repo/pull/43",
+        status: "merged",
+      },
+    ]);
   });
 
   it("getFirstStartedWorkflowState picks the lowest position started state", async () => {

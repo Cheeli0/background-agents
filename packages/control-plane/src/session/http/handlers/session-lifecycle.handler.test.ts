@@ -76,6 +76,7 @@ function createHandler() {
     createSandbox: vi.fn(),
     createParticipant: vi.fn(),
     updateSessionTitle: vi.fn(),
+    getLatestLinearCallbackContext: vi.fn(),
   };
   const getDurableObjectId = vi.fn(() => "session-do-id");
   const encryptToken = vi.fn();
@@ -100,6 +101,7 @@ function createHandler() {
   const sendToSandbox = vi.fn();
   const updateSandboxStatus = vi.fn();
   const broadcast = vi.fn();
+  const linearBot = { fetch: vi.fn() };
 
   const handler = createSessionLifecycleHandler({
     repository,
@@ -121,6 +123,8 @@ function createHandler() {
     sendToSandbox,
     updateSandboxStatus,
     broadcast,
+    linearBot,
+    internalCallbackSecret: "internal-secret",
   });
 
   return {
@@ -143,6 +147,7 @@ function createHandler() {
     sendToSandbox,
     updateSandboxStatus,
     broadcast,
+    linearBot,
   };
 }
 
@@ -267,6 +272,62 @@ describe("createSessionLifecycleHandler", () => {
       "Failed to encrypt SCM token",
       expect.objectContaining({ error: expect.any(Error) })
     );
+  });
+
+  it("returns the first associated PR for linear sessions", async () => {
+    const { handler, repository, linearBot } = createHandler();
+    repository.getLatestLinearCallbackContext.mockReturnValue({
+      callback_context: JSON.stringify({
+        agentSessionId: "agent-session-1",
+        organizationId: "org-1",
+      }),
+    });
+    linearBot.fetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          pullRequests: [
+            {
+              number: 42,
+              title: "Display associated PR",
+              url: "https://github.com/acme/repo/pull/42",
+              status: "open",
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    const response = await handler.getAssociatedPr();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      pullRequest: {
+        number: 42,
+        title: "Display associated PR",
+        url: "https://github.com/acme/repo/pull/42",
+        status: "open",
+      },
+    });
+    expect(linearBot.fetch).toHaveBeenCalledWith(
+      "https://internal/internal/agent-sessions/agent-session-1/pull-requests?organizationId=org-1",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: expect.stringMatching(/^Bearer /),
+        }),
+      })
+    );
+  });
+
+  it("returns null when no linear callback context exists", async () => {
+    const { handler, repository, linearBot } = createHandler();
+    repository.getLatestLinearCallbackContext.mockReturnValue(null);
+
+    const response = await handler.getAssociatedPr();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ pullRequest: null });
+    expect(linearBot.fetch).not.toHaveBeenCalled();
   });
 
   it("logs invalid model warning and stores normalized model", async () => {

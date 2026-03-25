@@ -368,6 +368,11 @@ const routes: Route[] = [
     handler: handleGetSession,
   },
   {
+    method: "GET",
+    pattern: parsePattern("/sessions/:id/associated-pr"),
+    handler: handleSessionAssociatedPr,
+  },
+  {
     method: "DELETE",
     pattern: parsePattern("/sessions/:id"),
     handler: handleDeleteSession,
@@ -874,6 +879,20 @@ async function handleDeleteSession(
   // when no longer referenced. We could also call a cleanup method on the DO.
 
   return json({ status: "deleted", sessionId });
+}
+
+async function handleSessionAssociatedPr(
+  _request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  const stub = getSessionStub(env, match);
+  if (!stub) return error("Session ID required");
+
+  return stub.fetch(
+    internalRequest(buildSessionInternalUrl(SessionInternalPaths.associatedPr), undefined, ctx)
+  );
 }
 
 async function handleSessionPrompt(

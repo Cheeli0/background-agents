@@ -272,6 +272,90 @@ export interface StartedWorkflowStateResult {
   state?: LinearWorkflowState | null;
 }
 
+export interface LinearAgentSessionPullRequest {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  status: "open" | "merged" | "closed" | "draft";
+}
+
+export async function fetchAgentSessionPullRequests(
+  client: LinearApiClient,
+  agentSessionId: string
+): Promise<LinearAgentSessionPullRequest[]> {
+  try {
+    const data = await linearGraphQL(
+      client,
+      `
+      query AgentSessionPullRequests($id: String!) {
+        agentSession(id: $id) {
+          pullRequests(first: 10) {
+            nodes {
+              pullRequest {
+                id
+                number
+                title
+                url
+                status
+              }
+            }
+          }
+        }
+      }
+    `,
+      { id: agentSessionId }
+    );
+
+    const nodes = (
+      (
+        data as {
+          data?: {
+            agentSession?: {
+              pullRequests?: {
+                nodes?: Array<{
+                  pullRequest?: {
+                    id: string;
+                    number: number;
+                    title: string;
+                    url: string;
+                    status: LinearAgentSessionPullRequest["status"] | "inReview" | "approved";
+                  };
+                }>;
+              };
+            };
+          };
+        }
+      ).data?.agentSession?.pullRequests?.nodes ?? []
+    )
+      .map((node) => node.pullRequest)
+      .filter((pullRequest): pullRequest is NonNullable<typeof pullRequest> =>
+        Boolean(pullRequest)
+      );
+
+    return nodes.map((pullRequest) => ({
+      id: pullRequest.id,
+      number: pullRequest.number,
+      title: pullRequest.title,
+      url: pullRequest.url,
+      status:
+        pullRequest.status === "merged"
+          ? "merged"
+          : pullRequest.status === "draft"
+            ? "draft"
+            : pullRequest.status === "closed"
+              ? "closed"
+              : "open",
+    }));
+  } catch (err) {
+    log.error("linear.fetch_agent_session_pull_requests_failed", {
+      agent_session_id: agentSessionId,
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+    return [];
+  }
+}
+
 export async function getFirstStartedWorkflowState(
   client: LinearApiClient,
   teamId: string
@@ -296,14 +380,16 @@ export async function getFirstStartedWorkflowState(
       { teamId }
     );
 
-    const states =
-      ((data as {
-        data?: {
-          team?: {
-            states?: { nodes?: LinearWorkflowState[] };
+    const states = (
+      (
+        data as {
+          data?: {
+            team?: {
+              states?: { nodes?: LinearWorkflowState[] };
+            };
           };
-        };
-      }).data?.team?.states?.nodes ?? []
+        }
+      ).data?.team?.states?.nodes ?? []
     )
       .slice()
       .sort(
@@ -348,8 +434,7 @@ export async function moveIssueToStartedStateIfNeeded(
   if (NON_TRANSITIONABLE_STATE_TYPES.has(currentStateType)) {
     return {
       status: "skipped",
-      reason:
-        currentStateType === "started" ? "already_started" : `already_${currentStateType}`,
+      reason: currentStateType === "started" ? "already_started" : `already_${currentStateType}`,
     };
   }
 

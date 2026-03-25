@@ -143,6 +143,7 @@ export class SessionDO extends DurableObject<Env> {
   private readonly routes = createSessionInternalRoutes({
     init: (request) => this.sessionLifecycleHandler.init(request),
     state: () => this.sessionLifecycleHandler.getState(),
+    associatedPr: () => this.sessionLifecycleHandler.getAssociatedPr(),
     prompt: (request) => this.messagesHandler.enqueuePrompt(request),
     stop: () => this.messagesHandler.stop(),
     sandboxEvent: (request) => this.sandboxHandler.sandboxEvent(request),
@@ -418,6 +419,8 @@ export class SessionDO extends DurableObject<Env> {
         sendToSandbox: (ws, message) => this.wsManager.send(ws, message),
         updateSandboxStatus: (status) => this.updateSandboxStatus(status),
         broadcast: (message) => this.broadcast(message),
+        linearBot: this.env.LINEAR_BOT,
+        internalCallbackSecret: this.env.INTERNAL_CALLBACK_SECRET,
       });
     }
 

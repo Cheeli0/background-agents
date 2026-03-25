@@ -28,6 +28,12 @@ interface MetadataSectionProps {
   repoName?: string;
   artifacts?: Artifact[];
   parentSessionId?: string | null;
+  associatedPr?: {
+    number: number;
+    title: string;
+    url: string;
+    status: "open" | "merged" | "closed" | "draft";
+  } | null;
 }
 
 export function MetadataSection({
@@ -40,6 +46,7 @@ export function MetadataSection({
   repoName,
   artifacts = [],
   parentSessionId,
+  associatedPr,
 }: MetadataSectionProps) {
   const [copied, setCopied] = useState(false);
 
@@ -52,6 +59,22 @@ export function MetadataSection({
   const prUrl = getSafeExternalUrl(
     prArtifact?.url || manualPrArtifact?.metadata?.createPrUrl || manualPrArtifact?.url
   );
+  const associatedPrUrl = getSafeExternalUrl(associatedPr?.url);
+  const hasMatchingArtifactPr = associatedPr
+    ? artifacts.some(
+        (artifact) =>
+          artifact.type === "pr" &&
+          (artifact.metadata?.prNumber === associatedPr.number ||
+            getSafeExternalUrl(artifact.url) === associatedPrUrl)
+      )
+    : false;
+  const associatedPrLink =
+    associatedPr && associatedPrUrl && !hasMatchingArtifactPr && associatedPrUrl !== prUrl
+      ? {
+          ...associatedPr,
+          url: associatedPrUrl,
+        }
+      : null;
   const branchUrl =
     branchName && repoOwner && repoName
       ? `https://github.com/${repoOwner}/${repoName}/tree/${encodeURIComponent(branchName)}`
@@ -117,6 +140,24 @@ export function MetadataSection({
               {prState}
             </Badge>
           )}
+        </div>
+      )}
+
+      {associatedPrLink && (
+        <div className="flex items-center gap-2 text-sm">
+          <GitHubIcon className="w-4 h-4 text-muted-foreground" />
+          <a
+            href={associatedPrLink.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent hover:underline"
+            title={associatedPrLink.title}
+          >
+            Associated PR #{associatedPrLink.number}
+          </a>
+          <Badge variant={prBadgeVariant(associatedPrLink.status)} className="capitalize">
+            {associatedPrLink.status}
+          </Badge>
         </div>
       )}
 

@@ -551,6 +551,17 @@ export class SessionRepository {
     return rows[0] ?? null;
   }
 
+  getLatestLinearCallbackContext(): { callback_context: string } | null {
+    const result = this.sql.exec(
+      `SELECT callback_context FROM messages
+       WHERE source = 'linear' AND callback_context IS NOT NULL
+       ORDER BY created_at DESC
+       LIMIT 1`
+    );
+    const rows = result.toArray() as Array<{ callback_context: string }>;
+    return rows[0] ?? null;
+  }
+
   createMessage(data: CreateMessageData): void {
     this.sql.exec(
       `INSERT INTO messages (id, author_id, content, source, model, reasoning_effort, attachments, callback_context, status, created_at)
