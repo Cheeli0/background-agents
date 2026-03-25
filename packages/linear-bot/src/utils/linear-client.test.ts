@@ -3,6 +3,7 @@ import type { LinearApiClient } from "./linear-client";
 import {
   fetchIssueDetails,
   getFirstStartedWorkflowState,
+  getRepoSuggestions,
   moveIssueToStartedStateIfNeeded,
 } from "./linear-client";
 
@@ -203,5 +204,35 @@ describe("linear-client workflow helpers", () => {
       status: "failed",
       reason: "started_state_lookup_failed",
     });
+  });
+
+  it("getRepoSuggestions inlines candidate repositories instead of using a removed input type", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      jsonResponse({
+        data: {
+          issueRepositorySuggestions: {
+            suggestions: [{ repositoryFullName: "acme/api", confidence: 0.91 }],
+          },
+        },
+      })
+    );
+
+    const suggestions = await getRepoSuggestions(client, "issue-1", "session-1", [
+      { hostname: "github.com", repositoryFullName: "acme/api" },
+    ]);
+
+    expect(suggestions).toEqual([{ repositoryFullName: "acme/api", confidence: 0.91 }]);
+
+    const request = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
+    const body = JSON.parse(String(request?.body)) as {
+      query: string;
+      variables: Record<string, unknown>;
+    };
+
+    expect(body.query).not.toContain("IssueRepositorySuggestionInput");
+    expect(body.query).toContain(
+      'candidateRepositories: [{ hostname: "github.com", repositoryFullName: "acme/api" }]'
+    );
+    expect(body.variables).toEqual({ issueId: "issue-1", agentSessionId: "session-1" });
   });
 });
