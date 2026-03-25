@@ -168,6 +168,22 @@ async function linearGraphQL(
   return payload as Record<string, unknown>;
 }
 
+function toGraphQLStringLiteral(value: string): string {
+  return JSON.stringify(value)
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function buildRepositoryCandidatesLiteral(
+  candidateRepos: Array<{ hostname: string; repositoryFullName: string }>
+): string {
+  const candidates = candidateRepos.map(
+    (repo) =>
+      `{ hostname: ${toGraphQLStringLiteral(repo.hostname)}, repositoryFullName: ${toGraphQLStringLiteral(repo.repositoryFullName)} }`
+  );
+  return `[${candidates.join(", ")}]`;
+}
+
 // ─── Agent Activities ────────────────────────────────────────────────────────
 
 export async function emitAgentActivity(
@@ -443,14 +459,15 @@ export async function getRepoSuggestions(
   candidateRepos: Array<{ hostname: string; repositoryFullName: string }>
 ): Promise<Array<{ repositoryFullName: string; confidence: number }>> {
   try {
+    const candidateRepositoriesLiteral = buildRepositoryCandidatesLiteral(candidateRepos);
     const data = await linearGraphQL(
       client,
       `
-      query RepoSuggestions($issueId: String!, $agentSessionId: String!, $candidateRepositories: [IssueRepositorySuggestionInput!]!) {
+      query RepoSuggestions($issueId: String!, $agentSessionId: String!) {
         issueRepositorySuggestions(
           issueId: $issueId
           agentSessionId: $agentSessionId
-          candidateRepositories: $candidateRepositories
+          candidateRepositories: ${candidateRepositoriesLiteral}
         ) {
           suggestions {
             repositoryFullName
@@ -459,7 +476,7 @@ export async function getRepoSuggestions(
         }
       }
     `,
-      { issueId, agentSessionId, candidateRepositories: candidateRepos }
+      { issueId, agentSessionId }
     );
 
     const result = data as {
