@@ -38,13 +38,19 @@ function createFakeKV(initial: Record<string, string> = {}) {
   return { kv: kv as unknown as KVNamespace, putCalls, store };
 }
 
-function createControlPlaneFetch() {
+function createControlPlaneFetch(params?: { failCreateSession?: boolean; failPrompt?: boolean }) {
   return vi.fn(async (url: string) => {
     if (url === "https://internal/sessions") {
+      if (params?.failCreateSession) {
+        return new Response("create session failed", { status: 500 });
+      }
       return jsonResponse({ sessionId: "sess-1" });
     }
 
     if (url === "https://internal/sessions/sess-1/prompt") {
+      if (params?.failPrompt) {
+        return new Response("prompt failed", { status: 500 });
+      }
       return jsonResponse({ ok: true });
     }
 
@@ -65,6 +71,8 @@ function createControlPlaneFetch() {
 function createEnv(params?: {
   projectMapping?: Record<string, { owner: string; name: string }>;
   existingSession?: Record<string, unknown>;
+  failCreateSession?: boolean;
+  failPrompt?: boolean;
 }) {
   const oauthToken = JSON.stringify({
     access_token: "linear-oauth-token",
@@ -85,7 +93,10 @@ function createEnv(params?: {
   }
 
   const { kv, putCalls } = createFakeKV(initialKv);
-  const controlPlaneFetch = createControlPlaneFetch();
+  const controlPlaneFetch = createControlPlaneFetch({
+    failCreateSession: params?.failCreateSession,
+    failPrompt: params?.failPrompt,
+  });
   const env = {
     LINEAR_KV: kv,
     CONTROL_PLANE: { fetch: controlPlaneFetch },
@@ -220,6 +231,15 @@ describe("handleAgentSessionEvent started-state behavior", () => {
     );
 
     expect(issueUpdateCalls).toHaveLength(1);
+    const promptCallOrder = controlPlaneFetch.mock.invocationCallOrder.find((_callOrder, index) => {
+      return controlPlaneFetch.mock.calls[index]?.[0] === "https://internal/sessions/sess-1/prompt";
+    });
+    const moveCallOrder = linearFetch.mock.invocationCallOrder[
+      linearFetch.mock.calls.findIndex(([, init]) =>
+        String(init?.body).includes("mutation MoveIssueToStarted")
+      )
+    ];
+    expect(moveCallOrder).toBeGreaterThan(promptCallOrder ?? 0);
     expect(controlPlaneFetch).toHaveBeenCalledWith(
       "https://internal/sessions",
       expect.objectContaining({ method: "POST" })
@@ -325,6 +345,26 @@ describe("handleAgentSessionEvent started-state behavior", () => {
       "https://internal/sessions",
       expect.objectContaining({ method: "POST" })
     );
+    expect(controlPlaneFetch).toHaveBeenCalledWith(
+      "https://internal/sessions/sess-1/prompt",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("does not move the issue to started if prompt delivery fails", async () => {
+    const { env, controlPlaneFetch } = createEnv({
+      projectMapping: { "project-1": { owner: "acme", name: "platform" } },
+      failPrompt: true,
+    });
+    const linearFetch = createLinearFetch({ currentStateType: "backlog" });
+    globalThis.fetch = linearFetch as typeof globalThis.fetch;
+
+    await handleAgentSessionEvent(createCreatedWebhook(), env, "trace-4");
+
+    const issueUpdateCalls = linearFetch.mock.calls.filter(([, init]) =>
+      String(init?.body).includes("mutation MoveIssueToStarted")
+    );
+    expect(issueUpdateCalls).toHaveLength(0);
     expect(controlPlaneFetch).toHaveBeenCalledWith(
       "https://internal/sessions/sess-1/prompt",
       expect.objectContaining({ method: "POST" })
