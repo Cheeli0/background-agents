@@ -38,9 +38,41 @@ import type { Session } from "@open-inspect/shared";
 export type SessionItem = Session;
 
 type SessionsResponse = { sessions: SessionItem[] };
+type RepositoryInfo = {
+  key: string;
+  label: string;
+};
+type RepositorySessionGroup = {
+  repository: RepositoryInfo;
+  activeSessions: SessionItem[];
+  inactiveSessions: SessionItem[];
+};
 
 export const MOBILE_LONG_PRESS_MS = 450;
 const MOBILE_LONG_PRESS_MOVE_THRESHOLD_PX = 10;
+const UNKNOWN_REPOSITORY_LABEL = "Unknown repository";
+
+function getSessionRepositoryInfo(
+  session: Pick<SessionItem, "repoOwner" | "repoName">
+): RepositoryInfo {
+  const repoOwner = session.repoOwner?.trim() ?? "";
+  const repoName = session.repoName?.trim() ?? "";
+
+  if (repoOwner && repoName) {
+    const fullName = `${repoOwner}/${repoName}`;
+    return { key: fullName.toLowerCase(), label: fullName };
+  }
+
+  if (repoOwner) {
+    return { key: `owner:${repoOwner.toLowerCase()}`, label: repoOwner };
+  }
+
+  if (repoName) {
+    return { key: `repo:${repoName.toLowerCase()}`, label: repoName };
+  }
+
+  return { key: "unknown", label: UNKNOWN_REPOSITORY_LABEL };
+}
 
 export function buildSessionHref(session: SessionItem) {
   return {
@@ -159,15 +191,15 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   );
 
   // Sort sessions by updatedAt (most recent first), filter by search query,
-  // and group children under their parent sessions
-  const { activeSessions, inactiveSessions, childrenMap } = useMemo(() => {
+  // and group children under their parent sessions before grouping by repository.
+  const { repositoryGroups, childrenMap } = useMemo(() => {
     const filtered = sessions
       .filter((session) => session.status !== "archived")
       .filter((session) => {
         if (!searchQuery) return true;
         const query = searchQuery.toLowerCase();
         const title = session.title?.toLowerCase() || "";
-        const repo = `${session.repoOwner}/${session.repoName}`.toLowerCase();
+        const repo = getSessionRepositoryInfo(session).label.toLowerCase();
         return title.includes(query) || repo.includes(query);
       });
 
@@ -198,19 +230,25 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
       }
     }
 
-    const active: SessionItem[] = [];
-    const inactive: SessionItem[] = [];
+    const repositoryGroupsMap = new Map<string, RepositorySessionGroup>();
 
     for (const session of topLevel) {
+      const repository = getSessionRepositoryInfo(session);
+      const existingGroup = repositoryGroupsMap.get(repository.key) ?? {
+        repository,
+        activeSessions: [],
+        inactiveSessions: [],
+      };
       const timestamp = session.updatedAt || session.createdAt;
       if (isInactiveSession(timestamp)) {
-        inactive.push(session);
+        existingGroup.inactiveSessions.push(session);
       } else {
-        active.push(session);
+        existingGroup.activeSessions.push(session);
       }
+      repositoryGroupsMap.set(repository.key, existingGroup);
     }
 
-    return { activeSessions: active, inactiveSessions: inactive, childrenMap: children };
+    return { repositoryGroups: [...repositoryGroupsMap.values()], childrenMap: children };
   }, [sessions, searchQuery]);
 
   const currentSessionId = pathname?.startsWith("/session/") ? pathname.split("/")[2] : null;
@@ -298,27 +336,20 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
           <div className="px-4 py-8 text-center text-sm text-muted-foreground">No sessions yet</div>
         ) : (
           <>
-            {/* Active Sessions */}
-            {activeSessions.map((session) => (
-              <SessionWithChildren
-                key={session.id}
-                session={session}
-                childSessions={childrenMap.get(session.id)}
-                currentSessionId={currentSessionId}
-                isMobile={isMobile}
-                onSessionSelect={onSessionSelect}
-              />
-            ))}
-
-            {/* Inactive Divider */}
-            {inactiveSessions.length > 0 && (
-              <>
-                <div className="px-4 py-2 mt-2">
-                  <span className="text-xs font-medium text-secondary-foreground uppercase tracking-wide">
-                    Inactive
+            {repositoryGroups.map((group) => (
+              <section key={group.repository.key} className="py-1">
+                <div
+                  role="heading"
+                  aria-level={2}
+                  aria-label={`Repository ${group.repository.label}`}
+                  className="px-4 py-2"
+                >
+                  <span className="text-[11px] font-medium text-secondary-foreground uppercase tracking-[0.08em]">
+                    {group.repository.label}
                   </span>
                 </div>
-                {inactiveSessions.map((session) => (
+
+                {group.activeSessions.map((session) => (
                   <SessionWithChildren
                     key={session.id}
                     session={session}
@@ -328,8 +359,28 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
                     onSessionSelect={onSessionSelect}
                   />
                 ))}
-              </>
-            )}
+
+                {group.inactiveSessions.length > 0 && (
+                  <>
+                    <div className="px-4 py-1.5">
+                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.1em]">
+                        Inactive
+                      </span>
+                    </div>
+                    {group.inactiveSessions.map((session) => (
+                      <SessionWithChildren
+                        key={session.id}
+                        session={session}
+                        childSessions={childrenMap.get(session.id)}
+                        currentSessionId={currentSessionId}
+                        isMobile={isMobile}
+                        onSessionSelect={onSessionSelect}
+                      />
+                    ))}
+                  </>
+                )}
+              </section>
+            ))}
 
             {loadingMore && (
               <div className="flex justify-center py-3">
@@ -438,8 +489,9 @@ function SessionListItem({
 }) {
   const timestamp = session.updatedAt || session.createdAt;
   const relativeTime = formatRelativeTime(timestamp);
-  const displayTitle = session.title || `${session.repoOwner}/${session.repoName}`;
-  const repoInfo = `${session.repoOwner}/${session.repoName}`;
+  const repository = getSessionRepositoryInfo(session);
+  const displayTitle = session.title || repository.label;
+  const repoInfo = repository.label;
   // Orphan child (parent filtered out) — show a subtle badge
   const isOrphanChild = session.parentSessionId && session.spawnSource === "agent";
   const [isRenaming, setIsRenaming] = useState(false);
