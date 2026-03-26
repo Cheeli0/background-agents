@@ -51,6 +51,7 @@ vi.mock("./shared", async (importOriginal) => {
     ...actual,
     createRouteSourceControlProvider: vi.fn(() => ({
       checkRepositoryAccess: vi.fn(),
+      getPullRequestChecks: vi.fn(),
     })),
     resolveInstalledRepo: vi.fn().mockResolvedValue({
       repoId: 12345,

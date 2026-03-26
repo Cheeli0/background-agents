@@ -7,9 +7,26 @@ export interface SessionAssociatedPr {
   title: string;
   url: string;
   status: "open" | "merged" | "closed" | "draft";
+  checks: SessionPullRequestChecks | null;
+}
+
+export interface SessionArtifactPr {
+  number: number;
+  url: string;
+  status: "open" | "merged" | "closed" | "draft";
+  checks: SessionPullRequestChecks | null;
+}
+
+export interface SessionPullRequestChecks {
+  state: "success" | "failure" | "pending";
+  totalCount: number;
+  successfulCount: number;
+  failedCount: number;
+  pendingCount: number;
 }
 
 interface SessionAssociatedPrResponse {
+  artifactPullRequest: SessionArtifactPr | null;
   pullRequest: SessionAssociatedPr | null;
 }
 
@@ -32,6 +49,7 @@ export function useSessionAssociatedPr(sessionId: string | null) {
   );
 
   return {
+    artifactPr: data?.artifactPullRequest ?? null,
     associatedPr: data?.pullRequest ?? null,
     error,
     isLoading,

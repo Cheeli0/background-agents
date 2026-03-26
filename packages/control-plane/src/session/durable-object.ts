@@ -421,6 +421,7 @@ export class SessionDO extends DurableObject<Env> {
         broadcast: (message) => this.broadcast(message),
         linearBot: this.env.LINEAR_BOT,
         internalCallbackSecret: this.env.INTERNAL_CALLBACK_SECRET,
+        sourceControlProvider: this.sourceControlProvider,
       });
     }
 

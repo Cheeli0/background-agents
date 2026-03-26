@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ParticipantRow, SandboxRow, SessionRow } from "../../types";
+import type { ArtifactRow, ParticipantRow, SandboxRow, SessionRow } from "../../types";
 import { createSessionLifecycleHandler } from "./session-lifecycle.handler";
 import { getValidModelOrDefault } from "../../../utils/models";
 
@@ -77,6 +77,7 @@ function createHandler() {
     createParticipant: vi.fn(),
     updateSessionTitle: vi.fn(),
     getLatestLinearCallbackContext: vi.fn(),
+    listArtifacts: vi.fn<() => ArtifactRow[]>(() => []),
   };
   const getDurableObjectId = vi.fn(() => "session-do-id");
   const encryptToken = vi.fn();
@@ -102,6 +103,9 @@ function createHandler() {
   const updateSandboxStatus = vi.fn();
   const broadcast = vi.fn();
   const linearBot = { fetch: vi.fn() };
+  const sourceControlProvider = {
+    getPullRequestChecks: vi.fn(),
+  };
 
   const handler = createSessionLifecycleHandler({
     repository,
@@ -125,6 +129,7 @@ function createHandler() {
     broadcast,
     linearBot,
     internalCallbackSecret: "internal-secret",
+    sourceControlProvider: sourceControlProvider as never,
   });
 
   return {
@@ -148,6 +153,7 @@ function createHandler() {
     updateSandboxStatus,
     broadcast,
     linearBot,
+    sourceControlProvider,
   };
 }
 
@@ -275,7 +281,8 @@ describe("createSessionLifecycleHandler", () => {
   });
 
   it("returns the first associated PR for linear sessions", async () => {
-    const { handler, repository, linearBot } = createHandler();
+    const { handler, repository, linearBot, getSession, sourceControlProvider } = createHandler();
+    getSession.mockReturnValue(createSession());
     repository.getLatestLinearCallbackContext.mockReturnValue({
       callback_context: JSON.stringify({
         agentSessionId: "agent-session-1",
@@ -297,16 +304,31 @@ describe("createSessionLifecycleHandler", () => {
         { status: 200, headers: { "Content-Type": "application/json" } }
       )
     );
+    sourceControlProvider.getPullRequestChecks.mockResolvedValue({
+      state: "pending",
+      totalCount: 3,
+      successfulCount: 1,
+      failedCount: 0,
+      pendingCount: 2,
+    });
 
     const response = await handler.getAssociatedPr();
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
+      artifactPullRequest: null,
       pullRequest: {
         number: 42,
         title: "Display associated PR",
         url: "https://github.com/acme/repo/pull/42",
         status: "open",
+        checks: {
+          state: "pending",
+          totalCount: 3,
+          successfulCount: 1,
+          failedCount: 0,
+          pendingCount: 2,
+        },
       },
     });
     expect(linearBot.fetch).toHaveBeenCalledWith(
@@ -317,6 +339,11 @@ describe("createSessionLifecycleHandler", () => {
         }),
       })
     );
+    expect(sourceControlProvider.getPullRequestChecks).toHaveBeenCalledWith({
+      owner: "acme",
+      name: "repo",
+      pullRequestNumber: 42,
+    });
   });
 
   it("returns null when no linear callback context exists", async () => {
@@ -326,7 +353,7 @@ describe("createSessionLifecycleHandler", () => {
     const response = await handler.getAssociatedPr();
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ pullRequest: null });
+    expect(await response.json()).toEqual({ artifactPullRequest: null, pullRequest: null });
     expect(linearBot.fetch).not.toHaveBeenCalled();
   });
 
@@ -343,10 +370,51 @@ describe("createSessionLifecycleHandler", () => {
     const response = await handler.getAssociatedPr();
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ pullRequest: null });
+    expect(await response.json()).toEqual({ artifactPullRequest: null, pullRequest: null });
     expect(log.warn).toHaveBeenCalledWith("Failed to fetch associated Linear pull requests", {
       agent_session_id: "agent-session-1",
       error: "service unavailable",
+    });
+  });
+
+  it("returns PR artifact checks when a session PR exists", async () => {
+    const { handler, repository, getSession, sourceControlProvider } = createHandler();
+    getSession.mockReturnValue(createSession());
+    repository.getLatestLinearCallbackContext.mockReturnValue(null);
+    repository.listArtifacts.mockReturnValue([
+      {
+        id: "artifact-1",
+        type: "pr",
+        url: "https://github.com/acme/repo/pull/7",
+        metadata: JSON.stringify({ number: 7, state: "open" }),
+        created_at: 100,
+      },
+    ]);
+    sourceControlProvider.getPullRequestChecks.mockResolvedValue({
+      state: "success",
+      totalCount: 4,
+      successfulCount: 4,
+      failedCount: 0,
+      pendingCount: 0,
+    });
+
+    const response = await handler.getAssociatedPr();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      artifactPullRequest: {
+        number: 7,
+        url: "https://github.com/acme/repo/pull/7",
+        status: "open",
+        checks: {
+          state: "success",
+          totalCount: 4,
+          successfulCount: 4,
+          failedCount: 0,
+          pendingCount: 0,
+        },
+      },
+      pullRequest: null,
     });
   });
 

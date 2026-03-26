@@ -49,6 +49,7 @@ function createMockProvider() {
   return {
     name: "github",
     checkRepositoryAccess: vi.fn(),
+    getPullRequestChecks: vi.fn(),
     listRepositories: vi.fn(),
     generatePushAuth: vi.fn(async () => ({ authType: "app", token: "app-token" as const })),
     getRepository: vi.fn(async () => ({

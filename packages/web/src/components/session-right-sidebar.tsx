@@ -33,7 +33,7 @@ export function SessionRightSidebarContent({
 }: SessionRightSidebarContentProps) {
   const tasks = useMemo(() => extractLatestTasks(events), [events]);
   const filesChanged = useMemo(() => extractChangedFiles(events), [events]);
-  const { associatedPr } = useSessionAssociatedPr(sessionState?.id ?? null);
+  const { artifactPr, associatedPr } = useSessionAssociatedPr(sessionState?.id ?? null);
 
   if (!sessionState) {
     return (
@@ -66,6 +66,7 @@ export function SessionRightSidebarContent({
           repoName={sessionState.repoName}
           artifacts={artifacts}
           parentSessionId={sessionState.parentSessionId}
+          artifactPr={artifactPr}
           associatedPr={associatedPr}
         />
       </div>
