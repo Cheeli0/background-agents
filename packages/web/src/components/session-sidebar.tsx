@@ -87,7 +87,7 @@ function associatedPrStatusClassName(status: AssociatedPrStatus) {
     case "merged":
       return "text-[#8250df]";
     case "closed":
-      return "text-muted-foreground";
+      return "text-[#cf222e]";
   }
 }
 
@@ -98,20 +98,27 @@ function sessionAssociatedPrStatusKey(sessionId: string) {
 async function fetchAssociatedPrStatus([url]: ReturnType<
   typeof sessionAssociatedPrStatusKey
 >): Promise<AssociatedPrStatus | null> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch associated PR: ${response.status}`);
-  }
+  try {
+    const response = await fetch(url);
+    if (response.ok) {
+      const data = (await response.json()) as {
+        pullRequest?: {
+          status?: "open" | "merged" | "closed" | "draft";
+        } | null;
+        artifactPullRequest?: {
+          status?: "open" | "merged" | "closed" | "draft";
+        } | null;
+      };
 
-  const data = (await response.json()) as {
-    pullRequest?: {
-      status?: "open" | "merged" | "closed" | "draft";
-    } | null;
-  };
-
-  const status = data.pullRequest?.status;
-  if (status === "open" || status === "merged" || status === "closed") {
-    return status;
+      const status = data.pullRequest?.status ?? data.artifactPullRequest?.status;
+      if (status === "open" || status === "merged" || status === "closed") {
+        return status;
+      }
+    } else {
+      console.warn(`Failed to fetch associated PR: ${response.status}`);
+    }
+  } catch (error) {
+    console.warn("Failed to fetch associated PR:", error);
   }
 
   const artifactsResponse = await fetch(url.replace("/associated-pr", "/artifacts"));
