@@ -167,6 +167,20 @@ export interface CreatePullRequestResult {
   targetBranch: string;
 }
 
+export interface GetPullRequestChecksConfig {
+  owner: string;
+  name: string;
+  pullRequestNumber: number;
+}
+
+export interface PullRequestChecks {
+  state: "success" | "failure" | "pending";
+  totalCount: number;
+  successfulCount: number;
+  failedCount: number;
+  pendingCount: number;
+}
+
 /**
  * Source control provider interface.
  *
@@ -253,6 +267,11 @@ export interface SourceControlProvider {
    * @throws SourceControlProviderError on configuration errors
    */
   checkRepositoryAccess(config: GetRepositoryConfig): Promise<RepositoryAccessResult | null>;
+
+  /**
+   * Get the aggregate CI check status for a pull request.
+   */
+  getPullRequestChecks(config: GetPullRequestChecksConfig): Promise<PullRequestChecks | null>;
 
   /**
    * List all repositories accessible to this deployment's app-level credentials.

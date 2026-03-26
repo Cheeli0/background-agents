@@ -6,6 +6,11 @@ import { formatModelName, formatProviderName, truncateBranch, copyToClipboard } 
 import { formatRelativeTime } from "@/lib/time";
 import { getSafeExternalUrl } from "@/lib/urls";
 import type { Artifact } from "@/types/session";
+import type {
+  SessionArtifactPr,
+  SessionAssociatedPr,
+  SessionPullRequestChecks,
+} from "@/hooks/use-session-associated-pr";
 import {
   ClockIcon,
   SparkleIcon,
@@ -15,6 +20,8 @@ import {
   BranchIcon,
   CopyIcon,
   CheckIcon,
+  CheckCircleIcon,
+  ErrorIcon,
   LinkIcon,
 } from "@/components/ui/icons";
 import { Badge, prBadgeVariant } from "@/components/ui/badge";
@@ -29,12 +36,43 @@ interface MetadataSectionProps {
   repoName?: string;
   artifacts?: Artifact[];
   parentSessionId?: string | null;
-  associatedPr?: {
-    number: number;
-    title: string;
-    url: string;
-    status: "open" | "merged" | "closed" | "draft";
-  } | null;
+  artifactPr?: SessionArtifactPr | null;
+  associatedPr?: SessionAssociatedPr | null;
+}
+
+function getChecksLabel(checks: SessionPullRequestChecks): string {
+  if (checks.state === "failure") {
+    return `${checks.failedCount}/${checks.totalCount} checks failing`;
+  }
+  if (checks.state === "pending") {
+    return `${checks.pendingCount}/${checks.totalCount} checks pending`;
+  }
+  return `${checks.successfulCount}/${checks.totalCount} checks passing`;
+}
+
+function PullRequestChecksIndicator({
+  checks,
+}: {
+  checks: SessionPullRequestChecks | null | undefined;
+}) {
+  if (!checks) {
+    return null;
+  }
+
+  const label = getChecksLabel(checks);
+  const className = "w-4 h-4";
+
+  return (
+    <span className="inline-flex items-center" aria-label={label} title={label}>
+      {checks.state === "success" ? (
+        <CheckCircleIcon className={`${className} text-success`} />
+      ) : checks.state === "failure" ? (
+        <ErrorIcon className={`${className} text-red-600`} />
+      ) : (
+        <ClockIcon className={`${className} text-amber-500`} />
+      )}
+    </span>
+  );
 }
 
 export function MetadataSection({
@@ -47,6 +85,7 @@ export function MetadataSection({
   repoName,
   artifacts = [],
   parentSessionId,
+  artifactPr,
   associatedPr,
 }: MetadataSectionProps) {
   const [copied, setCopied] = useState(false);
@@ -145,6 +184,7 @@ export function MetadataSection({
               {prState}
             </Badge>
           )}
+          <PullRequestChecksIndicator checks={artifactPr?.checks} />
         </div>
       )}
 
@@ -163,6 +203,7 @@ export function MetadataSection({
           <Badge variant={prBadgeVariant(associatedPrLink.status)} className="capitalize">
             {associatedPrLink.status}
           </Badge>
+          <PullRequestChecksIndicator checks={associatedPr?.checks} />
         </div>
       )}
 

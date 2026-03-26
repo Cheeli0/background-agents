@@ -11,6 +11,8 @@ export type {
   SourceControlProviderName,
   SourceControlAuthContext,
   GitPushAuthContext,
+  GetPullRequestChecksConfig,
+  PullRequestChecks,
   BuildManualPullRequestUrlConfig,
   BuildGitPushSpecConfig,
   GitPushSpec,
