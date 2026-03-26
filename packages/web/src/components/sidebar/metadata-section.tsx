@@ -11,6 +11,7 @@ import type {
   SessionAssociatedPr,
   SessionPullRequestChecks,
 } from "@/hooks/use-session-associated-pr";
+import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
 import { PullRequestStatusIcon } from "@/components/pull-request-status-icon";
 import {
   ClockIcon,
@@ -27,6 +28,7 @@ import {
 import { Badge, prBadgeVariant } from "@/components/ui/badge";
 
 interface MetadataSectionProps {
+  sessionId?: string;
   createdAt: number;
   model?: string;
   reasoningEffort?: string;
@@ -76,6 +78,7 @@ function PullRequestChecksIndicator({
 }
 
 export function MetadataSection({
+  sessionId,
   createdAt,
   model,
   reasoningEffort,
@@ -116,6 +119,7 @@ export function MetadataSection({
           url: associatedPrUrl,
         }
       : null;
+  const sidebarPrStatus = useSessionPrStatus(sessionId ?? null);
   const branchUrl =
     branchName && repoOwner && repoName
       ? `https://github.com/${repoOwner}/${repoName}/tree/${encodeURIComponent(branchName)}`
@@ -166,7 +170,10 @@ export function MetadataSection({
       {/* PR Badge */}
       {(prNumber || prUrl) && (
         <div className="flex items-center gap-2 text-sm">
-          <PullRequestStatusIcon status={prState ?? "open"} className="w-4 h-4" />
+          <PullRequestStatusIcon
+            status={sidebarPrStatus ?? prState ?? "open"}
+            className="w-4 h-4"
+          />
           {prUrl ? (
             <a
               href={prUrl}
@@ -190,7 +197,10 @@ export function MetadataSection({
 
       {associatedPrLink && (
         <div className="flex items-center gap-2 text-sm">
-          <PullRequestStatusIcon status={associatedPrLink.status} className="w-4 h-4" />
+          <PullRequestStatusIcon
+            status={sidebarPrStatus ?? associatedPrLink.status}
+            className="w-4 h-4"
+          />
           <a
             href={associatedPrLink.url}
             target="_blank"

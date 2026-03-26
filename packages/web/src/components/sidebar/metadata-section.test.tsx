@@ -4,12 +4,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
+import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
 import { MetadataSection } from "./metadata-section";
 
 expect.extend(matchers);
 
+vi.mock("@/hooks/use-session-pr-status", () => ({
+  useSessionPrStatus: vi.fn(() => null),
+}));
+
 afterEach(() => {
   cleanup();
+  vi.mocked(useSessionPrStatus).mockReset();
+  vi.mocked(useSessionPrStatus).mockReturnValue(null);
 });
 
 vi.mock("next/link", () => ({
@@ -22,8 +29,11 @@ vi.mock("next/link", () => ({
 
 describe("MetadataSection", () => {
   it("renders an associated pull request link when available", () => {
+    vi.mocked(useSessionPrStatus).mockReturnValue("merged");
+
     render(
       <MetadataSection
+        sessionId="session-42"
         createdAt={Date.now()}
         baseBranch="main"
         repoOwner="acme"
@@ -46,8 +56,8 @@ describe("MetadataSection", () => {
 
     const link = screen.getByRole("link", { name: /associated pr #42/i });
     expect(link).toHaveAttribute("href", "https://github.com/acme/repo/pull/42");
-    const statusIcon = screen.getByLabelText("PR open");
-    expect(statusIcon).toHaveClass("text-success");
+    const statusIcon = screen.getByLabelText("PR merged");
+    expect(statusIcon).toHaveClass("text-[#8250df]");
     expect(link.parentElement?.firstElementChild).toBe(statusIcon);
     expect(screen.getByText("open")).toBeInTheDocument();
     expect(screen.getByLabelText("2/3 checks pending")).toBeInTheDocument();

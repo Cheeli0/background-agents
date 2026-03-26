@@ -57,6 +57,7 @@ export function SessionRightSidebarContent({
       {/* Metadata */}
       <div className="px-4 py-4 border-b border-border-muted">
         <MetadataSection
+          sessionId={sessionState.id}
           createdAt={sessionState.createdAt}
           model={sessionState.model}
           reasoningEffort={sessionState.reasoningEffort}
