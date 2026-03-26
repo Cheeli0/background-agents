@@ -96,6 +96,15 @@ describe("MetadataSection", () => {
     expect(screen.getByText("Provider: OpenAI")).toBeInTheDocument();
   });
 
+  it("shows Z.AI as the provider for GLM models", () => {
+    render(
+      <MetadataSection createdAt={Date.now()} baseBranch="main" model="zai-coding-plan/glm-5" />
+    );
+
+    expect(screen.getByText("GLM 5")).toBeInTheDocument();
+    expect(screen.getByText("Provider: Z.AI")).toBeInTheDocument();
+  });
+
   it("shows unknown when provider cannot be determined", () => {
     render(
       <MetadataSection

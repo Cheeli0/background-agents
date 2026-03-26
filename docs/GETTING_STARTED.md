@@ -146,6 +146,8 @@ Create an R2 API Token:
 
 > **Want to use your OpenAI ChatGPT subscription?** See [Using OpenAI Models](OPENAI_MODELS.md) for
 > setup instructions (can be configured after deployment).
+>
+> **Want to use Z.AI GLM models?** See [Using Z.AI Models](ZAI_MODELS.md) for the API-key setup.
 
 ---
 
@@ -774,3 +776,4 @@ For details on the infrastructure components, see:
 - [terraform/README.md](../terraform/README.md) - Terraform module documentation
 - [README.md](../README.md) - System architecture overview
 - [OPENAI_MODELS.md](OPENAI_MODELS.md) - Configuring OpenAI Codex models
+- [ZAI_MODELS.md](ZAI_MODELS.md) - Configuring Z.AI Coding Plan models

@@ -31,6 +31,13 @@ const GITHUB_COPILOT_MODELS = [
   "github-copilot/gpt-5.4-mini",
 ] as const;
 
+const ZAI_CODING_PLAN_MODELS = [
+  "zai-coding-plan/glm-5",
+  "zai-coding-plan/glm-5-turbo",
+  "zai-coding-plan/glm-4.7",
+  "zai-coding-plan/glm-4.5-air",
+] as const;
+
 /**
  * Valid model names supported by the system.
  * All models use "provider/model" format.
@@ -50,6 +57,7 @@ export const VALID_MODELS = [
   "opencode/kimi-k2.5",
   "opencode/minimax-m2.5",
   "opencode/glm-5",
+  ...ZAI_CODING_PLAN_MODELS,
 ] as const;
 
 export type ValidModel = (typeof VALID_MODELS)[number];
@@ -301,11 +309,36 @@ export const MODEL_OPTIONS: ModelCategory[] = [
     ],
   },
   {
+    category: "Z.AI",
+    models: [
+      {
+        id: "zai-coding-plan/glm-5",
+        name: "GLM 5",
+        description: "Flagship agentic engineering model",
+      },
+      {
+        id: "zai-coding-plan/glm-5-turbo",
+        name: "GLM 5 Turbo",
+        description: "Optimized for fast coding workflows",
+      },
+      {
+        id: "zai-coding-plan/glm-4.7",
+        name: "GLM 4.7",
+        description: "Strong coding model with improved aesthetics",
+      },
+      {
+        id: "zai-coding-plan/glm-4.5-air",
+        name: "GLM 4.5 Air",
+        description: "Lightweight coding model with fast responses",
+      },
+    ],
+  },
+  {
     category: "OpenCode Zen",
     models: [
       { id: "opencode/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
       { id: "opencode/minimax-m2.5", name: "MiniMax M2.5", description: "MiniMax" },
-      { id: "opencode/glm-5", name: "GLM 5", description: "Z.ai 744B MoE" },
+      { id: "opencode/glm-5", name: "GLM 5", description: "Z.ai via OpenCode Zen" },
     ],
   },
 ];
@@ -334,6 +367,10 @@ export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
   "github-copilot/gpt-5-mini",
   "github-copilot/gpt-5.3-codex",
   "github-copilot/gpt-5.4",
+  "zai-coding-plan/glm-5",
+  "zai-coding-plan/glm-5-turbo",
+  "zai-coding-plan/glm-4.7",
+  "zai-coding-plan/glm-4.5-air",
 ];
 
 // === Normalization ===
@@ -425,7 +462,5 @@ export function getValidModelOrDefault(model: string | undefined | null): ValidM
 }
 
 export function isSupportedClassifierModel(model: string): model is SupportedClassifierModel {
-  return SUPPORTED_CLASSIFIER_MODELS.includes(
-    normalizeModelId(model) as SupportedClassifierModel
-  );
+  return SUPPORTED_CLASSIFIER_MODELS.includes(normalizeModelId(model) as SupportedClassifierModel);
 }

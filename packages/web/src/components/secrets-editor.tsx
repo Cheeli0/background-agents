@@ -13,6 +13,7 @@ const MAX_KEY_LENGTH = 256;
 const MAX_VALUE_SIZE = 16384;
 const MAX_TOTAL_VALUE_SIZE = 65536;
 const MAX_SECRETS_PER_SCOPE = 50;
+const ZAI_API_KEY_SECRET = "ZAI_API_KEY";
 
 const RESERVED_KEYS = new Set([
   "PYTHONUNBUFFERED",
@@ -336,6 +337,12 @@ export function SecretsEditor({
     ? "Secrets apply to all repositories."
     : `Values are never shown after save. Secrets apply to ${repoLabel || "the selected repo"}.`;
 
+  const helperText =
+    "Keys are automatically uppercased. Paste a `.env` block into either field to import.";
+
+  const zaiHint =
+    "For Z.AI models, add ZAI_API_KEY only. OPENCODE_AUTH_JSON also works if you prefer the full provider JSON.";
+
   return (
     <div className="mt-4 border border-border bg-background p-4">
       <div className="flex items-center justify-between mb-3">
@@ -475,10 +482,12 @@ export function SecretsEditor({
             >
               {saving ? "Saving..." : "Save secrets"}
             </button>
-            <span className="text-[11px] text-muted-foreground">
-              Keys are automatically uppercased. Paste a `.env` block into either field to import.
-            </span>
+            <span className="text-[11px] text-muted-foreground">{helperText}</span>
           </div>
+
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Tip: <span className="font-mono">{ZAI_API_KEY_SECRET}</span>. {zaiHint}
+          </p>
         </>
       )}
     </div>

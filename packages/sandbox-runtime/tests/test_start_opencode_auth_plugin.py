@@ -95,3 +95,24 @@ async def test_skips_codex_plugin_for_github_copilot_provider(tmp_path):
     assert not any(
         target.endswith(".opencode/plugins/codex-auth-plugin.ts") for target in copy_targets
     )
+
+
+@pytest.mark.asyncio
+async def test_uses_zai_coding_plan_provider_name_in_config(tmp_path):
+    supervisor = _make_supervisor({"provider": "zai-coding-plan", "model": "glm-5"})
+    supervisor.workspace_path = tmp_path
+    supervisor.repo_path = tmp_path / "missing-repo"
+    supervisor._setup_opencode_auth = MagicMock()
+    supervisor._install_tools = MagicMock()
+    supervisor._wait_for_health = AsyncMock()
+
+    with patch(
+        "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+        new=AsyncMock(return_value=_fake_process()),
+    ) as exec_mock:
+        await supervisor.start_opencode()
+
+    assert exec_mock.await_args is not None
+    env = exec_mock.await_args.kwargs["env"]
+    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    assert config["model"] == "zai-coding-plan/glm-5"

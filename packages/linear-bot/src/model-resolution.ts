@@ -37,6 +37,10 @@ const MODEL_LABEL_MAP: Record<string, string> = {
   "gpt-5.4": "openai/gpt-5.4",
   "gpt-5.2-codex": "openai/gpt-5.2-codex",
   "gpt-5.3-codex": "openai/gpt-5.3-codex",
+  "glm-5": "zai-coding-plan/glm-5",
+  "glm-5-turbo": "zai-coding-plan/glm-5-turbo",
+  "glm-4.7": "zai-coding-plan/glm-4.7",
+  "glm-4.5-air": "zai-coding-plan/glm-4.5-air",
 };
 
 /**
