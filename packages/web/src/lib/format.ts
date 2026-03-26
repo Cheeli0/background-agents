@@ -2,11 +2,7 @@
  * Utility functions for formatting display values
  */
 
-import {
-  MODEL_OPTIONS,
-  normalizeModelId,
-  type ModelDisplayInfo,
-} from "@open-inspect/shared";
+import { MODEL_OPTIONS, normalizeModelId, type ModelDisplayInfo } from "@open-inspect/shared";
 
 // Build a lookup map once at module level
 const MODEL_DISPLAY_NAMES = new Map<string, string>(
@@ -41,8 +37,20 @@ function formatMultiplierNumber(multiplier: number): string {
     : multiplier.toFixed(2).replace(/\.?0+$/, "");
 }
 
+const MIN_PREMIUM_MULTIPLIER = 0;
+const MAX_PREMIUM_MULTIPLIER = 100;
+
+function isValidPremiumMultiplier(multiplier: number): boolean {
+  return (
+    Number.isFinite(multiplier) &&
+    multiplier >= MIN_PREMIUM_MULTIPLIER &&
+    multiplier <= MAX_PREMIUM_MULTIPLIER
+  );
+}
+
 export function formatPremiumMultiplierLabel(multiplier?: number): string | null {
   if (multiplier === undefined) return null;
+  if (!isValidPremiumMultiplier(multiplier)) return null;
   if (multiplier === 0) return "Free";
   return `Premium x${formatMultiplierNumber(multiplier)}`;
 }

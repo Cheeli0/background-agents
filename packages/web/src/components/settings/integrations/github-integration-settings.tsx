@@ -9,10 +9,12 @@ import {
   type EnrichedRepository,
   type GitHubBotSettings,
   type GitHubGlobalConfig,
+  type ModelCategory,
   type ValidModel,
 } from "@open-inspect/shared";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { IntegrationSettingsSkeleton } from "./integration-settings-skeleton";
+import { ModelOptionLabel } from "../model-option-label";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioCard } from "@/components/ui/form-controls";
@@ -102,7 +104,7 @@ export function GitHubIntegrationSettings() {
 
       <Section
         title="Repository Overrides"
-        description="Set model, reasoning, and custom instruction overrides for specific repositories."
+        description="Set model, reasoning, and custom instruction overrides for specific repositories. Premium badges show Copilot request multipliers."
       >
         <RepoOverridesSection
           overrides={repoOverrides}
@@ -509,7 +511,7 @@ function RepoOverridesSection({
 }: {
   overrides: RepoSettingsEntry[];
   availableRepos: EnrichedRepository[];
-  enabledModelOptions: { category: string; models: { id: string; name: string }[] }[];
+  enabledModelOptions: ModelCategory[];
 }) {
   const [addingRepo, setAddingRepo] = useState("");
 
@@ -586,7 +588,7 @@ function RepoOverrideRow({
   enabledModelOptions,
 }: {
   entry: RepoSettingsEntry;
-  enabledModelOptions: { category: string; models: { id: string; name: string }[] }[];
+  enabledModelOptions: ModelCategory[];
 }) {
   const [model, setModel] = useState(entry.settings.model ?? "");
   const [effort, setEffort] = useState(entry.settings.reasoningEffort ?? "");
@@ -703,7 +705,7 @@ function RepoOverrideRow({
                 <SelectLabel>{group.category}</SelectLabel>
                 {group.models.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
-                    {m.name}
+                    <ModelOptionLabel name={m.name} premiumMultiplier={m.premiumMultiplier} />
                   </SelectItem>
                 ))}
               </SelectGroup>
