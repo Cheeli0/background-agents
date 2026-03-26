@@ -11,11 +11,12 @@ import type {
   SessionAssociatedPr,
   SessionPullRequestChecks,
 } from "@/hooks/use-session-associated-pr";
+import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
+import { PullRequestStatusIcon } from "@/components/pull-request-status-icon";
 import {
   ClockIcon,
   SparkleIcon,
   GitHubIcon,
-  GitPrIcon,
   GitBranchWorkIcon,
   BranchIcon,
   CopyIcon,
@@ -24,9 +25,9 @@ import {
   ErrorIcon,
   LinkIcon,
 } from "@/components/ui/icons";
-import { Badge, prBadgeVariant } from "@/components/ui/badge";
 
 interface MetadataSectionProps {
+  sessionId?: string;
   createdAt: number;
   model?: string;
   reasoningEffort?: string;
@@ -76,6 +77,7 @@ function PullRequestChecksIndicator({
 }
 
 export function MetadataSection({
+  sessionId,
   createdAt,
   model,
   reasoningEffort,
@@ -116,6 +118,7 @@ export function MetadataSection({
           url: associatedPrUrl,
         }
       : null;
+  const sidebarPrStatus = useSessionPrStatus(sessionId ?? null);
   const branchUrl =
     branchName && repoOwner && repoName
       ? `https://github.com/${repoOwner}/${repoName}/tree/${encodeURIComponent(branchName)}`
@@ -166,7 +169,10 @@ export function MetadataSection({
       {/* PR Badge */}
       {(prNumber || prUrl) && (
         <div className="flex items-center gap-2 text-sm">
-          <GitPrIcon className="w-4 h-4 text-muted-foreground" />
+          <PullRequestStatusIcon
+            status={sidebarPrStatus ?? prState ?? "open"}
+            className="w-4 h-4"
+          />
           {prUrl ? (
             <a
               href={prUrl}
@@ -179,18 +185,16 @@ export function MetadataSection({
           ) : (
             <span className="text-foreground">#{prNumber}</span>
           )}
-          {prState && (
-            <Badge variant={prBadgeVariant(prState)} className="capitalize">
-              {prState}
-            </Badge>
-          )}
           <PullRequestChecksIndicator checks={artifactPr?.checks} />
         </div>
       )}
 
       {associatedPrLink && (
         <div className="flex items-center gap-2 text-sm">
-          <GitPrIcon className="w-4 h-4 text-muted-foreground" />
+          <PullRequestStatusIcon
+            status={sidebarPrStatus ?? associatedPrLink.status}
+            className="w-4 h-4"
+          />
           <a
             href={associatedPrLink.url}
             target="_blank"
@@ -200,9 +204,6 @@ export function MetadataSection({
           >
             Associated PR #{associatedPrLink.number}
           </a>
-          <Badge variant={prBadgeVariant(associatedPrLink.status)} className="capitalize">
-            {associatedPrLink.status}
-          </Badge>
           <PullRequestChecksIndicator checks={associatedPr?.checks} />
         </div>
       )}
