@@ -7,7 +7,7 @@ import type { Env } from "./types";
 export const OPENCODE_AUTH_JSON_SECRET = "OPENCODE_AUTH_JSON";
 export const ZAI_API_KEY_SECRET = "ZAI_API_KEY";
 const COPILOT_ACCESS_TOKEN_EXPIRY_BUFFER_MS = 60 * 1000;
-const ZAI_PROVIDER_IDS = ["zai", "zai-coding-plan"] as const;
+const ZAI_PROVIDER_IDS = ["zai-coding-plan", "zai"] as const;
 
 interface RepoSecretContext {
   repoId?: number | null;

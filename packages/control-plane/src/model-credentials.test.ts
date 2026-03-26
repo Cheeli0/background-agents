@@ -237,6 +237,23 @@ describe("model-credentials", () => {
       expect(result).toBeNull();
     });
 
+    it("prioritizes zai-coding-plan when both Z.AI provider entries exist", async () => {
+      mockGetGlobalSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
+          "zai-coding-plan": { type: "oauth", key: "not-api" },
+          zai: { type: "api", key: "zai-key" },
+        }),
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-4.7", {
+        repoId: null,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toContain("type 'api'");
+    });
+
     it("returns an error when Z.AI credentials are missing", async () => {
       const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-4.5-air", {
         repoId: 1,
