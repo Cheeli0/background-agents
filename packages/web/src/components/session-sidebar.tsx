@@ -10,6 +10,7 @@ import {
   buildSessionsPageKey,
   mergeUniqueSessions,
   SIDEBAR_SESSIONS_KEY,
+  type SidebarSession,
   type SessionListResponse,
 } from "@/lib/session-list";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
@@ -22,8 +23,10 @@ import {
   SettingsIcon,
   AutomationsIcon,
   BranchIcon,
+  CheckCircleIcon,
   ChevronRightIcon,
   FolderIcon,
+  KeyboardIcon,
 } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,9 +38,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Session } from "@open-inspect/shared";
-
-export type SessionItem = Session;
+export type SessionItem = SidebarSession;
 
 type SessionsResponse = { sessions: SessionItem[] };
 type RepositoryInfo = {
@@ -567,6 +568,8 @@ function SessionListItem({
   const longPressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const showCompletedIndicator = session.status === "completed";
+  const showWaitingForUserIndicator = session.status === "active" && session.isProcessing === false;
 
   useEffect(() => {
     if (!isRenaming) {
@@ -742,7 +745,27 @@ function SessionListItem({
           onTouchCancel={handleTouchEnd}
           className="block pr-8"
         >
-          <div className="truncate text-sm font-medium text-foreground">{displayTitle}</div>
+          <div className="flex items-center gap-1.5">
+            <div className="truncate text-sm font-medium text-foreground">{displayTitle}</div>
+            {showCompletedIndicator && (
+              <span
+                className="inline-flex items-center text-success"
+                aria-label="Session completed"
+                title="Session completed"
+              >
+                <CheckCircleIcon className="h-3.5 w-3.5" />
+              </span>
+            )}
+            {showWaitingForUserIndicator && (
+              <span
+                className="inline-flex items-center text-accent"
+                aria-label="Waiting for your input"
+                title="Waiting for your input"
+              >
+                <KeyboardIcon className="h-3.5 w-3.5" />
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
             <span>{relativeTime}</span>
             <span>·</span>
