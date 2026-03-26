@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { mutate } from "swr";
-import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
+import { SIDEBAR_SESSIONS_KEY, type SessionListResponse } from "@/lib/session-list";
 import type { Artifact, SandboxEvent } from "@/types/session";
 import type {
   ParticipantPresence,
@@ -251,6 +251,37 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttempts = useRef(0);
 
+  const patchSidebarSession = useCallback(
+    (
+      patch: (
+        session: SessionListResponse["sessions"][number]
+      ) => SessionListResponse["sessions"][number]
+    ) => {
+      mutate<SessionListResponse>(
+        SIDEBAR_SESSIONS_KEY,
+        (current) => {
+          if (!current) {
+            return current;
+          }
+
+          let updated = false;
+          const sessions = current.sessions.map((session) => {
+            if (session.id !== sessionId) {
+              return session;
+            }
+
+            updated = true;
+            return patch(session);
+          });
+
+          return updated ? { ...current, sessions } : current;
+        },
+        false
+      );
+    },
+    [sessionId]
+  );
+
   // Pagination state
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -329,6 +360,11 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
               // Backward-compatible default for older sessions that may omit this.
               isProcessing: data.state.isProcessing ?? false,
             });
+            patchSidebarSession((session) => ({
+              ...session,
+              status: data.state.status,
+              isProcessing: data.state.isProcessing ?? false,
+            }));
           }
           // Store the current user's participant ID and info for author attribution
           if (data.participantId) {
@@ -462,6 +498,14 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
 
         case "session_status":
           setSessionState((prev) => (prev ? { ...prev, status: data.status } : null));
+          patchSidebarSession((session) => ({
+            ...session,
+            status: data.status,
+            isProcessing:
+              data.status === "completed" || data.status === "cancelled" || data.status === "failed"
+                ? false
+                : session.isProcessing,
+          }));
           // Revalidate session list so status change is reflected in sidebar
           mutate(SIDEBAR_SESSIONS_KEY);
           break;
@@ -474,6 +518,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
 
         case "processing_status":
           setSessionState((prev) => (prev ? { ...prev, isProcessing: data.isProcessing } : null));
+          patchSidebarSession((session) => ({ ...session, isProcessing: data.isProcessing }));
           break;
 
         case "sandbox_error":
@@ -492,7 +537,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
           break;
       }
     },
-    [fetchArtifacts, processSandboxEvent, sessionId]
+    [fetchArtifacts, patchSidebarSession, processSandboxEvent, sessionId]
   );
 
   const fetchWsToken = useCallback(async (): Promise<string | null> => {
@@ -644,42 +689,46 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
     };
   }, [sessionId, handleMessage, fetchWsToken]);
 
-  const sendPrompt = useCallback((content: string, model?: string, reasoningEffort?: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.error("WebSocket not connected");
-      return;
-    }
+  const sendPrompt = useCallback(
+    (content: string, model?: string, reasoningEffort?: string) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        console.error("WebSocket not connected");
+        return;
+      }
 
-    if (!subscribedRef.current) {
-      console.error("Not subscribed yet, waiting...");
-      // Retry after a short delay
-      setTimeout(() => sendPrompt(content, model, reasoningEffort), 500);
-      return;
-    }
+      if (!subscribedRef.current) {
+        console.error("Not subscribed yet, waiting...");
+        // Retry after a short delay
+        setTimeout(() => sendPrompt(content, model, reasoningEffort), 500);
+        return;
+      }
 
-    console.log("Sending prompt", {
-      contentLength: content.length,
-      model,
-      reasoningEffort,
-    });
-
-    // Optimistically set isProcessing for immediate feedback
-    // Server will confirm with processing_status message
-    setSessionState((prev) => (prev ? { ...prev, isProcessing: true } : null));
-
-    // Note: user_message event is NOT inserted optimistically here.
-    // The server writes a user_message event to the events table and broadcasts it
-    // to all clients (including the sender), which handles both display and multiplayer.
-
-    wsRef.current.send(
-      JSON.stringify({
-        type: "prompt",
-        content,
-        model, // Include model for per-message model switching
+      console.log("Sending prompt", {
+        contentLength: content.length,
+        model,
         reasoningEffort,
-      })
-    );
-  }, []);
+      });
+
+      // Optimistically set isProcessing for immediate feedback
+      // Server will confirm with processing_status message
+      setSessionState((prev) => (prev ? { ...prev, isProcessing: true } : null));
+      patchSidebarSession((session) => ({ ...session, isProcessing: true }));
+
+      // Note: user_message event is NOT inserted optimistically here.
+      // The server writes a user_message event to the events table and broadcasts it
+      // to all clients (including the sender), which handles both display and multiplayer.
+
+      wsRef.current.send(
+        JSON.stringify({
+          type: "prompt",
+          content,
+          model, // Include model for per-message model switching
+          reasoningEffort,
+        })
+      );
+    },
+    [patchSidebarSession]
+  );
 
   const stopExecution = useCallback(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {

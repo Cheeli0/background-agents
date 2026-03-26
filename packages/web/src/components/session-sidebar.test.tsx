@@ -304,4 +304,44 @@ describe("SessionSidebar", () => {
     expect(groupButton).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
   });
+
+  it("shows completion and waiting-for-input icons for session states", async () => {
+    const sessions = [
+      {
+        ...createSession(1),
+        title: "Completed Session",
+        status: "completed",
+      },
+      {
+        ...createSession(2),
+        title: "Waiting Session",
+        status: "active",
+        isProcessing: false,
+      },
+      {
+        ...createSession(3),
+        title: "Running Session",
+        status: "active",
+        isProcessing: true,
+      },
+    ];
+
+    render(
+      <SWRConfig
+        value={{
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    await screen.findByText("Completed Session");
+
+    expect(screen.getByLabelText("Session completed")).toBeInTheDocument();
+    expect(screen.getByLabelText("Waiting for your input")).toBeInTheDocument();
+    expect(screen.queryAllByLabelText("Waiting for your input")).toHaveLength(1);
+  });
 });

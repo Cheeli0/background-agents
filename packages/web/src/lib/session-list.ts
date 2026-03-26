@@ -1,5 +1,9 @@
 import type { Session } from "@open-inspect/shared";
 
+export type SidebarSession = Session & {
+  isProcessing?: boolean;
+};
+
 export const SESSIONS_PAGE_SIZE = 50;
 export const SIDEBAR_SESSIONS_KEY = buildSessionsPageKey({
   excludeStatus: "archived",
@@ -8,7 +12,7 @@ export const SIDEBAR_SESSIONS_KEY = buildSessionsPageKey({
 });
 
 export interface SessionListResponse {
-  sessions: Session[];
+  sessions: SidebarSession[];
   hasMore: boolean;
 }
 
@@ -39,7 +43,7 @@ export function buildSessionsPageKey({
   return `/api/sessions?${searchParams.toString()}`;
 }
 
-export function mergeUniqueSessions(existing: Session[], incoming: Session[]) {
+export function mergeUniqueSessions(existing: SidebarSession[], incoming: SidebarSession[]) {
   const seen = new Set(existing.map((session) => session.id));
   const merged = [...existing];
 
