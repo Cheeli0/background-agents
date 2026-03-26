@@ -268,6 +268,107 @@ describe("GitHubSourceControlProvider", () => {
         pendingCount: 2,
       });
     });
+
+    it("falls back to unauthenticated checks lookup when app config is missing", async () => {
+      mockFetchWithTimeout
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ head: { sha: "xyz123" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ state: "success", total_count: 1, statuses: [{}] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              total_count: 1,
+              check_runs: [{ status: "completed", conclusion: "success" }],
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          )
+        );
+
+      const provider = new GitHubSourceControlProvider();
+      const result = await provider.getPullRequestChecks({
+        owner: "acme",
+        name: "web",
+        pullRequestNumber: 101,
+      });
+
+      expect(result).toEqual({
+        state: "success",
+        totalCount: 2,
+        successfulCount: 2,
+        failedCount: 0,
+        pendingCount: 0,
+      });
+
+      const firstCallHeaders = mockFetchWithTimeout.mock.calls[0]?.[1]?.headers as
+        | Record<string, string>
+        | undefined;
+      expect(firstCallHeaders?.Authorization).toBeUndefined();
+    });
+
+    it("falls back to unauthenticated checks lookup when app-auth lookup fails", async () => {
+      mockFetchWithTimeout
+        .mockResolvedValueOnce(new Response("forbidden", { status: 403 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ head: { sha: "xyz456" } }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ state: "success", total_count: 1, statuses: [{}] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              total_count: 1,
+              check_runs: [{ status: "completed", conclusion: "success" }],
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          )
+        );
+
+      const provider = new GitHubSourceControlProvider({ appConfig: fakeAppConfig });
+      const result = await provider.getPullRequestChecks({
+        owner: "acme",
+        name: "web",
+        pullRequestNumber: 102,
+      });
+
+      expect(result).toEqual({
+        state: "success",
+        totalCount: 2,
+        successfulCount: 2,
+        failedCount: 0,
+        pendingCount: 0,
+      });
+
+      const appCallHeaders = mockFetchWithTimeout.mock.calls[0]?.[1]?.headers as
+        | Record<string, string>
+        | undefined;
+      const fallbackCallHeaders = mockFetchWithTimeout.mock.calls[1]?.[1]?.headers as
+        | Record<string, string>
+        | undefined;
+      expect(appCallHeaders?.Authorization).toBe("Bearer installation-token");
+      expect(fallbackCallHeaders?.Authorization).toBeUndefined();
+    });
   });
 
   it("builds manual pull request URL with encoded components", () => {

@@ -40,10 +40,10 @@ function extractHttpStatus(error: unknown): number | undefined {
   return undefined;
 }
 
-function getGitHubApiHeaders(token: string, extraHeaders?: HeadersInit): HeadersInit {
+function getGitHubApiHeaders(token?: string, extraHeaders?: HeadersInit): HeadersInit {
   return {
     Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${token}`,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     "User-Agent": USER_AGENT,
     "X-GitHub-Api-Version": "2022-11-28",
     ...extraHeaders,
@@ -219,151 +219,158 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
   async getPullRequestChecks(
     config: GetPullRequestChecksConfig
   ): Promise<PullRequestChecks | null> {
-    if (!this.appConfig) {
-      throw new SourceControlProviderError(
-        "GitHub App not configured - cannot get pull request checks",
-        "permanent"
-      );
+    let appLookupError: unknown = null;
+
+    if (this.appConfig) {
+      try {
+        const token = await getCachedInstallationToken(
+          this.appConfig,
+          this.kvCache ? { REPOS_CACHE: this.kvCache } : undefined
+        );
+
+        return await this.fetchPullRequestChecks(config, token);
+      } catch (error) {
+        appLookupError = error;
+      }
     }
 
     try {
-      const token = await getCachedInstallationToken(
-        this.appConfig,
-        this.kvCache ? { REPOS_CACHE: this.kvCache } : undefined
-      );
+      // Public repositories can still be queried without app auth. This keeps
+      // check indicators visible when app credentials are missing or permission-scoped.
+      return await this.fetchPullRequestChecks(config);
+    } catch (error) {
+      const upstreamError = appLookupError ?? error;
 
-      const pullRequestResponse = await fetchWithTimeout(
-        `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/pulls/${config.pullRequestNumber}`,
+      throw SourceControlProviderError.fromFetchError(
+        `Failed to get pull request checks: ${upstreamError instanceof Error ? upstreamError.message : String(upstreamError)}`,
+        upstreamError,
+        extractHttpStatus(upstreamError)
+      );
+    }
+  }
+
+  private async fetchPullRequestChecks(
+    config: GetPullRequestChecksConfig,
+    token?: string
+  ): Promise<PullRequestChecks | null> {
+    const pullRequestResponse = await fetchWithTimeout(
+      `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/pulls/${config.pullRequestNumber}`,
+      {
+        headers: getGitHubApiHeaders(token),
+      }
+    );
+
+    if (!pullRequestResponse.ok) {
+      const error = await pullRequestResponse.text();
+      throw SourceControlProviderError.fromFetchError(
+        `Failed to get PR details: ${pullRequestResponse.status} ${error}`,
+        new Error(error),
+        pullRequestResponse.status
+      );
+    }
+
+    const pullRequest = (await pullRequestResponse.json()) as {
+      head?: { sha?: string };
+    };
+    const headSha = pullRequest.head?.sha;
+    if (!headSha) {
+      return null;
+    }
+
+    const [statusResponse, checkRunsResponse] = await Promise.all([
+      fetchWithTimeout(`${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/commits/${headSha}/status`, {
+        headers: getGitHubApiHeaders(token),
+      }),
+      fetchWithTimeout(
+        `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/commits/${headSha}/check-runs?per_page=100`,
         {
           headers: getGitHubApiHeaders(token),
         }
-      );
+      ),
+    ]);
 
-      if (!pullRequestResponse.ok) {
-        const error = await pullRequestResponse.text();
-        throw SourceControlProviderError.fromFetchError(
-          `Failed to get PR details: ${pullRequestResponse.status} ${error}`,
-          new Error(error),
-          pullRequestResponse.status
-        );
-      }
-
-      const pullRequest = (await pullRequestResponse.json()) as {
-        head?: { sha?: string };
-      };
-      const headSha = pullRequest.head?.sha;
-      if (!headSha) {
-        return null;
-      }
-
-      const [statusResponse, checkRunsResponse] = await Promise.all([
-        fetchWithTimeout(
-          `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/commits/${headSha}/status`,
-          {
-            headers: getGitHubApiHeaders(token),
-          }
-        ),
-        fetchWithTimeout(
-          `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/commits/${headSha}/check-runs?per_page=100`,
-          {
-            headers: getGitHubApiHeaders(token),
-          }
-        ),
-      ]);
-
-      if (!statusResponse.ok) {
-        const error = await statusResponse.text();
-        throw SourceControlProviderError.fromFetchError(
-          `Failed to get commit status: ${statusResponse.status} ${error}`,
-          new Error(error),
-          statusResponse.status
-        );
-      }
-
-      if (!checkRunsResponse.ok) {
-        const error = await checkRunsResponse.text();
-        throw SourceControlProviderError.fromFetchError(
-          `Failed to get check runs: ${checkRunsResponse.status} ${error}`,
-          new Error(error),
-          checkRunsResponse.status
-        );
-      }
-
-      const combinedStatus = (await statusResponse.json()) as {
-        state?: string;
-        statuses?: unknown[];
-        total_count?: number;
-      };
-      const checkRuns = (await checkRunsResponse.json()) as {
-        total_count?: number;
-        check_runs?: Array<{
-          status?: string;
-          conclusion?: string | null;
-        }>;
-      };
-
-      let successfulCount = 0;
-      let failedCount = 0;
-      let pendingCount = 0;
-
-      const combinedState = combinedStatus.state;
-      const statusContextsCount =
-        typeof combinedStatus.total_count === "number"
-          ? combinedStatus.total_count
-          : Array.isArray(combinedStatus.statuses)
-            ? combinedStatus.statuses.length
-            : 0;
-
-      if (combinedState === "failure" || combinedState === "error") {
-        failedCount += Math.max(statusContextsCount, 1);
-      } else if (combinedState === "pending") {
-        pendingCount += Math.max(statusContextsCount, 1);
-      } else if (combinedState === "success") {
-        successfulCount += statusContextsCount;
-      }
-
-      for (const checkRun of checkRuns.check_runs ?? []) {
-        if (checkRun.status !== "completed") {
-          pendingCount += 1;
-          continue;
-        }
-
-        if (isFailedConclusion(checkRun.conclusion ?? null)) {
-          failedCount += 1;
-          continue;
-        }
-
-        if (isSuccessfulConclusion(checkRun.conclusion ?? null)) {
-          successfulCount += 1;
-          continue;
-        }
-
-        pendingCount += 1;
-      }
-
-      const totalCount = successfulCount + failedCount + pendingCount;
-      if (totalCount === 0) {
-        return null;
-      }
-
-      return {
-        state: failedCount > 0 ? "failure" : pendingCount > 0 ? "pending" : "success",
-        totalCount,
-        successfulCount,
-        failedCount,
-        pendingCount,
-      };
-    } catch (error) {
-      if (error instanceof SourceControlProviderError) {
-        throw error;
-      }
-
+    if (!statusResponse.ok) {
+      const error = await statusResponse.text();
       throw SourceControlProviderError.fromFetchError(
-        `Failed to get pull request checks: ${error instanceof Error ? error.message : String(error)}`,
-        error,
-        extractHttpStatus(error)
+        `Failed to get commit status: ${statusResponse.status} ${error}`,
+        new Error(error),
+        statusResponse.status
       );
     }
+
+    if (!checkRunsResponse.ok) {
+      const error = await checkRunsResponse.text();
+      throw SourceControlProviderError.fromFetchError(
+        `Failed to get check runs: ${checkRunsResponse.status} ${error}`,
+        new Error(error),
+        checkRunsResponse.status
+      );
+    }
+
+    const combinedStatus = (await statusResponse.json()) as {
+      state?: string;
+      statuses?: unknown[];
+      total_count?: number;
+    };
+    const checkRuns = (await checkRunsResponse.json()) as {
+      total_count?: number;
+      check_runs?: Array<{
+        status?: string;
+        conclusion?: string | null;
+      }>;
+    };
+
+    let successfulCount = 0;
+    let failedCount = 0;
+    let pendingCount = 0;
+
+    const combinedState = combinedStatus.state;
+    const statusContextsCount =
+      typeof combinedStatus.total_count === "number"
+        ? combinedStatus.total_count
+        : Array.isArray(combinedStatus.statuses)
+          ? combinedStatus.statuses.length
+          : 0;
+
+    if (combinedState === "failure" || combinedState === "error") {
+      failedCount += Math.max(statusContextsCount, 1);
+    } else if (combinedState === "pending") {
+      pendingCount += Math.max(statusContextsCount, 1);
+    } else if (combinedState === "success") {
+      successfulCount += statusContextsCount;
+    }
+
+    for (const checkRun of checkRuns.check_runs ?? []) {
+      if (checkRun.status !== "completed") {
+        pendingCount += 1;
+        continue;
+      }
+
+      if (isFailedConclusion(checkRun.conclusion ?? null)) {
+        failedCount += 1;
+        continue;
+      }
+
+      if (isSuccessfulConclusion(checkRun.conclusion ?? null)) {
+        successfulCount += 1;
+        continue;
+      }
+
+      pendingCount += 1;
+    }
+
+    const totalCount = successfulCount + failedCount + pendingCount;
+    if (totalCount === 0) {
+      return null;
+    }
+
+    return {
+      state: failedCount > 0 ? "failure" : pendingCount > 0 ? "pending" : "success",
+      totalCount,
+      successfulCount,
+      failedCount,
+      pendingCount,
+    };
   }
 
   /**
