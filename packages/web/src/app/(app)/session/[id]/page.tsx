@@ -22,11 +22,7 @@ import {
   SessionRightSidebarContent,
 } from "@/components/session-right-sidebar";
 import { ActionBar } from "@/components/action-bar";
-import {
-  copyToClipboard,
-  formatModelNameLower,
-  formatPremiumMultiplierLabel,
-} from "@/lib/format";
+import { copyToClipboard, formatModelNameLower, formatPremiumMultiplierLabel } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -680,18 +676,18 @@ function SessionContent({
       {/* Header */}
       <header className="border-b border-border-muted flex-shrink-0">
         <div className="px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             {!isOpen && (
               <button
                 onClick={toggle}
-                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition"
+                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition flex-shrink-0"
                 title={`Open sidebar (${SHORTCUT_LABELS.TOGGLE_SIDEBAR})`}
                 aria-label={`Open sidebar (${SHORTCUT_LABELS.TOGGLE_SIDEBAR})`}
               >
                 <SidebarIcon className="w-4 h-4" />
               </button>
             )}
-            <div>
+            <div className="flex-1 min-w-0">
               {isRenaming ? (
                 <input
                   autoFocus
@@ -708,18 +704,20 @@ function SessionContent({
                       setIsRenaming(false);
                     }
                   }}
-                  className="text-sm bg-transparent text-foreground outline-none focus:ring-inset focus:ring-ring font-medium max-w-40 truncate"
+                  className="text-sm bg-transparent text-foreground outline-none focus:ring-inset focus:ring-ring font-medium max-w-md truncate w-full"
                 />
               ) : (
                 <h1
-                  className="font-medium text-foreground max-w-40 truncate cursor-text"
+                  className="font-medium text-foreground max-w-md truncate cursor-text"
                   onClick={handleStartRename}
                   title="Click to rename"
                 >
                   {resolvedTitle}
                 </h1>
               )}
-              <p className="text-sm text-muted-foreground">{sessionDisplayInfo.repoLabel}</p>
+              <p className="text-sm text-muted-foreground truncate">
+                {sessionDisplayInfo.repoLabel}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-4">
