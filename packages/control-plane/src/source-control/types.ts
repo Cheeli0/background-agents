@@ -182,6 +182,28 @@ export interface PullRequestChecks {
 }
 
 /**
+ * Configuration for fetching pull request status details.
+ */
+export interface GetPullRequestStatusConfig {
+  /** Repository owner */
+  owner: string;
+  /** Repository name */
+  name: string;
+  /** Pull request number */
+  pullRequestNumber: number;
+}
+
+/**
+ * Pull request status details.
+ */
+export interface PullRequestStatus {
+  number: number;
+  title: string;
+  url: string;
+  status: "open" | "merged" | "closed" | "draft";
+}
+
+/**
  * Source control provider interface.
  *
  * Defines the contract for source control platform operations.
@@ -311,4 +333,13 @@ export interface SourceControlProvider {
    * Build provider-specific git push specification for bridge execution.
    */
   buildGitPushSpec(config: BuildGitPushSpecConfig): GitPushSpec;
+
+  /**
+   * Get pull request status details when supported by the provider.
+   *
+   * Optional to preserve compatibility with providers that don't expose this.
+   */
+  getPullRequestStatus?(
+    config: GetPullRequestStatusConfig
+  ): Promise<PullRequestStatus | null>;
 }

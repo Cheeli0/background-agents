@@ -15,6 +15,7 @@ import {
 } from "@/lib/session-list";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { useIsMobile } from "@/hooks/use-media-query";
+import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
 import {
   MoreIcon,
   SidebarIcon,
@@ -28,6 +29,7 @@ import {
   FolderIcon,
   KeyboardIcon,
 } from "@/components/ui/icons";
+import { PullRequestStatusIcon } from "@/components/pull-request-status-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -88,6 +90,16 @@ function getSessionRepositoryInfo(
 
 function shouldAutoExpandRepositoryGroup(session: { creationSource?: string | null }) {
   return !!session.creationSource && EXTERNAL_SESSION_CREATION_SOURCES.has(session.creationSource);
+}
+
+function SessionPrStatusIndicator({ sessionId }: { sessionId: string }) {
+  const prStatus = useSessionPrStatus(sessionId);
+
+  if (!prStatus) {
+    return null;
+  }
+
+  return <PullRequestStatusIcon status={prStatus} className="w-3 h-3" />;
 }
 
 export function buildSessionHref(session: SessionItem) {
@@ -799,8 +811,11 @@ function SessionListItem({
           onTouchCancel={handleTouchEnd}
           className="block pr-8"
         >
-          <div className="flex items-center gap-1.5">
-            <div className="truncate text-sm font-medium text-foreground">{displayTitle}</div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <SessionPrStatusIndicator sessionId={session.id} />
+            <div className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+              {displayTitle}
+            </div>
             {showCompletedIndicator && (
               <span
                 className="inline-flex items-center text-success"
@@ -892,6 +907,7 @@ function ChildSessionListItem({
       }`}
     >
       <div className="flex items-center gap-1.5 text-xs">
+        <SessionPrStatusIndicator sessionId={session.id} />
         <span className="shrink-0 text-muted-foreground">{relativeTime}</span>
         <span className="truncate font-medium text-foreground">{displayTitle}</span>
       </div>

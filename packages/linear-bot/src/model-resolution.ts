@@ -4,9 +4,14 @@
 
 import type { TeamRepoMapping, StaticRepoConfig } from "./types";
 import {
+  extractProviderAndModel,
+  isValidModel,
+  normalizeModelId,
+  type ValidModel,
   getDefaultReasoningEffort,
   getValidModelOrDefault,
   isValidReasoningEffort,
+  VALID_MODELS,
 } from "@open-inspect/shared";
 
 /**
@@ -37,19 +42,121 @@ const MODEL_LABEL_MAP: Record<string, string> = {
   "gpt-5.4": "openai/gpt-5.4",
   "gpt-5.2-codex": "openai/gpt-5.2-codex",
   "gpt-5.3-codex": "openai/gpt-5.3-codex",
+  "glm-5": "zai-coding-plan/glm-5",
+  "glm-5-turbo": "zai-coding-plan/glm-5-turbo",
+  "glm-4.7": "zai-coding-plan/glm-4.7",
+  "glm-4.5-air": "zai-coding-plan/glm-4.5-air",
 };
+
+const PROVIDER_LABEL_DEFAULT_MODEL: Record<string, ValidModel> = {
+  anthropic: "anthropic/claude-sonnet-4-6",
+  openai: "openai/gpt-5.4",
+  "github-copilot": "github-copilot/claude-sonnet-4-6",
+  opencode: "opencode/kimi-k2.5",
+};
+
+function extractLabelValue(labels: Array<{ name: string }>, prefix: string): string | null {
+  for (const label of labels) {
+    const match = label.name.match(new RegExp(`^${prefix}:(.+)$`, "i"));
+    if (match) {
+      return match[1].trim().toLowerCase();
+    }
+  }
+
+  return null;
+}
+
+function resolveProviderQualifiedModel(provider: string, model: string): string | null {
+  const candidate = `${provider}/${model}`;
+  if (!isValidModel(candidate)) {
+    return null;
+  }
+
+  return getValidModelOrDefault(candidate);
+}
+
+function resolveModelLabel(modelLabel: string, providerLabel: string | null): string | null {
+  const mappedModel = MODEL_LABEL_MAP[modelLabel];
+  if (mappedModel) {
+    if (providerLabel) {
+      const { model } = extractProviderAndModel(mappedModel);
+      const providerQualifiedModel = resolveProviderQualifiedModel(providerLabel, model);
+      if (providerQualifiedModel) {
+        return providerQualifiedModel;
+      }
+    }
+
+    return mappedModel;
+  }
+
+  if (providerLabel) {
+    const providerQualifiedModel = resolveProviderQualifiedModel(providerLabel, modelLabel);
+    if (providerQualifiedModel) {
+      return providerQualifiedModel;
+    }
+  }
+
+  if (isValidModel(modelLabel)) {
+    const normalizedModel = getValidModelOrDefault(normalizeModelId(modelLabel));
+    if (providerLabel) {
+      const { model } = extractProviderAndModel(normalizedModel);
+      const providerQualifiedModel = resolveProviderQualifiedModel(providerLabel, model);
+      if (providerQualifiedModel) {
+        return providerQualifiedModel;
+      }
+    }
+
+    return normalizedModel;
+  }
+
+  const suffixMatches = VALID_MODELS.filter((candidate) => candidate.endsWith(`/${modelLabel}`));
+  if (providerLabel) {
+    const providerMatch = suffixMatches.find((candidate) =>
+      candidate.startsWith(`${providerLabel}/`)
+    );
+    if (providerMatch) {
+      return providerMatch;
+    }
+  }
+
+  if (suffixMatches.length === 1) {
+    return suffixMatches[0];
+  }
+
+  return null;
+}
+
+function resolveProviderOnlyLabel(providerLabel: string, baseModel?: string): string | null {
+  if (baseModel && isValidModel(baseModel)) {
+    const normalizedBaseModel = getValidModelOrDefault(baseModel);
+    const { model } = extractProviderAndModel(normalizedBaseModel);
+    const providerQualifiedModel = resolveProviderQualifiedModel(providerLabel, model);
+    if (providerQualifiedModel) {
+      return providerQualifiedModel;
+    }
+  }
+
+  return PROVIDER_LABEL_DEFAULT_MODEL[providerLabel] ?? null;
+}
 
 /**
  * Extract model override from issue labels (e.g., "model:opus" → "anthropic/claude-opus-4-5").
  */
-export function extractModelFromLabels(labels: Array<{ name: string }>): string | null {
-  for (const label of labels) {
-    const match = label.name.match(/^model:(.+)$/i);
-    if (match) {
-      const key = match[1].toLowerCase();
-      if (MODEL_LABEL_MAP[key]) return MODEL_LABEL_MAP[key];
-    }
+export function extractModelFromLabels(
+  labels: Array<{ name: string }>,
+  baseModel?: string
+): string | null {
+  const providerLabel = extractLabelValue(labels, "provider");
+  const modelLabel = extractLabelValue(labels, "model");
+
+  if (modelLabel) {
+    return resolveModelLabel(modelLabel, providerLabel);
   }
+
+  if (providerLabel) {
+    return resolveProviderOnlyLabel(providerLabel, baseModel);
+  }
+
   return null;
 }
 

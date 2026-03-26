@@ -470,7 +470,16 @@ async function handleNewSession(
     userReasoningEffort = prefs?.reasoningEffort;
   }
 
-  const labelModel = extractModelFromLabels(labels);
+  const baseSessionModelSettings = resolveSessionModelSettings({
+    envDefaultModel: env.DEFAULT_MODEL,
+    configModel: integrationConfig.model,
+    configReasoningEffort: integrationConfig.reasoningEffort,
+    allowUserPreferenceOverride: integrationConfig.allowUserPreferenceOverride,
+    allowLabelModelOverride: false,
+    userModel,
+    userReasoningEffort,
+  });
+  const labelModel = extractModelFromLabels(labels, baseSessionModelSettings.model);
   const { model, reasoningEffort } = resolveSessionModelSettings({
     envDefaultModel: env.DEFAULT_MODEL,
     configModel: integrationConfig.model,

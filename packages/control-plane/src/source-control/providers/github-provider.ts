@@ -14,12 +14,12 @@ import type {
   RepositoryInfo,
   CreatePullRequestConfig,
   CreatePullRequestResult,
-  GetPullRequestChecksConfig,
-  PullRequestChecks,
   BuildManualPullRequestUrlConfig,
   BuildGitPushSpecConfig,
   GitPushSpec,
   GitPushAuthContext,
+  GetPullRequestStatusConfig,
+  PullRequestStatus,
 } from "../types";
 import { SourceControlProviderError } from "../errors";
 import {
@@ -42,22 +42,38 @@ function extractHttpStatus(error: unknown): number | undefined {
 
 function getGitHubApiHeaders(token?: string, extraHeaders?: HeadersInit): HeadersInit {
   return {
-    Accept: "application/vnd.github+json",
+    Accept: "application/vnd.github.v3+json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     "User-Agent": USER_AGENT,
-    "X-GitHub-Api-Version": "2022-11-28",
     ...extraHeaders,
   };
 }
 
-function isSuccessfulConclusion(conclusion: string | null): boolean {
-  return ["success", "neutral", "skipped", "stale"].includes(conclusion ?? "");
-}
+function toPullRequestStatus(data: {
+  number: number;
+  title: string;
+  html_url: string;
+  state: string;
+  draft: boolean;
+  merged: boolean;
+}): PullRequestStatus {
+  let status: PullRequestStatus["status"];
+  if (data.draft) {
+    status = "draft";
+  } else if (data.merged) {
+    status = "merged";
+  } else if (data.state === "closed") {
+    status = "closed";
+  } else {
+    status = "open";
+  }
 
-function isFailedConclusion(conclusion: string | null): boolean {
-  return ["failure", "timed_out", "cancelled", "action_required", "startup_failure"].includes(
-    conclusion ?? ""
-  );
+  return {
+    number: data.number,
+    title: data.title,
+    url: data.html_url,
+    status,
+  };
 }
 
 /**
@@ -158,6 +174,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
 
     const data = (await response.json()) as {
       number: number;
+      title: string;
       html_url: string;
       url: string;
       state: string;
@@ -169,24 +186,13 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
 
     // Map GitHub state to our state type
     // GitHub uses state: "closed" + merged: true for merged PRs
-    let state: CreatePullRequestResult["state"];
-    if (data.draft) {
-      state = "draft";
-    } else if (data.merged) {
-      state = "merged";
-    } else if (data.state === "open") {
-      state = "open";
-    } else if (data.state === "closed") {
-      state = "closed";
-    } else {
-      state = "open"; // Default to open for unknown states
-    }
+    const status = toPullRequestStatus(data);
 
     const result: CreatePullRequestResult = {
       id: data.number,
       webUrl: data.html_url,
       apiUrl: data.url,
-      state,
+      state: status.status,
       sourceBranch: data.head.ref,
       targetBranch: data.base.ref,
     };
@@ -214,163 +220,6 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     }
 
     return result;
-  }
-
-  async getPullRequestChecks(
-    config: GetPullRequestChecksConfig
-  ): Promise<PullRequestChecks | null> {
-    let appLookupError: unknown = null;
-
-    if (this.appConfig) {
-      try {
-        const token = await getCachedInstallationToken(
-          this.appConfig,
-          this.kvCache ? { REPOS_CACHE: this.kvCache } : undefined
-        );
-
-        return await this.fetchPullRequestChecks(config, token);
-      } catch (error) {
-        appLookupError = error;
-      }
-    }
-
-    try {
-      // Public repositories can still be queried without app auth. This keeps
-      // check indicators visible when app credentials are missing or permission-scoped.
-      return await this.fetchPullRequestChecks(config);
-    } catch (error) {
-      const upstreamError = appLookupError ?? error;
-
-      throw SourceControlProviderError.fromFetchError(
-        `Failed to get pull request checks: ${upstreamError instanceof Error ? upstreamError.message : String(upstreamError)}`,
-        upstreamError,
-        extractHttpStatus(upstreamError)
-      );
-    }
-  }
-
-  private async fetchPullRequestChecks(
-    config: GetPullRequestChecksConfig,
-    token?: string
-  ): Promise<PullRequestChecks | null> {
-    const pullRequestResponse = await fetchWithTimeout(
-      `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/pulls/${config.pullRequestNumber}`,
-      {
-        headers: getGitHubApiHeaders(token),
-      }
-    );
-
-    if (!pullRequestResponse.ok) {
-      const error = await pullRequestResponse.text();
-      throw SourceControlProviderError.fromFetchError(
-        `Failed to get PR details: ${pullRequestResponse.status} ${error}`,
-        new Error(error),
-        pullRequestResponse.status
-      );
-    }
-
-    const pullRequest = (await pullRequestResponse.json()) as {
-      head?: { sha?: string };
-    };
-    const headSha = pullRequest.head?.sha;
-    if (!headSha) {
-      return null;
-    }
-
-    const [statusResponse, checkRunsResponse] = await Promise.all([
-      fetchWithTimeout(`${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/commits/${headSha}/status`, {
-        headers: getGitHubApiHeaders(token),
-      }),
-      fetchWithTimeout(
-        `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/commits/${headSha}/check-runs?per_page=100`,
-        {
-          headers: getGitHubApiHeaders(token),
-        }
-      ),
-    ]);
-
-    if (!statusResponse.ok) {
-      const error = await statusResponse.text();
-      throw SourceControlProviderError.fromFetchError(
-        `Failed to get commit status: ${statusResponse.status} ${error}`,
-        new Error(error),
-        statusResponse.status
-      );
-    }
-
-    if (!checkRunsResponse.ok) {
-      const error = await checkRunsResponse.text();
-      throw SourceControlProviderError.fromFetchError(
-        `Failed to get check runs: ${checkRunsResponse.status} ${error}`,
-        new Error(error),
-        checkRunsResponse.status
-      );
-    }
-
-    const combinedStatus = (await statusResponse.json()) as {
-      state?: string;
-      statuses?: unknown[];
-      total_count?: number;
-    };
-    const checkRuns = (await checkRunsResponse.json()) as {
-      total_count?: number;
-      check_runs?: Array<{
-        status?: string;
-        conclusion?: string | null;
-      }>;
-    };
-
-    let successfulCount = 0;
-    let failedCount = 0;
-    let pendingCount = 0;
-
-    const combinedState = combinedStatus.state;
-    const statusContextsCount =
-      typeof combinedStatus.total_count === "number"
-        ? combinedStatus.total_count
-        : Array.isArray(combinedStatus.statuses)
-          ? combinedStatus.statuses.length
-          : 0;
-
-    if (combinedState === "failure" || combinedState === "error") {
-      failedCount += Math.max(statusContextsCount, 1);
-    } else if (combinedState === "pending") {
-      pendingCount += Math.max(statusContextsCount, 1);
-    } else if (combinedState === "success") {
-      successfulCount += statusContextsCount;
-    }
-
-    for (const checkRun of checkRuns.check_runs ?? []) {
-      if (checkRun.status !== "completed") {
-        pendingCount += 1;
-        continue;
-      }
-
-      if (isFailedConclusion(checkRun.conclusion ?? null)) {
-        failedCount += 1;
-        continue;
-      }
-
-      if (isSuccessfulConclusion(checkRun.conclusion ?? null)) {
-        successfulCount += 1;
-        continue;
-      }
-
-      pendingCount += 1;
-    }
-
-    const totalCount = successfulCount + failedCount + pendingCount;
-    if (totalCount === 0) {
-      return null;
-    }
-
-    return {
-      state: failedCount > 0 ? "failure" : pendingCount > 0 ? "pending" : "success",
-      totalCount,
-      successfulCount,
-      failedCount,
-      pendingCount,
-    };
   }
 
   /**
@@ -405,6 +254,39 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
         `Failed to check repository access: ${error instanceof Error ? error.message : String(error)}`,
         error,
         extractHttpStatus(error)
+      );
+    }
+  }
+
+  async getPullRequestStatus(
+    config: GetPullRequestStatusConfig
+  ): Promise<PullRequestStatus | null> {
+    let appLookupError: unknown = null;
+
+    if (this.appConfig) {
+      try {
+        const token = await getCachedInstallationToken(
+          this.appConfig,
+          this.kvCache ? { REPOS_CACHE: this.kvCache } : undefined
+        );
+        return await this.fetchPullRequestStatus(config, token);
+      } catch (error) {
+        appLookupError = error;
+      }
+    }
+
+    try {
+      return await this.fetchPullRequestStatus(config);
+    } catch (error) {
+      const upstreamError = appLookupError ?? error;
+      if (upstreamError instanceof SourceControlProviderError) {
+        throw upstreamError;
+      }
+
+      throw SourceControlProviderError.fromFetchError(
+        `Failed to get pull request status: ${upstreamError instanceof Error ? upstreamError.message : String(upstreamError)}`,
+        upstreamError,
+        extractHttpStatus(upstreamError)
       );
     }
   }
@@ -573,6 +455,42 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     } catch (error) {
       console.warn(`Failed to request reviewers for PR #${prNumber}:`, error);
     }
+  }
+
+  private async fetchPullRequestStatus(
+    config: GetPullRequestStatusConfig,
+    token?: string
+  ): Promise<PullRequestStatus | null> {
+    const response = await fetchWithTimeout(
+      `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/pulls/${config.pullRequestNumber}`,
+      {
+        headers: getGitHubApiHeaders(token),
+      }
+    );
+
+    if (response.status === 404) {
+      return null;
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw SourceControlProviderError.fromFetchError(
+        `Failed to get pull request status: ${response.status} ${error}`,
+        new Error(error),
+        response.status
+      );
+    }
+
+    const data = (await response.json()) as {
+      number: number;
+      title: string;
+      html_url: string;
+      state: string;
+      draft: boolean;
+      merged: boolean;
+    };
+
+    return toPullRequestStatus(data);
   }
 }
 

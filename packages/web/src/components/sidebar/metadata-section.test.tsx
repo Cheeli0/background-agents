@@ -1,12 +1,23 @@
 // @vitest-environment jsdom
 /// <reference types="@testing-library/jest-dom" />
 
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
+import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
 import { MetadataSection } from "./metadata-section";
 
 expect.extend(matchers);
+
+vi.mock("@/hooks/use-session-pr-status", () => ({
+  useSessionPrStatus: vi.fn(() => null),
+}));
+
+afterEach(() => {
+  cleanup();
+  vi.mocked(useSessionPrStatus).mockReset();
+  vi.mocked(useSessionPrStatus).mockReturnValue(null);
+});
 
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: React.ComponentProps<"a">) => (
@@ -18,8 +29,11 @@ vi.mock("next/link", () => ({
 
 describe("MetadataSection", () => {
   it("renders an associated pull request link when available", () => {
+    vi.mocked(useSessionPrStatus).mockReturnValue("merged");
+
     render(
       <MetadataSection
+        sessionId="session-42"
         createdAt={Date.now()}
         baseBranch="main"
         repoOwner="acme"
@@ -42,8 +56,34 @@ describe("MetadataSection", () => {
 
     const link = screen.getByRole("link", { name: /associated pr #42/i });
     expect(link).toHaveAttribute("href", "https://github.com/acme/repo/pull/42");
-    expect(screen.getByText("open")).toBeInTheDocument();
+    const statusIcon = screen.getByLabelText("PR merged");
+    expect(statusIcon).toHaveClass("text-[#8250df]");
+    expect(link.parentElement?.firstElementChild).toBe(statusIcon);
     expect(screen.getByLabelText("2/3 checks pending")).toBeInTheDocument();
+  });
+
+  it("shows merged PR status icon beside the session PR link", () => {
+    render(
+      <MetadataSection
+        createdAt={Date.now()}
+        baseBranch="main"
+        artifacts={[
+          {
+            id: "pr-1",
+            type: "pr",
+            url: "https://github.com/acme/repo/pull/7",
+            metadata: { prNumber: 7, prState: "merged" },
+            createdAt: Date.now(),
+          },
+        ]}
+      />
+    );
+
+    const statusIcon = screen.getByLabelText("PR merged");
+    const link = screen.getByRole("link", { name: "#7" });
+
+    expect(statusIcon).toHaveClass("text-[#8250df]");
+    expect(link.parentElement?.firstElementChild).toBe(statusIcon);
   });
 
   it("renders CI status for session PR artifacts", () => {
@@ -75,10 +115,9 @@ describe("MetadataSection", () => {
       />
     );
 
-    expect(screen.getByRole("link", { name: "#7" })).toHaveAttribute(
-      "href",
-      "https://github.com/acme/repo/pull/7"
-    );
+    const [link] = screen.getAllByRole("link", { name: "#7" });
+
+    expect(link).toHaveAttribute("href", "https://github.com/acme/repo/pull/7");
     expect(screen.getByLabelText("4/4 checks passing")).toBeInTheDocument();
   });
 
@@ -94,6 +133,15 @@ describe("MetadataSection", () => {
 
     expect(screen.getByText("GPT 5.3 Codex")).toBeInTheDocument();
     expect(screen.getByText("Provider: OpenAI")).toBeInTheDocument();
+  });
+
+  it("shows Z.AI as the provider for GLM models", () => {
+    render(
+      <MetadataSection createdAt={Date.now()} baseBranch="main" model="zai-coding-plan/glm-5" />
+    );
+
+    expect(screen.getByText("GLM 5")).toBeInTheDocument();
+    expect(screen.getByText("Provider: Z.AI")).toBeInTheDocument();
   });
 
   it("shows unknown when provider cannot be determined", () => {
