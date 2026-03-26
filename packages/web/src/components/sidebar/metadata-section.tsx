@@ -11,11 +11,11 @@ import type {
   SessionAssociatedPr,
   SessionPullRequestChecks,
 } from "@/hooks/use-session-associated-pr";
+import { PullRequestStatusIcon } from "@/components/pull-request-status-icon";
 import {
   ClockIcon,
   SparkleIcon,
   GitHubIcon,
-  GitPrIcon,
   GitBranchWorkIcon,
   BranchIcon,
   CopyIcon,
@@ -166,7 +166,7 @@ export function MetadataSection({
       {/* PR Badge */}
       {(prNumber || prUrl) && (
         <div className="flex items-center gap-2 text-sm">
-          <GitPrIcon className="w-4 h-4 text-muted-foreground" />
+          <PullRequestStatusIcon status={prState ?? "open"} className="w-4 h-4" />
           {prUrl ? (
             <a
               href={prUrl}
@@ -190,7 +190,7 @@ export function MetadataSection({
 
       {associatedPrLink && (
         <div className="flex items-center gap-2 text-sm">
-          <GitPrIcon className="w-4 h-4 text-muted-foreground" />
+          <PullRequestStatusIcon status={associatedPrLink.status} className="w-4 h-4" />
           <a
             href={associatedPrLink.url}
             target="_blank"

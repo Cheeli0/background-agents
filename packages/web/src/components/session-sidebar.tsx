@@ -27,8 +27,8 @@ import {
   ChevronRightIcon,
   FolderIcon,
   KeyboardIcon,
-  GitPrIcon,
 } from "@/components/ui/icons";
+import { PullRequestStatusIcon } from "@/components/pull-request-status-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -78,17 +78,6 @@ function getSessionRepositoryInfo(
   }
 
   return { key: "unknown", label: UNKNOWN_REPOSITORY_LABEL };
-}
-
-function associatedPrStatusClassName(status: AssociatedPrStatus) {
-  switch (status) {
-    case "open":
-      return "text-success";
-    case "merged":
-      return "text-[#8250df]";
-    case "closed":
-      return "text-[#cf222e]";
-  }
 }
 
 function sessionAssociatedPrStatusKey(sessionId: string) {
@@ -175,15 +164,7 @@ function SessionPrStatusIndicator({ sessionId }: { sessionId: string }) {
     return null;
   }
 
-  return (
-    <span
-      className={`inline-flex items-center ${associatedPrStatusClassName(prStatus)}`}
-      title={`PR ${prStatus}`}
-      aria-label={`PR ${prStatus}`}
-    >
-      <GitPrIcon className="w-3 h-3" />
-    </span>
-  );
+  return <PullRequestStatusIcon status={prStatus} className="w-3 h-3" />;
 }
 
 export function buildSessionHref(session: SessionItem) {
