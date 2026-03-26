@@ -15,7 +15,7 @@ import {
 import { useRepos } from "@/hooks/use-repos";
 import { useBranches } from "@/hooks/use-branches";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
-import { formatModelNameLower, formatModelOptionDescription } from "@/lib/format";
+import { formatModelNameLower, formatPremiumMultiplierLabel } from "@/lib/format";
 import { Combobox, type ComboboxGroup } from "@/components/ui/combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -285,11 +285,12 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
               options: group.models.map((m) => ({
                 value: m.id,
                 label: m.name,
-                description: formatModelOptionDescription(m),
+                badge: formatPremiumMultiplierLabel(m.premiumMultiplier) ?? undefined,
+                description: m.description,
               })),
             })) as ComboboxGroup[]
           }
-          dropdownWidth="w-56"
+          dropdownWidth="w-80"
           triggerClassName="flex w-full items-center gap-1.5 px-3 py-2 text-sm border border-border bg-input text-foreground hover:border-foreground/20 transition"
         >
           <ModelIcon className="w-3.5 h-3.5 text-muted-foreground" />

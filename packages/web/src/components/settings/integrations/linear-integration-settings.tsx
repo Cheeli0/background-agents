@@ -11,10 +11,12 @@ import {
   type EnrichedRepository,
   type LinearBotSettings,
   type LinearGlobalConfig,
+  type ModelCategory,
   type ValidModel,
 } from "@open-inspect/shared";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { IntegrationSettingsSkeleton } from "./integration-settings-skeleton";
+import { ModelOptionLabel } from "../model-option-label";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -105,7 +107,7 @@ export function LinearIntegrationSettings() {
 
       <Section
         title="Repository Overrides"
-        description="Override model selection and behavior for specific repositories."
+        description="Override model selection and behavior for specific repositories. Premium badges show Copilot request multipliers."
       >
         <RepoOverridesSection
           overrides={repoOverrides}
@@ -124,7 +126,7 @@ function GlobalSettingsSection({
 }: {
   settings: LinearGlobalConfig | null | undefined;
   availableRepos: EnrichedRepository[];
-  enabledModelOptions: { category: string; models: { id: string; name: string }[] }[];
+  enabledModelOptions: ModelCategory[];
 }) {
   const [model, setModel] = useState(settings?.defaults?.model ?? "");
   const [classificationModel, setClassificationModel] = useState(
@@ -292,13 +294,16 @@ function GlobalSettingsSection({
                   <SelectLabel>{group.category}</SelectLabel>
                   {group.models.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
-                      {m.name}
+                      <ModelOptionLabel name={m.name} premiumMultiplier={m.premiumMultiplier} />
                     </SelectItem>
                   ))}
                 </SelectGroup>
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground mt-1">
+            Premium badges show how many requests one run consumes for Copilot-backed models.
+          </p>
         </label>
 
         <label className="text-sm">
@@ -513,7 +518,7 @@ function RepoOverridesSection({
 }: {
   overrides: RepoSettingsEntry[];
   availableRepos: EnrichedRepository[];
-  enabledModelOptions: { category: string; models: { id: string; name: string }[] }[];
+  enabledModelOptions: ModelCategory[];
 }) {
   const [addingRepo, setAddingRepo] = useState("");
 
@@ -590,7 +595,7 @@ function RepoOverrideRow({
   enabledModelOptions,
 }: {
   entry: RepoSettingsEntry;
-  enabledModelOptions: { category: string; models: { id: string; name: string }[] }[];
+  enabledModelOptions: ModelCategory[];
 }) {
   const [model, setModel] = useState(entry.settings.model ?? "");
   const [effort, setEffort] = useState(entry.settings.reasoningEffort ?? "");
@@ -686,7 +691,7 @@ function RepoOverrideRow({
                 <SelectLabel>{group.category}</SelectLabel>
                 {group.models.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
-                    {m.name}
+                    <ModelOptionLabel name={m.name} premiumMultiplier={m.premiumMultiplier} />
                   </SelectItem>
                 ))}
               </SelectGroup>

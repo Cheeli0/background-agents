@@ -7,6 +7,7 @@ export interface ComboboxOption<T = string> {
   value: T;
   label: string;
   description?: string;
+  badge?: string;
 }
 
 export interface ComboboxGroup<T = string> {
@@ -95,7 +96,8 @@ export function Combobox<T = string>({
 
   const defaultFilter = (option: ComboboxOption<T>, q: string) =>
     option.label.toLowerCase().includes(q) ||
-    (option.description?.toLowerCase().includes(q) ?? false);
+    (option.description?.toLowerCase().includes(q) ?? false) ||
+    (option.badge?.toLowerCase().includes(q) ?? false);
 
   const filterOption = filterFn || defaultFilter;
 
@@ -384,8 +386,15 @@ function OptionButton<T>({
         isActive ? "bg-muted" : ""
       } ${isSelected ? "text-foreground" : "text-muted-foreground"}`}
     >
-      <div className="flex flex-col items-start text-left min-w-0">
-        <span className="font-medium truncate max-w-full">{option.label}</span>
+      <div className="flex flex-col items-start text-left min-w-0 flex-1">
+        <div className="flex items-center gap-2 w-full min-w-0">
+          <span className="font-medium truncate max-w-full">{option.label}</span>
+          {option.badge && (
+            <span className="inline-flex shrink-0 items-center rounded-full border border-border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground bg-muted">
+              {option.badge}
+            </span>
+          )}
+        </div>
         {option.description && (
           <span className="text-xs text-secondary-foreground truncate max-w-full">
             {option.description}

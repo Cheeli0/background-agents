@@ -31,13 +31,13 @@ This repo currently exposes the following static Copilot-backed model IDs:
 - `github-copilot/gemini-3-pro`
 - `github-copilot/gemini-3.1-pro`
 
-These are billed and authorized through your GitHub Copilot subscription, not through direct
-OpenAI or Anthropic credentials.
+These are billed and authorized through your GitHub Copilot subscription, not through direct OpenAI
+or Anthropic credentials.
 
 https://docs.github.com/en/copilot/concepts/billing/copilot-requests
 
-The UI shows the Copilot premium request multiplier in the model picker description and on the
-settings page. A label of `Free` means the multiplier is `0`.
+The UI shows the Copilot premium request multiplier in model picker options, integration model
+selectors, and on the settings page. A label of `Free` means the multiplier is `0`.
 
 ## Setup
 
@@ -119,8 +119,8 @@ entry or the provider entry pasted directly.
 ### A model is missing from the dropdown
 
 Most Copilot-backed models are available in model settings by default, but your saved preferences
-may still exclude some of them. Enable any additional models you want in model settings after
-adding the auth secret.
+may still exclude some of them. Enable any additional models you want in model settings after adding
+the auth secret.
 
 ### A model appears but requests fail
 
