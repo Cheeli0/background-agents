@@ -92,10 +92,12 @@ function associatedPrStatusClassName(status: AssociatedPrStatus) {
 }
 
 function sessionAssociatedPrStatusKey(sessionId: string) {
-  return `/api/sessions/${sessionId}/associated-pr`;
+  return [`/api/sessions/${sessionId}/associated-pr`, "status-only"] as const;
 }
 
-async function fetchAssociatedPrStatus(url: string): Promise<AssociatedPrStatus | null> {
+async function fetchAssociatedPrStatus([url]: ReturnType<
+  typeof sessionAssociatedPrStatusKey
+>): Promise<AssociatedPrStatus | null> {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch associated PR: ${response.status}`);

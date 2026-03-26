@@ -10,6 +10,7 @@ import {
   REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY,
   SessionSidebar,
 } from "./session-sidebar";
+import { useSessionAssociatedPr } from "@/hooks/use-session-associated-pr";
 import { buildSessionsPageKey, SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 
 expect.extend(matchers);
@@ -71,6 +72,11 @@ function jsonResponse(body: unknown) {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function AssociatedPrProbe({ sessionId }: { sessionId: string }) {
+  const { associatedPr } = useSessionAssociatedPr(sessionId);
+  return <span>{associatedPr ? `PR #${associatedPr.number}` : "No PR"}</span>;
 }
 
 describe("SessionSidebar", () => {
@@ -355,6 +361,50 @@ describe("SessionSidebar", () => {
 
     expect(groupButton).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Session 1")).toBeInTheDocument();
+  });
+
+  it("keeps associated PR cache isolated from sidebar status cache", async () => {
+    const sessions = [createSession(1)];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.endsWith("/session-1/associated-pr")) {
+        return jsonResponse({
+          pullRequest: {
+            number: 101,
+            title: "Improve status indicator",
+            url: "https://github.com/open-inspect/background-agents/pull/101",
+            status: "merged",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          fallback: {
+            [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false },
+          },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <>
+          <SessionSidebar />
+          <AssociatedPrProbe sessionId="session-1" />
+        </>
+      </SWRConfig>
+    );
+
+    expect(await screen.findByText("PR #101")).toBeInTheDocument();
+    expect(screen.getByLabelText("PR merged")).toBeInTheDocument();
   });
 
   it("restores collapsed repository groups from localStorage", async () => {
