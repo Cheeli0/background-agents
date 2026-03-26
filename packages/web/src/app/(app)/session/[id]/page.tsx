@@ -22,7 +22,11 @@ import {
   SessionRightSidebarContent,
 } from "@/components/session-right-sidebar";
 import { ActionBar } from "@/components/action-bar";
-import { copyToClipboard, formatModelNameLower, formatModelOptionDescription } from "@/lib/format";
+import {
+  copyToClipboard,
+  formatModelNameLower,
+  formatPremiumMultiplierLabel,
+} from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -958,12 +962,13 @@ function SessionContent({
                       options: group.models.map((model) => ({
                         value: model.id,
                         label: model.name,
-                        description: formatModelOptionDescription(model),
+                        badge: formatPremiumMultiplierLabel(model.premiumMultiplier) ?? undefined,
+                        description: model.description,
                       })),
                     })) as ComboboxGroup[]
                   }
                   direction="up"
-                  dropdownWidth="w-56"
+                  dropdownWidth="w-80"
                   disabled={isProcessing}
                   triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
                 >

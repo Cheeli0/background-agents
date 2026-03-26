@@ -6,7 +6,7 @@ import { mutate } from "swr";
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useSidebarContext } from "@/components/sidebar-layout";
-import { formatModelNameLower, formatModelOptionDescription } from "@/lib/format";
+import { formatModelNameLower, formatPremiumMultiplierLabel } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 import {
@@ -495,12 +495,13 @@ function HomeContent({
                           options: group.models.map((model) => ({
                             value: model.id,
                             label: model.name,
-                            description: formatModelOptionDescription(model),
+                            badge: formatPremiumMultiplierLabel(model.premiumMultiplier) ?? undefined,
+                            description: model.description,
                           })),
                         })) as ComboboxGroup[]
                       }
                       direction="up"
-                      dropdownWidth="w-56"
+                      dropdownWidth="w-80"
                       disabled={creating}
                       triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
                     >

@@ -21,13 +21,13 @@ describe("formatPremiumMultiplierLabel", () => {
 });
 
 describe("formatModelOptionDescription", () => {
-  it("appends multiplier labels when valid", () => {
+  it("prefixes multiplier labels when valid", () => {
     expect(
       formatModelOptionDescription({
         description: "Copilot-backed latest coding model",
         premiumMultiplier: 1,
       })
-    ).toBe("Copilot-backed latest coding model · Premium x1");
+    ).toBe("Premium x1 | Copilot-backed latest coding model");
   });
 
   it("falls back to model description for missing or invalid multipliers", () => {

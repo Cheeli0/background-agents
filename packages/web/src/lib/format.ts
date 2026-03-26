@@ -60,7 +60,7 @@ export function formatModelOptionDescription(
 ): string {
   const multiplierLabel = formatPremiumMultiplierLabel(model.premiumMultiplier);
   if (!multiplierLabel) return model.description;
-  return `${model.description} · ${multiplierLabel}`;
+  return `${multiplierLabel} | ${model.description}`;
 }
 
 export function getModelOptionDescription(modelId: string): string | null {
