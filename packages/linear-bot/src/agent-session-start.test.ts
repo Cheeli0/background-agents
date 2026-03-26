@@ -39,7 +39,7 @@ function createFakeKV(initial: Record<string, string> = {}) {
 }
 
 function createControlPlaneFetch(params?: { failCreateSession?: boolean; failPrompt?: boolean }) {
-  return vi.fn(async (url: string) => {
+  return vi.fn(async (url: string, _init?: RequestInit) => {
     if (url === "https://internal/sessions") {
       if (params?.failCreateSession) {
         return new Response("create session failed", { status: 500 });
@@ -140,6 +140,7 @@ function createCreatedWebhook(): AgentSessionWebhook {
 function createLinearFetch(params: {
   currentStateType: string;
   includeStateUpdateFailure?: boolean;
+  labels?: Array<{ id: string; name: string }>;
 }) {
   return vi.fn(async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as {
@@ -166,7 +167,7 @@ function createLinearFetch(params: {
             url: "https://linear.app/acme/issue/ENG-1/fix-issue",
             priority: 0,
             priorityLabel: "No priority",
-            labels: { nodes: [] },
+            labels: { nodes: params.labels ?? [] },
             project: { id: "project-1", name: "Platform" },
             assignee: null,
             state: {
@@ -234,11 +235,12 @@ describe("handleAgentSessionEvent started-state behavior", () => {
     const promptCallOrder = controlPlaneFetch.mock.invocationCallOrder.find((_callOrder, index) => {
       return controlPlaneFetch.mock.calls[index]?.[0] === "https://internal/sessions/sess-1/prompt";
     });
-    const moveCallOrder = linearFetch.mock.invocationCallOrder[
-      linearFetch.mock.calls.findIndex(([, init]) =>
-        String(init?.body).includes("mutation MoveIssueToStarted")
-      )
-    ];
+    const moveCallOrder =
+      linearFetch.mock.invocationCallOrder[
+        linearFetch.mock.calls.findIndex(([, init]) =>
+          String(init?.body).includes("mutation MoveIssueToStarted")
+        )
+      ];
     expect(moveCallOrder).toBeGreaterThan(promptCallOrder ?? 0);
     expect(controlPlaneFetch).toHaveBeenCalledWith(
       "https://internal/sessions",
@@ -317,7 +319,9 @@ describe("handleAgentSessionEvent started-state behavior", () => {
     );
 
     expect(
-      linearFetch.mock.calls.some(([, init]) => String(init?.body).includes("mutation MoveIssueToStarted"))
+      linearFetch.mock.calls.some(([, init]) =>
+        String(init?.body).includes("mutation MoveIssueToStarted")
+      )
     ).toBe(false);
     expect(controlPlaneFetch).toHaveBeenCalledWith(
       "https://internal/sessions/existing-session/prompt",
@@ -369,5 +373,28 @@ describe("handleAgentSessionEvent started-state behavior", () => {
       "https://internal/sessions/sess-1/prompt",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("uses provider and model labels together for session model selection", async () => {
+    const { env, controlPlaneFetch } = createEnv({
+      projectMapping: { "project-1": { owner: "acme", name: "platform" } },
+    });
+    const linearFetch = createLinearFetch({
+      currentStateType: "backlog",
+      labels: [
+        { id: "label-1", name: "provider:github-copilot" },
+        { id: "label-2", name: "model:gpt-5.4" },
+      ],
+    });
+    globalThis.fetch = linearFetch as typeof globalThis.fetch;
+
+    await handleAgentSessionEvent(createCreatedWebhook(), env, "trace-5");
+
+    const createSessionCall = controlPlaneFetch.mock.calls.find(
+      ([url]) => url === "https://internal/sessions"
+    );
+    const requestBody = JSON.parse(String(createSessionCall?.[1]?.body)) as { model: string };
+
+    expect(requestBody.model).toBe("github-copilot/gpt-5.4");
   });
 });
