@@ -2,11 +2,7 @@
  * Utility functions for formatting display values
  */
 
-import {
-  MODEL_OPTIONS,
-  normalizeModelId,
-  type ModelDisplayInfo,
-} from "@open-inspect/shared";
+import { MODEL_OPTIONS, normalizeModelId, type ModelDisplayInfo } from "@open-inspect/shared";
 
 // Build a lookup map once at module level
 const MODEL_DISPLAY_NAMES = new Map<string, string>(
@@ -14,6 +10,11 @@ const MODEL_DISPLAY_NAMES = new Map<string, string>(
 );
 const MODEL_DISPLAY_INFO = new Map<string, ModelDisplayInfo>(
   MODEL_OPTIONS.flatMap((g) => g.models.map((m) => [m.id, m]))
+);
+const PROVIDER_DISPLAY_NAMES = new Map<string, string>(
+  MODEL_OPTIONS.flatMap((group) =>
+    group.models.map((model) => [normalizeModelId(model.id).split("/")[0], group.category])
+  )
 );
 
 /**
@@ -33,6 +34,25 @@ export function formatModelName(modelId: string): string {
 export function formatModelNameLower(modelId: string): string {
   if (!modelId) return "unknown model";
   return (MODEL_DISPLAY_NAMES.get(normalizeModelId(modelId)) ?? modelId).toLowerCase();
+}
+
+export function formatProviderName(modelId: string): string | null {
+  if (!modelId) return null;
+
+  const normalized = normalizeModelId(modelId);
+  if (!normalized.includes("/")) return null;
+
+  const [provider] = normalized.split("/");
+  if (!provider) return null;
+
+  const displayName = PROVIDER_DISPLAY_NAMES.get(provider);
+  if (displayName) return displayName;
+
+  return provider
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatMultiplierNumber(multiplier: number): string {

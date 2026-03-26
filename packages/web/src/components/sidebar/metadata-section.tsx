@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { formatModelName, truncateBranch, copyToClipboard } from "@/lib/format";
+import { formatModelName, formatProviderName, truncateBranch, copyToClipboard } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/time";
 import { getSafeExternalUrl } from "@/lib/urls";
 import type { Artifact } from "@/types/session";
@@ -50,6 +50,7 @@ export function MetadataSection({
   associatedPr,
 }: MetadataSectionProps) {
   const [copied, setCopied] = useState(false);
+  const providerName = model ? formatProviderName(model) : null;
 
   const prArtifact = artifacts.find((a) => a.type === "pr");
   const manualPrArtifact = artifacts.find(
@@ -113,9 +114,12 @@ export function MetadataSection({
       {model && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <SparkleIcon className="w-4 h-4" />
-          <span>
-            {formatModelName(model)}
-            {reasoningEffort && <span> · {reasoningEffort}</span>}
+          <span className="flex flex-col leading-tight gap-0.5">
+            <span>
+              {formatModelName(model)}
+              {reasoningEffort && <span> · {reasoningEffort}</span>}
+            </span>
+            <span className="text-xs">Provider: {providerName ?? "Unknown"}</span>
           </span>
         </div>
       )}
