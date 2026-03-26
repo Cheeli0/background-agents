@@ -1,4 +1,6 @@
-import type { SessionStatus, SpawnSource } from "@open-inspect/shared";
+import type { MessageSource, SessionStatus, SpawnSource } from "@open-inspect/shared";
+
+type SessionCreationSource = MessageSource | "agent";
 
 export interface SessionEntry {
   id: string;
@@ -11,6 +13,7 @@ export interface SessionEntry {
   status: SessionStatus;
   parentSessionId?: string | null;
   spawnSource?: SpawnSource;
+  creationSource?: SessionCreationSource;
   spawnDepth?: number;
   automationId?: string | null;
   automationRunId?: string | null;
@@ -29,6 +32,7 @@ interface SessionRow {
   status: SessionStatus;
   parent_session_id: string | null;
   spawn_source: SpawnSource;
+  creation_source: SessionCreationSource;
   spawn_depth: number;
   automation_id: string | null;
   automation_run_id: string | null;
@@ -63,6 +67,7 @@ function toEntry(row: SessionRow): SessionEntry {
     status: row.status,
     parentSessionId: row.parent_session_id,
     spawnSource: row.spawn_source,
+    creationSource: row.creation_source,
     spawnDepth: row.spawn_depth,
     automationId: row.automation_id,
     automationRunId: row.automation_run_id,
@@ -77,8 +82,8 @@ export class SessionIndexStore {
   async create(session: SessionEntry): Promise<void> {
     await this.db
       .prepare(
-        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, model, reasoning_effort, base_branch, status, parent_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, model, reasoning_effort, base_branch, status, parent_session_id, spawn_source, creation_source, spawn_depth, automation_id, automation_run_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         session.id,
@@ -91,6 +96,7 @@ export class SessionIndexStore {
         session.status,
         session.parentSessionId ?? null,
         session.spawnSource ?? "user",
+        session.creationSource ?? "web",
         session.spawnDepth ?? 0,
         session.automationId ?? null,
         session.automationRunId ?? null,

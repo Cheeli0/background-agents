@@ -559,6 +559,7 @@ export class SchedulerDO extends DurableObject<Env> {
         title: `[Auto] ${automation.name}`,
         userId: automation.created_by,
         spawnSource: "automation",
+        creationSource: "automation",
       }),
     });
 
@@ -579,6 +580,7 @@ export class SchedulerDO extends DurableObject<Env> {
       baseBranch: automation.base_branch,
       status: "created",
       spawnSource: "automation",
+      creationSource: "automation",
       spawnDepth: 0,
       automationId: automation.id,
       automationRunId: runId,

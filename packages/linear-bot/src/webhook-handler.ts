@@ -390,18 +390,18 @@ async function handleNewSession(
       true
     );
 
-      const globalClassificationModel =
-        (await getLinearGlobalClassificationModel(env)) ?? env.CLASSIFICATION_MODEL ?? null;
+    const globalClassificationModel =
+      (await getLinearGlobalClassificationModel(env)) ?? env.CLASSIFICATION_MODEL ?? null;
 
-      const classification = await classifyRepo(
-        env,
-        issue.title,
-        issue.description,
-        labelNames,
-        projectInfo?.name,
-        globalClassificationModel,
-        traceId
-      );
+    const classification = await classifyRepo(
+      env,
+      issue.title,
+      issue.description,
+      labelNames,
+      projectInfo?.name,
+      globalClassificationModel,
+      traceId
+    );
 
     if (classification.needsClarification || !classification.repo) {
       const altList = (classification.alternatives || [])
@@ -506,6 +506,7 @@ async function handleNewSession(
       title: `${issue.identifier}: ${issue.title}`,
       model,
       reasoningEffort,
+      creationSource: "linear",
     }),
   });
 

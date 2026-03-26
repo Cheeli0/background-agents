@@ -85,6 +85,7 @@ async function createSession(
         title: title || `Slack: ${repo.name}`,
         model,
         reasoningEffort,
+        creationSource: "slack",
       }),
     });
 

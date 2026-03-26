@@ -234,16 +234,25 @@ describe("handleAgentSessionEvent started-state behavior", () => {
     const promptCallOrder = controlPlaneFetch.mock.invocationCallOrder.find((_callOrder, index) => {
       return controlPlaneFetch.mock.calls[index]?.[0] === "https://internal/sessions/sess-1/prompt";
     });
-    const moveCallOrder = linearFetch.mock.invocationCallOrder[
-      linearFetch.mock.calls.findIndex(([, init]) =>
-        String(init?.body).includes("mutation MoveIssueToStarted")
-      )
-    ];
+    const moveCallOrder =
+      linearFetch.mock.invocationCallOrder[
+        linearFetch.mock.calls.findIndex(([, init]) =>
+          String(init?.body).includes("mutation MoveIssueToStarted")
+        )
+      ];
     expect(moveCallOrder).toBeGreaterThan(promptCallOrder ?? 0);
     expect(controlPlaneFetch).toHaveBeenCalledWith(
       "https://internal/sessions",
       expect.objectContaining({ method: "POST" })
     );
+    const createSessionCall = controlPlaneFetch.mock.calls.find(
+      ([url]) => url === "https://internal/sessions"
+    );
+    expect(createSessionCall).toBeDefined();
+    const createSessionInit = (
+      createSessionCall as [string, RequestInit | undefined] | undefined
+    )?.[1];
+    expect(JSON.parse(String(createSessionInit?.body)).creationSource).toBe("linear");
     expect(controlPlaneFetch).toHaveBeenCalledWith(
       "https://internal/sessions/sess-1/prompt",
       expect.objectContaining({ method: "POST" })
@@ -317,7 +326,9 @@ describe("handleAgentSessionEvent started-state behavior", () => {
     );
 
     expect(
-      linearFetch.mock.calls.some(([, init]) => String(init?.body).includes("mutation MoveIssueToStarted"))
+      linearFetch.mock.calls.some(([, init]) =>
+        String(init?.body).includes("mutation MoveIssueToStarted")
+      )
     ).toBe(false);
     expect(controlPlaneFetch).toHaveBeenCalledWith(
       "https://internal/sessions/existing-session/prompt",

@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
-import { SWRConfig } from "swr";
+import { SWRConfig, useSWRConfig } from "swr";
 import {
   MOBILE_LONG_PRESS_MS,
   REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY,
@@ -64,6 +64,32 @@ function createSession(index: number) {
     createdAt: 1000 + index,
     updatedAt: 2000 + index,
   };
+}
+
+type SidebarTestSession = ReturnType<typeof createSession> & {
+  creationSource?: "web" | "slack" | "linear" | "extension" | "github" | "automation" | "agent";
+};
+
+function SidebarMutationHarness({ nextSessions }: { nextSessions: SidebarTestSession[] }) {
+  const { mutate } = useSWRConfig();
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          mutate(
+            SIDEBAR_SESSIONS_KEY,
+            { sessions: nextSessions, hasMore: false },
+            { revalidate: false }
+          )
+        }
+      >
+        Inject sessions
+      </button>
+      <SessionSidebar />
+    </>
+  );
 }
 
 function jsonResponse(body: unknown) {
@@ -220,6 +246,7 @@ describe("SessionSidebar", () => {
     render(
       <SWRConfig
         value={{
+          provider: () => new Map(),
           fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
           dedupingInterval: 0,
           revalidateOnFocus: false,
@@ -305,21 +332,90 @@ describe("SessionSidebar", () => {
     expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
   });
 
-  it("shows completion and waiting-for-input icons for session states", async () => {
+  it("auto-expands a collapsed repository when an external session is added", async () => {
+    const initialSessions = [createSession(1)];
+    const nextSessions = [
+      {
+        ...createSession(2),
+        title: "Slack session",
+        updatedAt: 9999,
+        creationSource: "slack" as const,
+      },
+      initialSessions[0],
+    ];
+
+    render(
+      <SWRConfig
+        value={{
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: initialSessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SidebarMutationHarness nextSessions={nextSessions} />
+      </SWRConfig>
+    );
+
+    const groupButton = await screen.findByRole("button", {
+      name: "Repository open-inspect/background-agents",
+    });
+
+    fireEvent.click(groupButton);
+    expect(groupButton).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Inject sessions" }));
+
+    await waitFor(() => expect(groupButton).toHaveAttribute("aria-expanded", "true"));
+    expect(screen.getByText("Slack session")).toBeInTheDocument();
+  });
+
+  it("keeps a collapsed repository closed for in-app session updates", async () => {
+    const initialSessions = [createSession(1)];
+    const nextSessions = [
+      {
+        ...createSession(2),
+        title: "Web session",
+        updatedAt: 9999,
+        creationSource: "web" as const,
+      },
+      initialSessions[0],
+    ];
+
+    render(
+      <SWRConfig
+        value={{
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: initialSessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SidebarMutationHarness nextSessions={nextSessions} />
+      </SWRConfig>
+    );
+
+    const groupButton = await screen.findByRole("button", {
+      name: "Repository open-inspect/background-agents",
+    });
+
+    fireEvent.click(groupButton);
+    expect(groupButton).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Inject sessions" }));
+
+    await waitFor(() => expect(groupButton).toHaveAttribute("aria-expanded", "false"));
+    expect(screen.queryByText("Web session")).not.toBeInTheDocument();
+  });
+
+  it("shows a waiting-for-input icon when a session is idle", async () => {
     const sessions = [
       {
         ...createSession(1),
-        title: "Completed Session",
-        status: "completed",
-      },
-      {
-        ...createSession(2),
         title: "Waiting Session",
         status: "active",
         isProcessing: false,
       },
       {
-        ...createSession(3),
+        ...createSession(2),
         title: "Running Session",
         status: "active",
         isProcessing: true,
@@ -329,6 +425,7 @@ describe("SessionSidebar", () => {
     render(
       <SWRConfig
         value={{
+          provider: () => new Map(),
           fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
           dedupingInterval: 0,
           revalidateOnFocus: false,
@@ -338,10 +435,9 @@ describe("SessionSidebar", () => {
       </SWRConfig>
     );
 
-    await screen.findByText("Completed Session");
+    await screen.findByRole("link", { name: /waiting session/i });
 
-    expect(screen.getByLabelText("Session completed")).toBeInTheDocument();
-    expect(screen.getByLabelText("Waiting for your input")).toBeInTheDocument();
-    expect(screen.queryAllByLabelText("Waiting for your input")).toHaveLength(1);
+    expect(document.querySelector('[aria-label="Waiting for your input"]')).toBeInTheDocument();
+    expect(document.querySelectorAll('[aria-label="Waiting for your input"]')).toHaveLength(1);
   });
 });
