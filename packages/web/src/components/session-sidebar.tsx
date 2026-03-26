@@ -22,6 +22,8 @@ import {
   SettingsIcon,
   AutomationsIcon,
   BranchIcon,
+  ChevronRightIcon,
+  FolderIcon,
 } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +53,7 @@ type RepositorySessionGroup = {
 export const MOBILE_LONG_PRESS_MS = 450;
 const MOBILE_LONG_PRESS_MOVE_THRESHOLD_PX = 10;
 const UNKNOWN_REPOSITORY_LABEL = "Unknown repository";
+export const REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY = "open-inspect-sidebar-collapsed-repositories";
 
 function getSessionRepositoryInfo(
   session: Pick<SessionItem, "repoOwner" | "repoName">
@@ -98,11 +101,47 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   const [extraSessions, setExtraSessions] = useState<SessionItem[]>([]);
   const [hasMorePages, setHasMorePages] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [collapsedRepositoryKeys, setCollapsedRepositoryKeys] = useState<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const offsetRef = useRef(0);
   const hasMoreRef = useRef(false);
   const loadingMoreRef = useRef(false);
   const isMobile = useIsMobile();
+  const collapsedRepositoriesHydratedRef = useRef(false);
+
+  useEffect(() => {
+    try {
+      const storedValue = localStorage.getItem(REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY);
+      if (!storedValue) {
+        collapsedRepositoriesHydratedRef.current = true;
+        return;
+      }
+
+      const parsed = JSON.parse(storedValue);
+      if (!Array.isArray(parsed)) {
+        collapsedRepositoriesHydratedRef.current = true;
+        return;
+      }
+
+      const validRepositoryKeys = parsed.filter(
+        (value): value is string => typeof value === "string"
+      );
+      setCollapsedRepositoryKeys(new Set(validRepositoryKeys));
+    } catch {
+      localStorage.removeItem(REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY);
+    } finally {
+      collapsedRepositoriesHydratedRef.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!collapsedRepositoriesHydratedRef.current) {
+      return;
+    }
+
+    const serialized = JSON.stringify([...collapsedRepositoryKeys]);
+    localStorage.setItem(REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY, serialized);
+  }, [collapsedRepositoryKeys]);
 
   const { data, isLoading: loading } = useSWR<SessionListResponse>(
     authSession ? SIDEBAR_SESSIONS_KEY : null
@@ -253,6 +292,18 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
 
   const currentSessionId = pathname?.startsWith("/session/") ? pathname.split("/")[2] : null;
 
+  const toggleRepositoryGroup = useCallback((repositoryKey: string) => {
+    setCollapsedRepositoryKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(repositoryKey)) {
+        next.delete(repositoryKey);
+      } else {
+        next.add(repositoryKey);
+      }
+      return next;
+    });
+  }, []);
+
   return (
     <aside className="w-72 h-dvh flex flex-col border-r border-border-muted bg-background">
       {/* Header */}
@@ -338,36 +389,32 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
           <>
             {repositoryGroups.map((group) => (
               <section key={group.repository.key} className="py-1">
-                <div
-                  role="heading"
-                  aria-level={2}
+                <button
+                  type="button"
+                  onClick={() => toggleRepositoryGroup(group.repository.key)}
+                  aria-expanded={!collapsedRepositoryKeys.has(group.repository.key)}
                   aria-label={`Repository ${group.repository.label}`}
-                  className="px-4 py-2"
+                  className="group/repository mx-2 w-[calc(100%-1rem)] px-2.5 py-2 rounded-md border border-border-muted bg-muted/40 text-left transition hover:bg-muted"
                 >
-                  <span className="text-[11px] font-medium text-secondary-foreground uppercase tracking-[0.08em]">
-                    {group.repository.label}
-                  </span>
-                </div>
+                  <div className="flex items-center gap-2">
+                    <ChevronRightIcon
+                      className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${
+                        collapsedRepositoryKeys.has(group.repository.key) ? "rotate-0" : "rotate-90"
+                      }`}
+                    />
+                    <FolderIcon className="h-3.5 w-3.5 text-secondary-foreground" />
+                    <span className="truncate text-[11px] font-semibold text-secondary-foreground uppercase tracking-[0.08em]">
+                      {group.repository.label}
+                    </span>
+                    <span className="ml-auto rounded-sm bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      {group.activeSessions.length + group.inactiveSessions.length}
+                    </span>
+                  </div>
+                </button>
 
-                {group.activeSessions.map((session) => (
-                  <SessionWithChildren
-                    key={session.id}
-                    session={session}
-                    childSessions={childrenMap.get(session.id)}
-                    currentSessionId={currentSessionId}
-                    isMobile={isMobile}
-                    onSessionSelect={onSessionSelect}
-                  />
-                ))}
-
-                {group.inactiveSessions.length > 0 && (
+                {!collapsedRepositoryKeys.has(group.repository.key) && (
                   <>
-                    <div className="px-4 py-1.5">
-                      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.1em]">
-                        Inactive
-                      </span>
-                    </div>
-                    {group.inactiveSessions.map((session) => (
+                    {group.activeSessions.map((session) => (
                       <SessionWithChildren
                         key={session.id}
                         session={session}
@@ -377,6 +424,26 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
                         onSessionSelect={onSessionSelect}
                       />
                     ))}
+
+                    {group.inactiveSessions.length > 0 && (
+                      <>
+                        <div className="px-4 py-1.5">
+                          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.1em]">
+                            Inactive
+                          </span>
+                        </div>
+                        {group.inactiveSessions.map((session) => (
+                          <SessionWithChildren
+                            key={session.id}
+                            session={session}
+                            childSessions={childrenMap.get(session.id)}
+                            currentSessionId={currentSessionId}
+                            isMobile={isMobile}
+                            onSessionSelect={onSessionSelect}
+                          />
+                        ))}
+                      </>
+                    )}
                   </>
                 )}
               </section>

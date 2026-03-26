@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { SWRConfig } from "swr";
-import { MOBILE_LONG_PRESS_MS, SessionSidebar } from "./session-sidebar";
+import {
+  MOBILE_LONG_PRESS_MS,
+  REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY,
+  SessionSidebar,
+} from "./session-sidebar";
 import { buildSessionsPageKey, SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 
 expect.extend(matchers);
@@ -47,6 +51,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
   mockUseIsMobile.mockReturnValue(false);
+  localStorage.clear();
 });
 
 function createSession(index: number) {
@@ -224,16 +229,79 @@ describe("SessionSidebar", () => {
       </SWRConfig>
     );
 
-    const repositoryHeadings = await screen.findAllByRole("heading", {
+    const repositoryButtons = await screen.findAllByRole("button", {
       name: /repository /i,
     });
 
-    expect(repositoryHeadings.map((heading) => heading.textContent)).toEqual([
-      "open-inspect/background-agents",
-      "open-inspect/docs",
-      "Unknown repository",
+    expect(repositoryButtons.map((button) => button.textContent)).toEqual([
+      "open-inspect/background-agents2",
+      "open-inspect/docs1",
+      "Unknown repository1",
     ]);
     expect(screen.getByText("Inactive")).toBeInTheDocument();
     expect(screen.getByText("Unknown Repo Session")).toBeInTheDocument();
+  });
+
+  it("collapses and expands repository groups", async () => {
+    const sessions = [createSession(1), createSession(2)];
+
+    render(
+      <SWRConfig
+        value={{
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    const groupButton = await screen.findByRole("button", {
+      name: "Repository open-inspect/background-agents",
+    });
+
+    expect(groupButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Session 1")).toBeInTheDocument();
+
+    fireEvent.click(groupButton);
+
+    expect(groupButton).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
+    expect(localStorage.getItem(REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY)).toBe(
+      JSON.stringify(["open-inspect/background-agents"])
+    );
+
+    fireEvent.click(groupButton);
+
+    expect(groupButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Session 1")).toBeInTheDocument();
+  });
+
+  it("restores collapsed repository groups from localStorage", async () => {
+    localStorage.setItem(
+      REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY,
+      JSON.stringify(["open-inspect/background-agents"])
+    );
+
+    render(
+      <SWRConfig
+        value={{
+          fallback: {
+            [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false },
+          },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    const groupButton = await screen.findByRole("button", {
+      name: "Repository open-inspect/background-agents",
+    });
+    expect(groupButton).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
   });
 });
