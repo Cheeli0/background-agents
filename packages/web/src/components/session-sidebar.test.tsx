@@ -283,14 +283,14 @@ describe("SessionSidebar", () => {
       </SWRConfig>
     );
 
-    const repositoryHeadings = await screen.findAllByRole("heading", {
+    const repositoryHeadings = await screen.findAllByRole("button", {
       name: /repository /i,
     });
 
-    expect(repositoryHeadings.map((heading) => heading.textContent)).toEqual([
-      "open-inspect/background-agents",
-      "open-inspect/docs",
-      "Unknown repository",
+    expect(repositoryHeadings.map((heading) => heading.getAttribute("aria-label"))).toEqual([
+      "Repository open-inspect/background-agents",
+      "Repository open-inspect/docs",
+      "Repository Unknown repository",
     ]);
     expect(screen.getByText("Inactive")).toBeInTheDocument();
     expect(screen.getByText("Unknown Repo Session")).toBeInTheDocument();
@@ -358,11 +358,12 @@ describe("SessionSidebar", () => {
       "Session 2 with a very long title that should truncate in sidebar"
     );
     const mergedRow = longTitle.closest("a");
+    const mergedHeaderRow = longTitle.parentElement;
 
     expect(mergedIndicator).toHaveClass("text-[#8250df]");
     expect(closedIndicator).toHaveClass("text-[#cf222e]");
     expect(mergedRow).toContainElement(mergedIndicator);
-    expect(mergedIndicator.compareDocumentPosition(longTitle) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(mergedHeaderRow?.firstElementChild).toBe(mergedIndicator);
   });
 
   it("keeps associated PR cache isolated from sidebar status cache", async () => {

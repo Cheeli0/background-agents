@@ -854,7 +854,10 @@ function SessionListItem({
           className="block pr-8"
         >
           <div className="flex items-center gap-1.5 min-w-0">
-            <div className="truncate text-sm font-medium text-foreground">{displayTitle}</div>
+            <SessionPrStatusIndicator sessionId={session.id} />
+            <div className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+              {displayTitle}
+            </div>
             {showCompletedIndicator && (
               <span
                 className="inline-flex items-center text-success"
@@ -873,7 +876,6 @@ function SessionListItem({
                 <KeyboardIcon className="h-3.5 w-3.5" />
               </span>
             )}
-            <SessionPrStatusIndicator sessionId={session.id} />
           </div>
           <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
             <span>{relativeTime}</span>
@@ -947,9 +949,9 @@ function ChildSessionListItem({
       }`}
     >
       <div className="flex items-center gap-1.5 text-xs">
+        <SessionPrStatusIndicator sessionId={session.id} />
         <span className="shrink-0 text-muted-foreground">{relativeTime}</span>
         <span className="truncate font-medium text-foreground">{displayTitle}</span>
-        <SessionPrStatusIndicator sessionId={session.id} />
       </div>
     </Link>
   );
