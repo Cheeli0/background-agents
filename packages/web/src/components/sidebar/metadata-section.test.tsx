@@ -37,4 +37,31 @@ describe("MetadataSection", () => {
     expect(link).toHaveAttribute("href", "https://github.com/acme/repo/pull/42");
     expect(screen.getByText("open")).toBeInTheDocument();
   });
+
+  it("shows provider information alongside model", () => {
+    render(
+      <MetadataSection
+        createdAt={Date.now()}
+        baseBranch="main"
+        model="openai/gpt-5.3-codex"
+        reasoningEffort="high"
+      />
+    );
+
+    expect(screen.getByText("GPT 5.3 Codex")).toBeInTheDocument();
+    expect(screen.getByText("Provider: OpenAI")).toBeInTheDocument();
+  });
+
+  it("shows unknown when provider cannot be determined", () => {
+    render(
+      <MetadataSection
+        createdAt={Date.now()}
+        baseBranch="main"
+        model="custom-model-without-prefix"
+      />
+    );
+
+    expect(screen.getByText("custom-model-without-prefix")).toBeInTheDocument();
+    expect(screen.getByText("Provider: Unknown")).toBeInTheDocument();
+  });
 });
