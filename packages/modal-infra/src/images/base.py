@@ -29,8 +29,8 @@ CODE_SERVER_VERSION = "4.109.5"
 AGENT_BROWSER_VERSION = "0.21.2"
 
 # Cache buster - change this to force Modal image rebuild
-# v44: replace Playwright with agent-browser for browser automation
-CACHE_BUSTER = "v44-agent-browser"
+# v45: refresh OpenCode layer to pick up latest Z.AI model registry (including glm-4.7)
+CACHE_BUSTER = "v45-zai-glm47-refresh"
 
 # Base image with all development tools
 base_image = (
@@ -129,7 +129,7 @@ base_image = (
         "mkdir -p /workspace",
         "mkdir -p /app/plugins",
         "mkdir -p /tmp/opencode",
-        "echo 'Image rebuilt at: v21-force-rebuild' > /app/image-version.txt",
+        f"echo 'Image rebuilt at: {CACHE_BUSTER}' > /app/image-version.txt",
     )
     # Set environment variables (including cache buster to force rebuild)
     .env(
