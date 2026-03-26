@@ -114,7 +114,43 @@ async function fetchAssociatedPrStatus([url]: ReturnType<
     return status;
   }
 
-  return null;
+  const artifactsResponse = await fetch(url.replace("/associated-pr", "/artifacts"));
+  if (!artifactsResponse.ok) {
+    return null;
+  }
+
+  const artifactsData = (await artifactsResponse.json()) as {
+    artifacts?: Array<{
+      type?: string;
+      createdAt?: number;
+      metadata?: {
+        prState?: "open" | "merged" | "closed" | "draft";
+        state?: "open" | "merged" | "closed" | "draft";
+      } | null;
+    }>;
+  };
+
+  const prArtifacts = (artifactsData.artifacts ?? []).filter((artifact) => artifact.type === "pr");
+  if (prArtifacts.length === 0) {
+    return null;
+  }
+
+  const latestPrArtifact = prArtifacts.reduce((latest, artifact) => {
+    const latestCreatedAt = latest.createdAt ?? 0;
+    const artifactCreatedAt = artifact.createdAt ?? 0;
+    return artifactCreatedAt > latestCreatedAt ? artifact : latest;
+  });
+
+  const artifactStatus = latestPrArtifact.metadata?.prState ?? latestPrArtifact.metadata?.state;
+  if (artifactStatus === "open" || artifactStatus === "merged" || artifactStatus === "closed") {
+    return artifactStatus;
+  }
+
+  if (artifactStatus === "draft") {
+    return "open";
+  }
+
+  return "open";
 }
 
 function SessionPrStatusIndicator({ sessionId }: { sessionId: string }) {

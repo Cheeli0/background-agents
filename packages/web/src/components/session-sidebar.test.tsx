@@ -99,6 +99,10 @@ describe("SessionSidebar", () => {
         return jsonResponse({ pullRequest: null });
       }
 
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
       throw new Error(`Unexpected fetch for ${url}`);
     });
 
@@ -161,6 +165,10 @@ describe("SessionSidebar", () => {
         return jsonResponse({ pullRequest: null });
       }
 
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
       throw new Error(`Unexpected fetch for ${url}`);
     });
 
@@ -191,6 +199,10 @@ describe("SessionSidebar", () => {
       const url = String(input);
       if (url.includes("/associated-pr")) {
         return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
       }
 
       throw new Error(`Unexpected fetch for ${url}`);
@@ -249,6 +261,20 @@ describe("SessionSidebar", () => {
       },
     ];
 
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
     render(
       <SWRConfig
         value={{
@@ -405,6 +431,57 @@ describe("SessionSidebar", () => {
 
     expect(await screen.findByText("PR #101")).toBeInTheDocument();
     expect(screen.getByLabelText("PR merged")).toBeInTheDocument();
+  });
+
+  it("falls back to artifact PR status for existing sessions", async () => {
+    const sessions = [createSession(1)];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === SIDEBAR_SESSIONS_KEY) {
+        return jsonResponse({ sessions, hasMore: false });
+      }
+
+      if (url.endsWith("/session-1/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.endsWith("/session-1/artifacts")) {
+        return jsonResponse({
+          artifacts: [
+            {
+              id: "artifact-1",
+              type: "pr",
+              createdAt: 1234,
+              metadata: { prState: "merged" },
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+          fetcher: async (url: string) => {
+            const response = await fetch(url);
+            return response.json();
+          },
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    expect(await screen.findByLabelText("PR merged")).toBeInTheDocument();
   });
 
   it("restores collapsed repository groups from localStorage", async () => {
