@@ -2,6 +2,7 @@ import type { Session } from "@open-inspect/shared";
 
 export type SidebarSession = Session & {
   isProcessing?: boolean;
+  creationSource?: "web" | "slack" | "linear" | "extension" | "github" | "automation" | "agent";
 };
 
 export const SESSIONS_PAGE_SIZE = 50;

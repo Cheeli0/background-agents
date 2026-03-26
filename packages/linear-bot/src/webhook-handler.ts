@@ -515,6 +515,7 @@ async function handleNewSession(
       title: `${issue.identifier}: ${issue.title}`,
       model,
       reasoningEffort,
+      creationSource: "linear",
     }),
   });
 

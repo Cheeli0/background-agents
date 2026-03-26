@@ -13,6 +13,7 @@ type SessionRow = {
   status: string;
   parent_session_id: string | null;
   spawn_source: "user" | "agent" | "automation";
+  creation_source: "web" | "slack" | "linear" | "extension" | "github" | "automation" | "agent";
   spawn_depth: number;
   automation_id: string | null;
   automation_run_id: string | null;
@@ -124,6 +125,7 @@ class FakeD1Database {
         status,
         parentSessionId,
         spawnSource,
+        creationSource,
         spawnDepth,
         automationId,
         automationRunId,
@@ -140,6 +142,7 @@ class FakeD1Database {
         string,
         string | null,
         "user" | "agent" | "automation",
+        "web" | "slack" | "linear" | "extension" | "github" | "automation" | "agent",
         number,
         string | null,
         string | null,
@@ -159,6 +162,7 @@ class FakeD1Database {
           status,
           parent_session_id: parentSessionId,
           spawn_source: spawnSource,
+          creation_source: creationSource,
           spawn_depth: spawnDepth,
           automation_id: automationId,
           automation_run_id: automationRunId,
@@ -317,6 +321,7 @@ describe("SessionIndexStore", () => {
         // Defaults applied for missing optional fields
         parentSessionId: null,
         spawnSource: "user",
+        creationSource: "web",
         spawnDepth: 0,
         automationId: null,
         automationRunId: null,
@@ -353,6 +358,7 @@ describe("SessionIndexStore", () => {
       const result = await store.get("child-1");
       expect(result?.parentSessionId).toBe("parent-1");
       expect(result?.spawnSource).toBe("agent");
+      expect(result?.creationSource).toBe("web");
       expect(result?.spawnDepth).toBe(1);
     });
   });

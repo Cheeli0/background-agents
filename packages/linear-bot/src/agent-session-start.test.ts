@@ -246,6 +246,14 @@ describe("handleAgentSessionEvent started-state behavior", () => {
       "https://internal/sessions",
       expect.objectContaining({ method: "POST" })
     );
+    const createSessionCall = controlPlaneFetch.mock.calls.find(
+      ([url]) => url === "https://internal/sessions"
+    );
+    expect(createSessionCall).toBeDefined();
+    const createSessionInit = (
+      createSessionCall as [string, RequestInit | undefined] | undefined
+    )?.[1];
+    expect(JSON.parse(String(createSessionInit?.body)).creationSource).toBe("linear");
     expect(controlPlaneFetch).toHaveBeenCalledWith(
       "https://internal/sessions/sess-1/prompt",
       expect.objectContaining({ method: "POST" })

@@ -53,6 +53,14 @@ type RepositorySessionGroup = {
   inactiveSessions: SessionItem[];
 };
 
+const EXTERNAL_SESSION_CREATION_SOURCES = new Set([
+  "slack",
+  "linear",
+  "github",
+  "extension",
+  "automation",
+]);
+
 export const MOBILE_LONG_PRESS_MS = 450;
 const MOBILE_LONG_PRESS_MOVE_THRESHOLD_PX = 10;
 const UNKNOWN_REPOSITORY_LABEL = "Unknown repository";
@@ -78,6 +86,10 @@ function getSessionRepositoryInfo(
   }
 
   return { key: "unknown", label: UNKNOWN_REPOSITORY_LABEL };
+}
+
+function shouldAutoExpandRepositoryGroup(session: { creationSource?: string | null }) {
+  return !!session.creationSource && EXTERNAL_SESSION_CREATION_SOURCES.has(session.creationSource);
 }
 
 function SessionPrStatusIndicator({ sessionId }: { sessionId: string }) {
@@ -121,6 +133,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   const loadingMoreRef = useRef(false);
   const isMobile = useIsMobile();
   const collapsedRepositoriesHydratedRef = useRef(false);
+  const previousFirstPageSessionIdsRef = useRef<Set<string> | null>(null);
 
   useEffect(() => {
     try {
@@ -160,6 +173,47 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
     authSession ? SIDEBAR_SESSIONS_KEY : null
   );
   const firstPageSessions = useMemo(() => data?.sessions ?? [], [data?.sessions]);
+
+  useEffect(() => {
+    const previousFirstPageSessionIds = previousFirstPageSessionIdsRef.current;
+    previousFirstPageSessionIdsRef.current = new Set(
+      firstPageSessions.map((session) => session.id)
+    );
+
+    if (!collapsedRepositoriesHydratedRef.current || !previousFirstPageSessionIds) {
+      return;
+    }
+
+    const repositoryKeysToExpand = new Set<string>();
+
+    for (const session of firstPageSessions) {
+      if (
+        previousFirstPageSessionIds.has(session.id) ||
+        !shouldAutoExpandRepositoryGroup(session)
+      ) {
+        continue;
+      }
+
+      repositoryKeysToExpand.add(getSessionRepositoryInfo(session).key);
+    }
+
+    if (repositoryKeysToExpand.size === 0) {
+      return;
+    }
+
+    setCollapsedRepositoryKeys((previous) => {
+      let changed = false;
+      const next = new Set(previous);
+
+      for (const repositoryKey of repositoryKeysToExpand) {
+        if (next.delete(repositoryKey)) {
+          changed = true;
+        }
+      }
+
+      return changed ? next : previous;
+    });
+  }, [firstPageSessions]);
 
   // Track data reference to clear extraSessions synchronously during render,
   // preventing one frame of stale extra sessions after SWR revalidation.

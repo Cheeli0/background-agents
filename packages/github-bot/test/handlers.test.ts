@@ -195,6 +195,7 @@ describe("handlePullRequestOpened", () => {
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("Review PR #42");
+    expect(sessionBody.creationSource).toBe("github");
 
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.source).toBe("github");

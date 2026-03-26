@@ -25,6 +25,7 @@ export type SandboxStatus =
 export type GitSyncStatus = "pending" | "in_progress" | "completed" | "failed";
 export type MessageStatus = "pending" | "processing" | "completed" | "failed";
 export type MessageSource = "web" | "slack" | "linear" | "extension" | "github" | "automation";
+export type SessionCreationSource = MessageSource | "agent";
 export type ArtifactType = "pr" | "screenshot" | "preview" | "branch";
 export type EventType =
   | "heartbeat"
@@ -68,6 +69,7 @@ export interface Session {
   status: SessionStatus;
   parentSessionId: string | null;
   spawnSource: SpawnSource;
+  creationSource?: SessionCreationSource;
   spawnDepth: number;
   createdAt: number;
   updatedAt: number;
@@ -492,6 +494,7 @@ export interface CreateSessionRequest {
   model?: string;
   reasoningEffort?: string;
   branch?: string;
+  creationSource?: SessionCreationSource;
 }
 
 export interface CreateSessionResponse {

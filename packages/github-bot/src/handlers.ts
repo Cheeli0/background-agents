@@ -44,6 +44,7 @@ async function createSession(
   if (params.reasoningEffort) {
     body.reasoningEffort = params.reasoningEffort;
   }
+  body.creationSource = "github";
   const response = await controlPlane.fetch("https://internal/sessions", {
     method: "POST",
     headers,

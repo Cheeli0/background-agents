@@ -665,6 +665,7 @@ async function handleCreateSession(
     scmLogin?: string;
     scmName?: string;
     scmEmail?: string;
+    creationSource?: "web" | "slack" | "linear" | "extension" | "github" | "automation" | "agent";
   };
 
   if (!body.repoOwner || !body.repoName) {
@@ -837,6 +838,7 @@ async function handleCreateSession(
     reasoningEffort,
     baseBranch: body.branch || defaultBranch || "main",
     status: "created",
+    creationSource: body.creationSource ?? "web",
     createdAt: now,
     updatedAt: now,
   });
@@ -1539,6 +1541,7 @@ async function handleSpawnChild(
           branch: spawnContext.baseBranch ?? "main",
           parentSessionId: parentId,
           spawnSource: "agent",
+          creationSource: "agent",
           spawnDepth: childDepth,
           codeServerEnabled: childCodeServerEnabled,
         }),
@@ -1564,6 +1567,7 @@ async function handleSpawnChild(
     status: "created",
     parentSessionId: parentId,
     spawnSource: "agent",
+    creationSource: "agent",
     spawnDepth: childDepth,
     createdAt: now,
     updatedAt: now,

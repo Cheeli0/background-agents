@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
-import { SWRConfig } from "swr";
+import { SWRConfig, useSWRConfig } from "swr";
 import { MOBILE_LONG_PRESS_MS, SessionSidebar } from "./session-sidebar";
 import { useSessionAssociatedPr } from "@/hooks/use-session-associated-pr";
 import { buildSessionsPageKey, SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
@@ -48,6 +48,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
   mockUseIsMobile.mockReturnValue(false);
+  localStorage.clear();
 });
 
 function createSession(index: number) {
@@ -60,6 +61,32 @@ function createSession(index: number) {
     createdAt: 1000 + index,
     updatedAt: 2000 + index,
   };
+}
+
+type SidebarTestSession = ReturnType<typeof createSession> & {
+  creationSource?: "web" | "slack" | "linear" | "extension" | "github" | "automation" | "agent";
+};
+
+function SidebarMutationHarness({ nextSessions }: { nextSessions: SidebarTestSession[] }) {
+  const { mutate } = useSWRConfig();
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() =>
+          mutate(
+            SIDEBAR_SESSIONS_KEY,
+            { sessions: nextSessions, hasMore: false },
+            { revalidate: false }
+          )
+        }
+      >
+        Inject sessions
+      </button>
+      <SessionSidebar />
+    </>
+  );
 }
 
 function jsonResponse(body: unknown) {
@@ -274,6 +301,7 @@ describe("SessionSidebar", () => {
     render(
       <SWRConfig
         value={{
+          provider: () => new Map(),
           fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
           dedupingInterval: 0,
           revalidateOnFocus: false,
@@ -408,6 +436,167 @@ describe("SessionSidebar", () => {
 
     expect(await screen.findByText("PR #101")).toBeInTheDocument();
     expect(screen.getByLabelText("PR merged")).toBeInTheDocument();
+  });
+
+  it("auto-expands a collapsed repository when an external session is added", async () => {
+    const initialSessions = [createSession(1)];
+    const nextSessions = [
+      {
+        ...createSession(2),
+        title: "Slack session",
+        updatedAt: 9999,
+        creationSource: "slack" as const,
+      },
+      initialSessions[0],
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: initialSessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SidebarMutationHarness nextSessions={nextSessions} />
+      </SWRConfig>
+    );
+
+    const groupButton = await screen.findByRole("button", {
+      name: "Repository open-inspect/background-agents",
+    });
+
+    fireEvent.click(groupButton);
+    expect(groupButton).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Inject sessions" }));
+
+    await waitFor(() => expect(groupButton).toHaveAttribute("aria-expanded", "true"));
+    expect(screen.getByText("Slack session")).toBeInTheDocument();
+  });
+
+  it("keeps a collapsed repository closed for in-app session updates", async () => {
+    const initialSessions = [createSession(1)];
+    const nextSessions = [
+      {
+        ...createSession(2),
+        title: "Web session",
+        updatedAt: 9999,
+        creationSource: "web" as const,
+      },
+      initialSessions[0],
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions: initialSessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SidebarMutationHarness nextSessions={nextSessions} />
+      </SWRConfig>
+    );
+
+    const groupButton = await screen.findByRole("button", {
+      name: "Repository open-inspect/background-agents",
+    });
+
+    fireEvent.click(groupButton);
+    expect(groupButton).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Inject sessions" }));
+
+    await waitFor(() => expect(groupButton).toHaveAttribute("aria-expanded", "false"));
+    expect(screen.queryByText("Web session")).not.toBeInTheDocument();
+  });
+
+  it("shows a waiting-for-input icon when a session is idle", async () => {
+    const sessions = [
+      {
+        ...createSession(1),
+        title: "Waiting Session",
+        status: "active",
+        isProcessing: false,
+      },
+      {
+        ...createSession(2),
+        title: "Running Session",
+        status: "active",
+        isProcessing: true,
+      },
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+          fetcher: async (url: string) => {
+            const response = await fetch(url);
+            return response.json();
+          },
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    await screen.findByRole("link", { name: /waiting session/i });
+
+    expect(document.querySelector('[aria-label="Waiting for your input"]')).toBeInTheDocument();
+    expect(document.querySelectorAll('[aria-label="Waiting for your input"]')).toHaveLength(1);
   });
 
   it("falls back to artifact PR status for existing sessions", async () => {
