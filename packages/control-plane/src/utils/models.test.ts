@@ -48,6 +48,13 @@ describe("model utilities", () => {
       expect(isValidModel("github-copilot/claude-sonnet-4")).toBe(true);
     });
 
+    it("returns true for Z.AI Coding Plan-backed models", () => {
+      expect(isValidModel("zai-coding-plan/glm-5")).toBe(true);
+      expect(isValidModel("zai-coding-plan/glm-5-turbo")).toBe(true);
+      expect(isValidModel("zai-coding-plan/glm-4.7")).toBe(true);
+      expect(isValidModel("zai-coding-plan/glm-4.5-air")).toBe(true);
+    });
+
     it("accepts bare GPT model names via normalization", () => {
       expect(isValidModel("gpt-5.4")).toBe(true);
       expect(isValidModel("gpt-5.2")).toBe(true);
@@ -140,6 +147,18 @@ describe("model utilities", () => {
       expect(extractProviderAndModel("github-copilot/claude-sonnet-4")).toEqual({
         provider: "github-copilot",
         model: "claude-sonnet-4",
+      });
+    });
+
+    it("extracts Z.AI Coding Plan provider from GLM models", () => {
+      expect(extractProviderAndModel("zai-coding-plan/glm-5")).toEqual({
+        provider: "zai-coding-plan",
+        model: "glm-5",
+      });
+
+      expect(extractProviderAndModel("zai-coding-plan/glm-4.7")).toEqual({
+        provider: "zai-coding-plan",
+        model: "glm-4.7",
       });
     });
 

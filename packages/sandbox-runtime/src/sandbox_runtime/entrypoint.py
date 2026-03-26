@@ -326,6 +326,17 @@ class SandboxSupervisor:
 
         return openai_entry
 
+    def _build_zai_auth_entry(self) -> dict[str, object] | None:
+        """Build the managed Z.AI auth entry for direct API-key sessions."""
+        api_key = os.environ.get("ZAI_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        return {
+            "type": "api",
+            "key": api_key,
+        }
+
     def _write_opencode_auth(self, auth_data: dict[str, object]) -> None:
         """Write OpenCode auth.json atomically with secure permissions."""
         auth_dir = Path.home() / ".local" / "share" / "opencode"
@@ -363,6 +374,29 @@ class SandboxSupervisor:
 
         return auth_data
 
+    def _normalize_zai_auth(self, auth_data: dict[str, object]) -> dict[str, object]:
+        """Normalize Z.AI auth blobs from either full auth.json or direct provider entries."""
+        zai_entry = auth_data.get("zai-coding-plan") or auth_data.get("zai")
+        if isinstance(zai_entry, dict):
+            normalized = dict(auth_data)
+            normalized["zai-coding-plan"] = zai_entry
+            normalized["zai"] = zai_entry
+            return normalized
+
+        if (
+            ("type" in auth_data or "key" in auth_data)
+            and "openai" not in auth_data
+            and "anthropic" not in auth_data
+            and "github-copilot" not in auth_data
+            and "copilot" not in auth_data
+        ):
+            return {
+                "zai-coding-plan": dict(auth_data),
+                "zai": dict(auth_data),
+            }
+
+        return auth_data
+
     def _setup_opencode_auth(self, selected_provider: str) -> None:
         """Write OpenCode auth.json from repo secrets and managed OpenAI config."""
         auth_data: dict[str, object] = {}
@@ -380,11 +414,18 @@ class SandboxSupervisor:
             auth_data = parsed
             if selected_provider == "github-copilot":
                 auth_data = self._normalize_copilot_auth(auth_data)
+            elif selected_provider == "zai-coding-plan":
+                auth_data = self._normalize_zai_auth(auth_data)
 
         try:
             openai_entry = self._build_openai_auth_entry()
             if openai_entry:
                 auth_data["openai"] = openai_entry
+
+            zai_entry = self._build_zai_auth_entry()
+            if zai_entry:
+                auth_data["zai"] = zai_entry
+                auth_data["zai-coding-plan"] = zai_entry
 
             if selected_provider == "github-copilot":
                 copilot_entry = auth_data.get("github-copilot") or auth_data.get("copilot")
@@ -392,6 +433,23 @@ class SandboxSupervisor:
                     raise RuntimeError(
                         "GitHub Copilot credentials are not configured. "
                         "Add OPENCODE_AUTH_JSON in repository Settings."
+                    )
+
+            if selected_provider == "zai-coding-plan":
+                zai_entry = auth_data.get("zai-coding-plan") or auth_data.get("zai")
+                if not isinstance(zai_entry, dict):
+                    raise RuntimeError(
+                        "Z.AI credentials are not configured. "
+                        "Add OPENCODE_AUTH_JSON in repository Settings."
+                    )
+
+                if zai_entry.get("type") != "api":
+                    raise RuntimeError("Z.AI credentials in OPENCODE_AUTH_JSON must use type 'api'.")
+
+                key = zai_entry.get("key")
+                if not isinstance(key, str) or not key.strip():
+                    raise RuntimeError(
+                        "Z.AI credentials in OPENCODE_AUTH_JSON must include a non-empty key."
                     )
 
             if not auth_data:

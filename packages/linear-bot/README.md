@@ -127,7 +127,7 @@ On any Linear issue:
 - Assign the issue to `OpenInspect` → agent picks it up
 - Agent status is visible directly in Linear (thinking, working, done)
 - Add a `model:<name>` label to override the model (e.g., `model:opus`, `model:sonnet`,
-  `model:haiku`, `model:gpt-5.4`, `model:gpt-5.2-codex`)
+  `model:haiku`, `model:gpt-5.4`, `model:gpt-5.2-codex`, `model:glm-5`, `model:glm-4.7`)
 
 ## Repo Resolution
 
@@ -189,4 +189,3 @@ Built on Linear's [Agents API](https://linear.app/developers/agents):
 - **Hono** for HTTP routing
 - **KV** for OAuth tokens, issue-to-session mapping, and configuration
 - **Service binding** to the control plane for session management
-

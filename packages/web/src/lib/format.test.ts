@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatModelOptionDescription, formatPremiumMultiplierLabel } from "./format";
+import {
+  formatModelOptionDescription,
+  formatPremiumMultiplierLabel,
+  formatProviderName,
+} from "./format";
 
 describe("formatPremiumMultiplierLabel", () => {
   it("returns null when no multiplier exists", () => {
@@ -40,5 +44,11 @@ describe("formatModelOptionDescription", () => {
     expect(
       formatModelOptionDescription({ description: "Fast and efficient", premiumMultiplier: -5 })
     ).toBe("Fast and efficient");
+  });
+});
+
+describe("formatProviderName", () => {
+  it("formats Z.AI Coding Plan provider names", () => {
+    expect(formatProviderName("zai-coding-plan/glm-5")).toBe("Z.AI");
   });
 });

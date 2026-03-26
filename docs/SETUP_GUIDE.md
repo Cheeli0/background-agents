@@ -224,4 +224,5 @@ Control plane cannot reach Modal (or Modal is not properly configured/deployed).
 - Full production deployment: [docs/GETTING_STARTED.md](./GETTING_STARTED.md)
 - Debugging and observability: [docs/DEBUGGING_PLAYBOOK.md](./DEBUGGING_PLAYBOOK.md)
 - OpenAI model setup: [docs/OPENAI_MODELS.md](./OPENAI_MODELS.md)
+- Z.AI model setup: [docs/ZAI_MODELS.md](./ZAI_MODELS.md)
 - Contribution workflow: [CONTRIBUTING.md](../CONTRIBUTING.md)

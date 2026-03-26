@@ -22,6 +22,12 @@ describe("extractModelFromLabels", () => {
     expect(extractModelFromLabels([{ name: "model:gpt-5.4" }])).toBe("openai/gpt-5.4");
   });
 
+  it("returns GLM 5 for model:glm-5 label", () => {
+    expect(extractModelFromLabels([{ name: "model:glm-5" }])).toBe("zai-coding-plan/glm-5");
+  });
+
+  it("returns GLM 4.7 for model:glm-4.7 label", () => {
+    expect(extractModelFromLabels([{ name: "model:glm-4.7" }])).toBe("zai-coding-plan/glm-4.7");
   it("resolves provider-only labels using the matching base model when available", () => {
     expect(
       extractModelFromLabels([{ name: "provider:github-copilot" }], "anthropic/claude-sonnet-4-6")
