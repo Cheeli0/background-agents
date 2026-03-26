@@ -27,6 +27,7 @@ import {
   ChevronRightIcon,
   FolderIcon,
   KeyboardIcon,
+  GitPrIcon,
 } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +51,7 @@ type RepositorySessionGroup = {
   activeSessions: SessionItem[];
   inactiveSessions: SessionItem[];
 };
+type AssociatedPrStatus = "open" | "merged" | "closed";
 
 export const MOBILE_LONG_PRESS_MS = 450;
 const MOBILE_LONG_PRESS_MOVE_THRESHOLD_PX = 10;
@@ -76,6 +78,112 @@ function getSessionRepositoryInfo(
   }
 
   return { key: "unknown", label: UNKNOWN_REPOSITORY_LABEL };
+}
+
+function associatedPrStatusClassName(status: AssociatedPrStatus) {
+  switch (status) {
+    case "open":
+      return "text-success";
+    case "merged":
+      return "text-[#8250df]";
+    case "closed":
+      return "text-[#cf222e]";
+  }
+}
+
+function sessionAssociatedPrStatusKey(sessionId: string) {
+  return [`/api/sessions/${sessionId}/associated-pr`, "status-only"] as const;
+}
+
+async function fetchAssociatedPrStatus([url]: ReturnType<
+  typeof sessionAssociatedPrStatusKey
+>): Promise<AssociatedPrStatus | null> {
+  try {
+    const response = await fetch(url);
+    if (response.ok) {
+      const data = (await response.json()) as {
+        pullRequest?: {
+          status?: "open" | "merged" | "closed" | "draft";
+        } | null;
+        artifactPullRequest?: {
+          status?: "open" | "merged" | "closed" | "draft";
+        } | null;
+      };
+
+      const status = data.pullRequest?.status ?? data.artifactPullRequest?.status;
+      if (status === "open" || status === "merged" || status === "closed") {
+        return status;
+      }
+    } else {
+      console.warn(`Failed to fetch associated PR: ${response.status}`);
+    }
+  } catch (error) {
+    console.warn("Failed to fetch associated PR:", error);
+  }
+
+  const artifactsResponse = await fetch(url.replace("/associated-pr", "/artifacts"));
+  if (!artifactsResponse.ok) {
+    return null;
+  }
+
+  const artifactsData = (await artifactsResponse.json()) as {
+    artifacts?: Array<{
+      type?: string;
+      createdAt?: number;
+      metadata?: {
+        prState?: "open" | "merged" | "closed" | "draft";
+        state?: "open" | "merged" | "closed" | "draft";
+      } | null;
+    }>;
+  };
+
+  const prArtifacts = (artifactsData.artifacts ?? []).filter((artifact) => artifact.type === "pr");
+  if (prArtifacts.length === 0) {
+    return null;
+  }
+
+  const latestPrArtifact = prArtifacts.reduce((latest, artifact) => {
+    const latestCreatedAt = latest.createdAt ?? 0;
+    const artifactCreatedAt = artifact.createdAt ?? 0;
+    return artifactCreatedAt > latestCreatedAt ? artifact : latest;
+  });
+
+  const artifactStatus = latestPrArtifact.metadata?.prState ?? latestPrArtifact.metadata?.state;
+  if (artifactStatus === "open" || artifactStatus === "merged" || artifactStatus === "closed") {
+    return artifactStatus;
+  }
+
+  if (artifactStatus === "draft") {
+    return "open";
+  }
+
+  return "open";
+}
+
+function SessionPrStatusIndicator({ sessionId }: { sessionId: string }) {
+  const { data: prStatus } = useSWR<AssociatedPrStatus | null>(
+    sessionAssociatedPrStatusKey(sessionId),
+    fetchAssociatedPrStatus,
+    {
+      refreshInterval: (latestStatus) => (latestStatus === "open" ? 10_000 : 0),
+      revalidateOnFocus: true,
+      dedupingInterval: 10_000,
+    }
+  );
+
+  if (!prStatus) {
+    return null;
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center ${associatedPrStatusClassName(prStatus)}`}
+      title={`PR ${prStatus}`}
+      aria-label={`PR ${prStatus}`}
+    >
+      <GitPrIcon className="w-3 h-3" />
+    </span>
+  );
 }
 
 export function buildSessionHref(session: SessionItem) {
@@ -745,8 +853,11 @@ function SessionListItem({
           onTouchCancel={handleTouchEnd}
           className="block pr-8"
         >
-          <div className="flex items-center gap-1.5">
-            <div className="truncate text-sm font-medium text-foreground">{displayTitle}</div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <SessionPrStatusIndicator sessionId={session.id} />
+            <div className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+              {displayTitle}
+            </div>
             {showCompletedIndicator && (
               <span
                 className="inline-flex items-center text-success"
@@ -838,6 +949,7 @@ function ChildSessionListItem({
       }`}
     >
       <div className="flex items-center gap-1.5 text-xs">
+        <SessionPrStatusIndicator sessionId={session.id} />
         <span className="shrink-0 text-muted-foreground">{relativeTime}</span>
         <span className="truncate font-medium text-foreground">{displayTitle}</span>
       </div>

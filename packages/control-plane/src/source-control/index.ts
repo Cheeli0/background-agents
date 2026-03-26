@@ -20,6 +20,8 @@ export type {
   GetRepositoryConfig,
   CreatePullRequestConfig,
   CreatePullRequestResult,
+  GetPullRequestStatusConfig,
+  PullRequestStatus,
   RepositoryAccessResult,
 } from "./types";
 

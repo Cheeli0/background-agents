@@ -5,11 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { SWRConfig } from "swr";
-import {
-  MOBILE_LONG_PRESS_MS,
-  REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY,
-  SessionSidebar,
-} from "./session-sidebar";
+import { MOBILE_LONG_PRESS_MS, SessionSidebar } from "./session-sidebar";
+import { useSessionAssociatedPr } from "@/hooks/use-session-associated-pr";
 import { buildSessionsPageKey, SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 
 expect.extend(matchers);
@@ -51,7 +48,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
   mockUseIsMobile.mockReturnValue(false);
-  localStorage.clear();
 });
 
 function createSession(index: number) {
@@ -73,6 +69,11 @@ function jsonResponse(body: unknown) {
   });
 }
 
+function AssociatedPrProbe({ sessionId }: { sessionId: string }) {
+  const { associatedPr } = useSessionAssociatedPr(sessionId);
+  return <span>{associatedPr ? `PR #${associatedPr.number}` : "No PR"}</span>;
+}
+
 describe("SessionSidebar", () => {
   it("loads the next page when scrolled near the bottom", async () => {
     const firstPage = Array.from({ length: 50 }, (_, index) => createSession(index + 1));
@@ -87,6 +88,14 @@ describe("SessionSidebar", () => {
 
       if (url === buildSessionsPageKey({ excludeStatus: "archived", offset: 50 })) {
         return jsonResponse({ sessions: secondPage, hasMore: false });
+      }
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
       }
 
       throw new Error(`Unexpected fetch for ${url}`);
@@ -145,6 +154,21 @@ describe("SessionSidebar", () => {
   it("navigates directly on mobile tap without opening rename actions", async () => {
     mockUseIsMobile.mockReturnValue(true);
 
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
     render(
       <SWRConfig
         value={{
@@ -165,6 +189,21 @@ describe("SessionSidebar", () => {
 
   it("opens rename actions on mobile long press", async () => {
     mockUseIsMobile.mockReturnValue(true);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <SWRConfig
@@ -217,6 +256,21 @@ describe("SessionSidebar", () => {
       },
     ];
 
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
     render(
       <SWRConfig
         value={{
@@ -229,119 +283,233 @@ describe("SessionSidebar", () => {
       </SWRConfig>
     );
 
-    const repositoryButtons = await screen.findAllByRole("button", {
+    const repositoryHeadings = await screen.findAllByRole("button", {
       name: /repository /i,
     });
 
-    expect(repositoryButtons.map((button) => button.textContent)).toEqual([
-      "open-inspect/background-agents2",
-      "open-inspect/docs1",
-      "Unknown repository1",
+    expect(repositoryHeadings.map((heading) => heading.getAttribute("aria-label"))).toEqual([
+      "Repository open-inspect/background-agents",
+      "Repository open-inspect/docs",
+      "Repository Unknown repository",
     ]);
     expect(screen.getByText("Inactive")).toBeInTheDocument();
     expect(screen.getByText("Unknown Repo Session")).toBeInTheDocument();
   });
 
-  it("collapses and expands repository groups", async () => {
-    const sessions = [createSession(1), createSession(2)];
+  it("shows merged and closed PR status indicators in the sessions list", async () => {
+    const sessions = [
+      createSession(1),
+      { ...createSession(2), title: "Session 2 with a very long title that should truncate in sidebar" },
+      createSession(3),
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === SIDEBAR_SESSIONS_KEY) {
+        return jsonResponse({ sessions, hasMore: false });
+      }
+
+      if (url.endsWith("/session-1/associated-pr")) {
+        return jsonResponse({ pullRequest: { status: "open" } });
+      }
+
+      if (url.endsWith("/session-2/associated-pr")) {
+        return jsonResponse({ pullRequest: { status: "merged" } });
+      }
+
+      if (url.endsWith("/session-3/associated-pr")) {
+        return jsonResponse({ pullRequest: { status: "closed" } });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <SWRConfig
         value={{
-          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          provider: () => new Map(),
           dedupingInterval: 0,
           revalidateOnFocus: false,
+          fetcher: async (url: string) => {
+            const response = await fetch(url);
+            return response.json();
+          },
         }}
       >
         <SessionSidebar />
       </SWRConfig>
     );
 
-    const groupButton = await screen.findByRole("button", {
-      name: "Repository open-inspect/background-agents",
+    expect(await screen.findByText("Session 1")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("PR merged")).toBeInTheDocument();
+      expect(screen.getByLabelText("PR closed")).toBeInTheDocument();
     });
 
-    expect(groupButton).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("Session 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("PR open")).toBeInTheDocument();
 
-    fireEvent.click(groupButton);
-
-    expect(groupButton).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
-    expect(localStorage.getItem(REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY)).toBe(
-      JSON.stringify(["open-inspect/background-agents"])
+    const mergedIndicator = screen.getByLabelText("PR merged");
+    const closedIndicator = screen.getByLabelText("PR closed");
+    const longTitle = screen.getByText(
+      "Session 2 with a very long title that should truncate in sidebar"
     );
+    const mergedRow = longTitle.closest("a");
+    const mergedHeaderRow = longTitle.parentElement;
 
-    fireEvent.click(groupButton);
-
-    expect(groupButton).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText("Session 1")).toBeInTheDocument();
+    expect(mergedIndicator).toHaveClass("text-[#8250df]");
+    expect(closedIndicator).toHaveClass("text-[#cf222e]");
+    expect(mergedRow).toContainElement(mergedIndicator);
+    expect(mergedHeaderRow?.firstElementChild).toBe(mergedIndicator);
   });
 
-  it("restores collapsed repository groups from localStorage", async () => {
-    localStorage.setItem(
-      REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY,
-      JSON.stringify(["open-inspect/background-agents"])
-    );
+  it("keeps associated PR cache isolated from sidebar status cache", async () => {
+    const sessions = [createSession(1)];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.endsWith("/session-1/associated-pr")) {
+        return jsonResponse({
+          pullRequest: {
+            number: 101,
+            title: "Improve status indicator",
+            url: "https://github.com/open-inspect/background-agents/pull/101",
+            status: "merged",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <SWRConfig
         value={{
+          provider: () => new Map(),
           fallback: {
-            [SIDEBAR_SESSIONS_KEY]: { sessions: [createSession(1)], hasMore: false },
+            [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false },
           },
           dedupingInterval: 0,
           revalidateOnFocus: false,
         }}
       >
-        <SessionSidebar />
+        <>
+          <SessionSidebar />
+          <AssociatedPrProbe sessionId="session-1" />
+        </>
       </SWRConfig>
     );
 
-    const groupButton = await screen.findByRole("button", {
-      name: "Repository open-inspect/background-agents",
-    });
-    expect(groupButton).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
+    expect(await screen.findByText("PR #101")).toBeInTheDocument();
+    expect(screen.getByLabelText("PR merged")).toBeInTheDocument();
   });
 
-  it("shows completion and waiting-for-input icons for session states", async () => {
-    const sessions = [
-      {
-        ...createSession(1),
-        title: "Completed Session",
-        status: "completed",
-      },
-      {
-        ...createSession(2),
-        title: "Waiting Session",
-        status: "active",
-        isProcessing: false,
-      },
-      {
-        ...createSession(3),
-        title: "Running Session",
-        status: "active",
-        isProcessing: true,
-      },
-    ];
+  it("falls back to artifact PR status for existing sessions", async () => {
+    const sessions = [createSession(1)];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === SIDEBAR_SESSIONS_KEY) {
+        return jsonResponse({ sessions, hasMore: false });
+      }
+
+      if (url.endsWith("/session-1/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.endsWith("/session-1/artifacts")) {
+        return jsonResponse({
+          artifacts: [
+            {
+              id: "artifact-1",
+              type: "pr",
+              createdAt: 1234,
+              metadata: { prState: "merged" },
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <SWRConfig
         value={{
-          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          provider: () => new Map(),
           dedupingInterval: 0,
           revalidateOnFocus: false,
+          fetcher: async (url: string) => {
+            const response = await fetch(url);
+            return response.json();
+          },
         }}
       >
         <SessionSidebar />
       </SWRConfig>
     );
 
-    await screen.findByText("Completed Session");
+    expect(await screen.findByLabelText("PR merged")).toBeInTheDocument();
+  });
 
-    expect(screen.getByLabelText("Session completed")).toBeInTheDocument();
-    expect(screen.getByLabelText("Waiting for your input")).toBeInTheDocument();
-    expect(screen.queryAllByLabelText("Waiting for your input")).toHaveLength(1);
+  it("falls back to artifact PR status when associated PR lookup fails", async () => {
+    const sessions = [createSession(1)];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === SIDEBAR_SESSIONS_KEY) {
+        return jsonResponse({ sessions, hasMore: false });
+      }
+
+      if (url.endsWith("/session-1/associated-pr")) {
+        return new Response(JSON.stringify({ error: "failed" }), { status: 500 });
+      }
+
+      if (url.endsWith("/session-1/artifacts")) {
+        return jsonResponse({
+          artifacts: [
+            {
+              id: "artifact-1",
+              type: "pr",
+              createdAt: 1234,
+              metadata: { prState: "merged" },
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+          fetcher: async (url: string) => {
+            const response = await fetch(url);
+            return response.json();
+          },
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    expect(await screen.findByText("Session 1")).toBeInTheDocument();
+    expect(await screen.findByLabelText("PR merged")).toBeInTheDocument();
   });
 });

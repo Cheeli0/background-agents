@@ -1,8 +1,8 @@
 import type { Logger } from "../../../logger";
-import type { ParticipantRow, SandboxRow, SessionRow } from "../../types";
+import type { ArtifactRow, ParticipantRow, SandboxRow, SessionRow } from "../../types";
 import type { SandboxStatus, ServerMessage, SessionStatus, SpawnSource } from "../../../types";
 import type { SessionRepository } from "../../repository";
-import type { PullRequestChecks, SourceControlProvider } from "../../../source-control";
+import type { PullRequestStatus, SourceControlProvider } from "../../../source-control";
 import { getValidModelOrDefault, isValidModel } from "../../../utils/models";
 import { generateInternalToken } from "@open-inspect/shared";
 
@@ -18,26 +18,12 @@ interface ServiceBinding {
 }
 
 interface AssociatedPrResponse {
-  artifactPullRequest: {
-    number: number;
-    url: string;
-    status: "open" | "merged" | "closed" | "draft";
-    checks: PullRequestChecks | null;
-  } | null;
   pullRequest: {
     number: number;
     title: string;
     url: string;
     status: "open" | "merged" | "closed" | "draft";
-    checks: PullRequestChecks | null;
   } | null;
-}
-
-interface PullRequestArtifactMetadata {
-  number?: number;
-  prNumber?: number;
-  state?: "open" | "merged" | "closed" | "draft";
-  prState?: "open" | "merged" | "closed" | "draft";
 }
 
 interface InitRequest {
@@ -125,11 +111,11 @@ function parseLinearCallbackContext(
   }
 }
 
-function emptyAssociatedPrResponse(): AssociatedPrResponse {
-  return {
-    artifactPullRequest: null,
-    pullRequest: null,
-  };
+interface PullRequestArtifactMetadata {
+  number?: number;
+  prNumber?: number;
+  state?: "open" | "merged" | "closed" | "draft";
+  prState?: "open" | "merged" | "closed" | "draft";
 }
 
 function parsePullRequestArtifactMetadata(raw: string | null): PullRequestArtifactMetadata | null {
@@ -143,30 +129,86 @@ function parsePullRequestArtifactMetadata(raw: string | null): PullRequestArtifa
   }
 }
 
-async function getPullRequestChecks(
-  deps: SessionLifecycleHandlerDeps,
-  repoOwner: string,
-  repoName: string,
-  pullRequestNumber: number
-): Promise<PullRequestChecks | null> {
-  if (!deps.sourceControlProvider) {
+function mapPullRequestStatus(
+  status: string | undefined
+): "open" | "merged" | "closed" | "draft" | null {
+  if (status === "open" || status === "merged" || status === "closed" || status === "draft") {
+    return status;
+  }
+  return null;
+}
+
+function parsePullRequestNumberFromUrl(url: string | null): number | null {
+  if (!url) return null;
+  const match = url.match(/\/pull\/(\d+)(?:\/|$)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function selectLatestPullRequestArtifact(artifacts: ArtifactRow[]): ArtifactRow | null {
+  const pullRequestArtifacts = artifacts.filter((artifact) => artifact.type === "pr");
+  if (pullRequestArtifacts.length === 0) {
     return null;
   }
 
+  return pullRequestArtifacts.reduce((latest, artifact) =>
+    artifact.created_at > latest.created_at ? artifact : latest
+  );
+}
+
+async function resolveArtifactPullRequest(
+  deps: SessionLifecycleHandlerDeps,
+  session: SessionRow | null
+): Promise<AssociatedPrResponse["pullRequest"]> {
+  const artifact = selectLatestPullRequestArtifact(deps.repository.listArtifacts());
+  if (!artifact) {
+    return null;
+  }
+
+  const metadata = parsePullRequestArtifactMetadata(artifact.metadata);
+  const artifactNumber =
+    metadata?.prNumber ?? metadata?.number ?? parsePullRequestNumberFromUrl(artifact.url);
+  if (typeof artifactNumber !== "number") {
+    return null;
+  }
+
+  const artifactStatus = mapPullRequestStatus(metadata?.prState ?? metadata?.state) ?? "open";
+  const fallback: AssociatedPrResponse["pullRequest"] = {
+    number: artifactNumber,
+    title: `PR #${artifactNumber}`,
+    url: artifact.url ?? "",
+    status: artifactStatus,
+  };
+
+  if (!session || !deps.sourceControlProvider?.getPullRequestStatus) {
+    return fallback.url ? fallback : null;
+  }
+
   try {
-    return await deps.sourceControlProvider.getPullRequestChecks({
-      owner: repoOwner,
-      name: repoName,
-      pullRequestNumber,
+    const live = await deps.sourceControlProvider.getPullRequestStatus({
+      owner: session.repo_owner,
+      name: session.repo_name,
+      pullRequestNumber: artifactNumber,
     });
+    if (!live) {
+      return fallback.url ? fallback : null;
+    }
+
+    return {
+      number: live.number,
+      title: live.title,
+      url: live.url,
+      status: live.status,
+    } satisfies PullRequestStatus;
   } catch (error) {
-    deps.getLog().warn("Failed to fetch pull request checks", {
-      repo_owner: repoOwner,
-      repo_name: repoName,
-      pull_request_number: pullRequestNumber,
+    deps.getLog().warn("Failed to resolve artifact pull request status", {
+      repo_owner: session.repo_owner,
+      repo_name: session.repo_name,
+      pull_request_number: artifactNumber,
       error: error instanceof Error ? error.message : String(error),
     });
-    return null;
+    return fallback.url ? fallback : null;
   }
 }
 
@@ -289,44 +331,17 @@ export function createSessionLifecycleHandler(
 
     async getAssociatedPr(): Promise<Response> {
       const session = deps.getSession();
-      const prArtifact = deps.repository.listArtifacts().find((artifact) => artifact.type === "pr");
-      const prArtifactMetadata = parsePullRequestArtifactMetadata(prArtifact?.metadata ?? null);
-      const artifactPullRequestNumber = prArtifactMetadata?.prNumber ?? prArtifactMetadata?.number;
-      const artifactPullRequestStatus = prArtifactMetadata?.prState ?? prArtifactMetadata?.state;
-      const artifactPullRequest =
-        session &&
-        prArtifact?.url &&
-        typeof artifactPullRequestNumber === "number" &&
-        artifactPullRequestStatus
-          ? {
-              number: artifactPullRequestNumber,
-              url: prArtifact.url,
-              status: artifactPullRequestStatus,
-              checks: await getPullRequestChecks(
-                deps,
-                session.repo_owner,
-                session.repo_name,
-                artifactPullRequestNumber
-              ),
-            }
-          : null;
-
+      const artifactPullRequest = await resolveArtifactPullRequest(deps, session);
       const callbackContext = parseLinearCallbackContext(
         deps.repository.getLatestLinearCallbackContext()?.callback_context
       );
 
       if (!callbackContext?.agentSessionId || !callbackContext.organizationId) {
-        return Response.json({
-          ...emptyAssociatedPrResponse(),
-          artifactPullRequest,
-        } satisfies AssociatedPrResponse);
+        return Response.json({ pullRequest: artifactPullRequest } satisfies AssociatedPrResponse);
       }
 
       if (!deps.linearBot || !deps.internalCallbackSecret) {
-        return Response.json({
-          ...emptyAssociatedPrResponse(),
-          artifactPullRequest,
-        } satisfies AssociatedPrResponse);
+        return Response.json({ pullRequest: artifactPullRequest } satisfies AssociatedPrResponse);
       }
 
       let linearResponse: Response;
@@ -346,10 +361,7 @@ export function createSessionLifecycleHandler(
           agent_session_id: callbackContext.agentSessionId,
           error: error instanceof Error ? error.message : String(error),
         });
-        return Response.json({
-          ...emptyAssociatedPrResponse(),
-          artifactPullRequest,
-        } satisfies AssociatedPrResponse);
+        return Response.json({ pullRequest: artifactPullRequest } satisfies AssociatedPrResponse);
       }
 
       if (!linearResponse.ok) {
@@ -357,37 +369,15 @@ export function createSessionLifecycleHandler(
           agent_session_id: callbackContext.agentSessionId,
           status: linearResponse.status,
         });
-        return Response.json({
-          ...emptyAssociatedPrResponse(),
-          artifactPullRequest,
-        } satisfies AssociatedPrResponse);
+        return Response.json({ pullRequest: artifactPullRequest } satisfies AssociatedPrResponse);
       }
 
       const body = (await linearResponse.json()) as {
-        pullRequests?: Array<Omit<NonNullable<AssociatedPrResponse["pullRequest"]>, "checks">>;
+        pullRequests?: Array<AssociatedPrResponse["pullRequest"]>;
       };
-      const rawPullRequest = Array.isArray(body.pullRequests)
-        ? (body.pullRequests[0] ?? null)
-        : null;
-      const pullRequest =
-        rawPullRequest && session
-          ? {
-              ...rawPullRequest,
-              checks: await getPullRequestChecks(
-                deps,
-                session.repo_owner,
-                session.repo_name,
-                rawPullRequest.number
-              ),
-            }
-          : rawPullRequest
-            ? {
-                ...rawPullRequest,
-                checks: null,
-              }
-            : null;
+      const pullRequest = Array.isArray(body.pullRequests) ? (body.pullRequests[0] ?? null) : null;
 
-      return Response.json({ artifactPullRequest, pullRequest } satisfies AssociatedPrResponse);
+      return Response.json({ pullRequest: pullRequest ?? artifactPullRequest } satisfies AssociatedPrResponse);
     },
 
     async updateTitle(request: Request): Promise<Response> {

@@ -103,9 +103,7 @@ function createHandler() {
   const updateSandboxStatus = vi.fn();
   const broadcast = vi.fn();
   const linearBot = { fetch: vi.fn() };
-  const sourceControlProvider = {
-    getPullRequestChecks: vi.fn(),
-  };
+  const sourceControlProvider = { getPullRequestStatus: vi.fn() };
 
   const handler = createSessionLifecycleHandler({
     repository,
@@ -281,8 +279,7 @@ describe("createSessionLifecycleHandler", () => {
   });
 
   it("returns the first associated PR for linear sessions", async () => {
-    const { handler, repository, linearBot, getSession, sourceControlProvider } = createHandler();
-    getSession.mockReturnValue(createSession());
+    const { handler, repository, linearBot } = createHandler();
     repository.getLatestLinearCallbackContext.mockReturnValue({
       callback_context: JSON.stringify({
         agentSessionId: "agent-session-1",
@@ -304,31 +301,16 @@ describe("createSessionLifecycleHandler", () => {
         { status: 200, headers: { "Content-Type": "application/json" } }
       )
     );
-    sourceControlProvider.getPullRequestChecks.mockResolvedValue({
-      state: "pending",
-      totalCount: 3,
-      successfulCount: 1,
-      failedCount: 0,
-      pendingCount: 2,
-    });
 
     const response = await handler.getAssociatedPr();
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      artifactPullRequest: null,
       pullRequest: {
         number: 42,
         title: "Display associated PR",
         url: "https://github.com/acme/repo/pull/42",
         status: "open",
-        checks: {
-          state: "pending",
-          totalCount: 3,
-          successfulCount: 1,
-          failedCount: 0,
-          pendingCount: 2,
-        },
       },
     });
     expect(linearBot.fetch).toHaveBeenCalledWith(
@@ -339,11 +321,6 @@ describe("createSessionLifecycleHandler", () => {
         }),
       })
     );
-    expect(sourceControlProvider.getPullRequestChecks).toHaveBeenCalledWith({
-      owner: "acme",
-      name: "repo",
-      pullRequestNumber: 42,
-    });
   });
 
   it("returns null when no linear callback context exists", async () => {
@@ -353,7 +330,46 @@ describe("createSessionLifecycleHandler", () => {
     const response = await handler.getAssociatedPr();
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ artifactPullRequest: null, pullRequest: null });
+    expect(await response.json()).toEqual({ pullRequest: null });
+    expect(linearBot.fetch).not.toHaveBeenCalled();
+  });
+
+  it("returns artifact PR with live merged status when linear context is unavailable", async () => {
+    const { handler, repository, getSession, sourceControlProvider, linearBot } = createHandler();
+    getSession.mockReturnValue(createSession());
+    repository.getLatestLinearCallbackContext.mockReturnValue(null);
+    repository.listArtifacts.mockReturnValue([
+      {
+        id: "artifact-1",
+        type: "pr",
+        url: "https://github.com/acme/repo/pull/15",
+        metadata: JSON.stringify({ number: 15, state: "open" }),
+        created_at: 100,
+      },
+    ]);
+    sourceControlProvider.getPullRequestStatus.mockResolvedValue({
+      number: 15,
+      title: "CHE-65: Add sidebar status icons",
+      url: "https://github.com/acme/repo/pull/15",
+      status: "merged",
+    });
+
+    const response = await handler.getAssociatedPr();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      pullRequest: {
+        number: 15,
+        title: "CHE-65: Add sidebar status icons",
+        url: "https://github.com/acme/repo/pull/15",
+        status: "merged",
+      },
+    });
+    expect(sourceControlProvider.getPullRequestStatus).toHaveBeenCalledWith({
+      owner: "acme",
+      name: "repo",
+      pullRequestNumber: 15,
+    });
     expect(linearBot.fetch).not.toHaveBeenCalled();
   });
 
@@ -370,51 +386,10 @@ describe("createSessionLifecycleHandler", () => {
     const response = await handler.getAssociatedPr();
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ artifactPullRequest: null, pullRequest: null });
+    expect(await response.json()).toEqual({ pullRequest: null });
     expect(log.warn).toHaveBeenCalledWith("Failed to fetch associated Linear pull requests", {
       agent_session_id: "agent-session-1",
       error: "service unavailable",
-    });
-  });
-
-  it("returns PR artifact checks when a session PR exists", async () => {
-    const { handler, repository, getSession, sourceControlProvider } = createHandler();
-    getSession.mockReturnValue(createSession());
-    repository.getLatestLinearCallbackContext.mockReturnValue(null);
-    repository.listArtifacts.mockReturnValue([
-      {
-        id: "artifact-1",
-        type: "pr",
-        url: "https://github.com/acme/repo/pull/7",
-        metadata: JSON.stringify({ number: 7, state: "open" }),
-        created_at: 100,
-      },
-    ]);
-    sourceControlProvider.getPullRequestChecks.mockResolvedValue({
-      state: "success",
-      totalCount: 4,
-      successfulCount: 4,
-      failedCount: 0,
-      pendingCount: 0,
-    });
-
-    const response = await handler.getAssociatedPr();
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      artifactPullRequest: {
-        number: 7,
-        url: "https://github.com/acme/repo/pull/7",
-        status: "open",
-        checks: {
-          state: "success",
-          totalCount: 4,
-          successfulCount: 4,
-          failedCount: 0,
-          pendingCount: 0,
-        },
-      },
-      pullRequest: null,
     });
   });
 
