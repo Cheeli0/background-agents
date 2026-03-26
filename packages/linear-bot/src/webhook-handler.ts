@@ -390,18 +390,18 @@ async function handleNewSession(
       true
     );
 
-      const globalClassificationModel =
-        (await getLinearGlobalClassificationModel(env)) ?? env.CLASSIFICATION_MODEL ?? null;
+    const globalClassificationModel =
+      (await getLinearGlobalClassificationModel(env)) ?? env.CLASSIFICATION_MODEL ?? null;
 
-      const classification = await classifyRepo(
-        env,
-        issue.title,
-        issue.description,
-        labelNames,
-        projectInfo?.name,
-        globalClassificationModel,
-        traceId
-      );
+    const classification = await classifyRepo(
+      env,
+      issue.title,
+      issue.description,
+      labelNames,
+      projectInfo?.name,
+      globalClassificationModel,
+      traceId
+    );
 
     if (classification.needsClarification || !classification.repo) {
       const altList = (classification.alternatives || [])
@@ -470,7 +470,16 @@ async function handleNewSession(
     userReasoningEffort = prefs?.reasoningEffort;
   }
 
-  const labelModel = extractModelFromLabels(labels);
+  const baseSessionModelSettings = resolveSessionModelSettings({
+    envDefaultModel: env.DEFAULT_MODEL,
+    configModel: integrationConfig.model,
+    configReasoningEffort: integrationConfig.reasoningEffort,
+    allowUserPreferenceOverride: integrationConfig.allowUserPreferenceOverride,
+    allowLabelModelOverride: false,
+    userModel,
+    userReasoningEffort,
+  });
+  const labelModel = extractModelFromLabels(labels, baseSessionModelSettings.model);
   const { model, reasoningEffort } = resolveSessionModelSettings({
     envDefaultModel: env.DEFAULT_MODEL,
     configModel: integrationConfig.model,
