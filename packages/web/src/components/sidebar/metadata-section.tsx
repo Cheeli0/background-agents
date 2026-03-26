@@ -25,7 +25,6 @@ import {
   ErrorIcon,
   LinkIcon,
 } from "@/components/ui/icons";
-import { Badge, prBadgeVariant } from "@/components/ui/badge";
 
 interface MetadataSectionProps {
   sessionId?: string;
@@ -186,11 +185,6 @@ export function MetadataSection({
           ) : (
             <span className="text-foreground">#{prNumber}</span>
           )}
-          {prState && (
-            <Badge variant={prBadgeVariant(prState)} className="capitalize">
-              {prState}
-            </Badge>
-          )}
           <PullRequestChecksIndicator checks={artifactPr?.checks} />
         </div>
       )}
@@ -210,9 +204,6 @@ export function MetadataSection({
           >
             Associated PR #{associatedPrLink.number}
           </a>
-          <Badge variant={prBadgeVariant(associatedPrLink.status)} className="capitalize">
-            {associatedPrLink.status}
-          </Badge>
           <PullRequestChecksIndicator checks={associatedPr?.checks} />
         </div>
       )}

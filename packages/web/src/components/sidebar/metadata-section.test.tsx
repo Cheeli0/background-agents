@@ -59,7 +59,6 @@ describe("MetadataSection", () => {
     const statusIcon = screen.getByLabelText("PR merged");
     expect(statusIcon).toHaveClass("text-[#8250df]");
     expect(link.parentElement?.firstElementChild).toBe(statusIcon);
-    expect(screen.getByText("open")).toBeInTheDocument();
     expect(screen.getByLabelText("2/3 checks pending")).toBeInTheDocument();
   });
 
@@ -85,7 +84,6 @@ describe("MetadataSection", () => {
 
     expect(statusIcon).toHaveClass("text-[#8250df]");
     expect(link.parentElement?.firstElementChild).toBe(statusIcon);
-    expect(screen.getByText("merged")).toBeInTheDocument();
   });
 
   it("renders CI status for session PR artifacts", () => {
@@ -142,8 +140,8 @@ describe("MetadataSection", () => {
       <MetadataSection createdAt={Date.now()} baseBranch="main" model="zai-coding-plan/glm-5" />
     );
 
-    expect(screen.getByText("zai-coding-plan/glm-5")).toBeInTheDocument();
-    expect(screen.getByText("Provider: Zai Coding Plan")).toBeInTheDocument();
+    expect(screen.getByText("GLM 5")).toBeInTheDocument();
+    expect(screen.getByText("Provider: Z.AI")).toBeInTheDocument();
   });
 
   it("shows unknown when provider cannot be determined", () => {
