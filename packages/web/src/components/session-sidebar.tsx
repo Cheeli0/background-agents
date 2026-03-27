@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useMemo, useCallback, useEffect, useRef, type TouchEvent } from "react";
 import { useSession, signOut } from "next-auth/react";
-import useSWR, { mutate } from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { formatRelativeTime, isInactiveSession } from "@/lib/time";
 import {
   buildSessionsPageKey,
@@ -33,6 +33,16 @@ import { PullRequestStatusIcon } from "@/components/pull-request-status-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -42,7 +52,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 export type SessionItem = SidebarSession;
 
-type SessionsResponse = { sessions: SessionItem[] };
 type RepositoryInfo = {
   key: string;
   label: string;
@@ -122,6 +131,8 @@ interface SessionSidebarProps {
 export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: SessionSidebarProps) {
   const { data: authSession } = useSession();
   const pathname = usePathname();
+  const router = useRouter();
+  const { mutate } = useSWRConfig();
   const [searchQuery, setSearchQuery] = useState("");
   const [extraSessions, setExtraSessions] = useState<SessionItem[]>([]);
   const [hasMorePages, setHasMorePages] = useState(false);
@@ -371,6 +382,29 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
     });
   }, []);
 
+  const handleSessionArchived = useCallback(
+    (sessionId: string) => {
+      setExtraSessions((previous) => previous.filter((session) => session.id !== sessionId));
+
+      if (!data) {
+        return;
+      }
+
+      void mutate(
+        SIDEBAR_SESSIONS_KEY,
+        {
+          ...data,
+          sessions: data.sessions.filter((session) => session.id !== sessionId),
+        },
+        {
+          populateCache: true,
+          revalidate: false,
+        }
+      );
+    },
+    [data, mutate]
+  );
+
   return (
     <aside className="w-72 h-dvh flex flex-col border-r border-border-muted bg-background">
       {/* Header */}
@@ -489,6 +523,8 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
                         currentSessionId={currentSessionId}
                         isMobile={isMobile}
                         onSessionSelect={onSessionSelect}
+                        onArchiveCurrentSession={() => router.push("/")}
+                        onArchiveSuccess={handleSessionArchived}
                       />
                     ))}
 
@@ -507,6 +543,8 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
                             currentSessionId={currentSessionId}
                             isMobile={isMobile}
                             onSessionSelect={onSessionSelect}
+                            onArchiveCurrentSession={() => router.push("/")}
+                            onArchiveSuccess={handleSessionArchived}
                           />
                         ))}
                       </>
@@ -581,12 +619,16 @@ function SessionWithChildren({
   currentSessionId,
   isMobile,
   onSessionSelect,
+  onArchiveCurrentSession,
+  onArchiveSuccess,
 }: {
   session: SessionItem;
   childSessions?: SessionItem[];
   currentSessionId: string | null;
   isMobile: boolean;
   onSessionSelect?: () => void;
+  onArchiveCurrentSession?: () => void;
+  onArchiveSuccess?: (sessionId: string) => void;
 }) {
   return (
     <>
@@ -595,6 +637,8 @@ function SessionWithChildren({
         isActive={session.id === currentSessionId}
         isMobile={isMobile}
         onSessionSelect={onSessionSelect}
+        onArchiveCurrentSession={onArchiveCurrentSession}
+        onArchiveSuccess={onArchiveSuccess}
       />
       {childSessions &&
         childSessions.map((child) => (
@@ -615,12 +659,17 @@ function SessionListItem({
   isActive,
   isMobile,
   onSessionSelect,
+  onArchiveCurrentSession,
+  onArchiveSuccess,
 }: {
   session: SessionItem;
   isActive: boolean;
   isMobile: boolean;
   onSessionSelect?: () => void;
+  onArchiveCurrentSession?: () => void;
+  onArchiveSuccess?: (sessionId: string) => void;
 }) {
+  const { mutate } = useSWRConfig();
   const timestamp = session.updatedAt || session.createdAt;
   const relativeTime = formatRelativeTime(timestamp);
   const repository = getSessionRepositoryInfo(session);
@@ -630,6 +679,7 @@ function SessionListItem({
   const isOrphanChild = session.parentSessionId && session.spawnSource === "agent";
   const [isRenaming, setIsRenaming] = useState(false);
   const [isActionsOpen, setIsActionsOpen] = useState(false);
+  const [showArchiveDialog, setShowArchiveDialog] = useState(false);
   const [title, setTitle] = useState(displayTitle);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
@@ -654,6 +704,27 @@ function SessionListItem({
     setIsRenaming(false);
   };
 
+  const handleArchive = async () => {
+    setShowArchiveDialog(false);
+    setIsActionsOpen(false);
+
+    try {
+      const response = await fetch(`/api/sessions/${session.id}/archive`, { method: "POST" });
+
+      if (!response.ok) {
+        throw new Error("Failed to archive session");
+      }
+
+      onArchiveSuccess?.(session.id);
+
+      if (isActive) {
+        onArchiveCurrentSession?.();
+      }
+    } catch {
+      console.error("Failed to archive session");
+    }
+  };
+
   const handleRenameSubmit = async () => {
     const trimmed = title.trim();
 
@@ -665,7 +736,7 @@ function SessionListItem({
     const previousTitle = displayTitle;
     setIsRenaming(false);
 
-    const updateSessionsTitle = (data?: SessionsResponse): SessionsResponse => ({
+    const updateSessionsTitle = (data?: SessionListResponse): SessionListResponse => ({
       sessions: (data?.sessions ?? []).map((currentSession) =>
         currentSession.id === session.id
           ? {
@@ -675,12 +746,13 @@ function SessionListItem({
             }
           : currentSession
       ),
+      hasMore: data?.hasMore ?? false,
     });
 
     try {
-      await mutate<SessionsResponse>(
-        "/api/sessions",
-        async (currentData?: SessionsResponse) => {
+      await mutate<SessionListResponse>(
+        SIDEBAR_SESSIONS_KEY,
+        async (currentData?: SessionListResponse) => {
           const response = await fetch(`/api/sessions/${session.id}/title`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -695,7 +767,7 @@ function SessionListItem({
           optimisticData: updateSessionsTitle,
           rollbackOnError: true,
           populateCache: true,
-          revalidate: true,
+          revalidate: false,
         }
       );
     } catch {
@@ -873,9 +945,33 @@ function SessionListItem({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={handleStartRename}>Rename</DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                setIsActionsOpen(false);
+                setShowArchiveDialog(true);
+              }}
+            >
+              Archive
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <AlertDialog open={showArchiveDialog} onOpenChange={setShowArchiveDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive session</AlertDialogTitle>
+            <AlertDialogDescription>
+              Archive this session? You can restore archived sessions from Settings &gt; Data
+              Controls.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleArchive}>Archive</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

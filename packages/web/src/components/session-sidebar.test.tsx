@@ -29,6 +29,9 @@ vi.mock("next-auth/react", () => ({
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
+  useRouter: () => ({
+    push: vi.fn(),
+  }),
 }));
 
 vi.mock("next/link", () => ({
@@ -252,6 +255,66 @@ describe("SessionSidebar", () => {
     });
 
     expect(screen.getByText("Rename")).toBeInTheDocument();
+    expect(screen.getByText("Archive")).toBeInTheDocument();
+  });
+
+  it("archives a session from the sidebar menu", async () => {
+    const sessions = [createSession(1), createSession(2)];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      if (url === "/api/sessions/session-1/archive") {
+        expect(init?.method).toBe("POST");
+        return new Response(null, { status: 200 });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    await screen.findByText("Session 1");
+
+    const sessionRow = screen.getByText("Session 1").closest("div.group") as HTMLDivElement;
+    const actionButton = sessionRow.querySelector('button[aria-label="Session actions"]');
+    expect(actionButton).not.toBeNull();
+
+    fireEvent.pointerDown(actionButton!, { button: 0, ctrlKey: false });
+
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    expect(await screen.findByText("Archive session")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/sessions/session-1/archive", { method: "POST" });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("Session 2")).toBeInTheDocument();
   });
 
   it("groups sessions by repository and falls back for missing repository info", async () => {
@@ -327,7 +390,10 @@ describe("SessionSidebar", () => {
   it("shows merged and closed PR status indicators in the sessions list", async () => {
     const sessions = [
       createSession(1),
-      { ...createSession(2), title: "Session 2 with a very long title that should truncate in sidebar" },
+      {
+        ...createSession(2),
+        title: "Session 2 with a very long title that should truncate in sidebar",
+      },
       createSession(3),
     ];
 
