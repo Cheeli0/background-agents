@@ -1,8 +1,4 @@
-import {
-  MODEL_REASONING_CONFIG,
-  type ValidModel,
-  type ReasoningEffort,
-} from "@open-inspect/shared";
+import { getReasoningConfig, type ReasoningEffort } from "@open-inspect/shared";
 
 interface ReasoningEffortPillsProps {
   selectedModel: string;
@@ -17,8 +13,11 @@ export function ReasoningEffortPills({
   onSelect,
   disabled,
 }: ReasoningEffortPillsProps) {
-  const config = MODEL_REASONING_CONFIG[selectedModel as ValidModel];
-  if (!config) return null;
+  const config = getReasoningConfig(selectedModel);
+
+  if (!config) {
+    return <span className="px-2 py-0.5 text-xs text-muted-foreground">reasoning unavailable</span>;
+  }
 
   // If effort is not in the list (e.g. model just changed), -1 wraps to index 0 on cycle
   const currentIndex = reasoningEffort
