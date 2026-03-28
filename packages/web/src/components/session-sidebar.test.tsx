@@ -29,6 +29,9 @@ vi.mock("next-auth/react", () => ({
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
+  useRouter: () => ({
+    push: vi.fn(),
+  }),
 }));
 
 vi.mock("next/link", () => ({
@@ -252,6 +255,155 @@ describe("SessionSidebar", () => {
     });
 
     expect(screen.getByText("Rename")).toBeInTheDocument();
+    expect(screen.getByText("Archive")).toBeInTheDocument();
+  });
+
+  it("archives a session from the sidebar menu", async () => {
+    const sessions = [createSession(1), createSession(2)];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      if (url === "/api/sessions/session-1/archive") {
+        expect(init?.method).toBe("POST");
+        return new Response(null, { status: 200 });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    await screen.findByText("Session 1");
+
+    const sessionRow = screen.getByText("Session 1").closest("div.group") as HTMLDivElement;
+    const actionButton = sessionRow.querySelector('button[aria-label="Session actions"]');
+    expect(actionButton).not.toBeNull();
+
+    fireEvent.pointerDown(actionButton!, { button: 0, ctrlKey: false });
+
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    expect(await screen.findByText("Archive session")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/sessions/session-1/archive", { method: "POST" });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("Session 2")).toBeInTheDocument();
+  });
+
+  it("keeps loaded paginated sessions visible after archiving", async () => {
+    const firstPage = Array.from({ length: 50 }, (_, index) => createSession(index + 1));
+    const secondPage = Array.from({ length: 5 }, (_, index) => createSession(index + 51));
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url === SIDEBAR_SESSIONS_KEY) {
+        return jsonResponse({ sessions: firstPage, hasMore: true });
+      }
+
+      if (url === buildSessionsPageKey({ excludeStatus: "archived", offset: 50 })) {
+        return jsonResponse({ sessions: secondPage, hasMore: false });
+      }
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      if (url === "/api/sessions/session-1/archive") {
+        expect(init?.method).toBe("POST");
+        return new Response(null, { status: 200 });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { container } = render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+          fetcher: async (url: string) => {
+            const response = await fetch(url);
+            return response.json();
+          },
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    expect(await screen.findByText("Session 1")).toBeInTheDocument();
+
+    const scrollContainer = container.querySelector(".overflow-y-auto") as HTMLDivElement;
+    let scrollTop = 0;
+
+    Object.defineProperty(scrollContainer, "scrollHeight", {
+      configurable: true,
+      value: 2000,
+    });
+    Object.defineProperty(scrollContainer, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value;
+      },
+    });
+
+    scrollTop = 1705;
+    fireEvent.scroll(scrollContainer);
+
+    expect(await screen.findByText("Session 55")).toBeInTheDocument();
+
+    const sessionRow = screen.getByText("Session 1").closest("div.group") as HTMLDivElement;
+    const actionButton = sessionRow.querySelector('button[aria-label="Session actions"]');
+    expect(actionButton).not.toBeNull();
+
+    fireEvent.pointerDown(actionButton!, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("Session 55")).toBeInTheDocument();
   });
 
   it("groups sessions by repository and falls back for missing repository info", async () => {
