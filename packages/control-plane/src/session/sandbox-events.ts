@@ -13,6 +13,7 @@ interface SessionSandboxEventProcessorDeps {
   ctx: DurableObjectState;
   log: Logger;
   repository: SessionRepository;
+  persistSessionBranchName: (branchName: string) => void;
   callbackService: CallbackNotificationService;
   wsManager: SessionWebSocketManager;
   broadcast: (message: ServerMessage) => void;
@@ -182,6 +183,10 @@ export class SessionSandboxEventProcessor {
       if (event.sha) {
         this.deps.repository.updateSessionCurrentSha(event.sha);
       }
+    }
+
+    if (event.type === "push_complete" && event.branchName) {
+      this.deps.persistSessionBranchName(event.branchName);
     }
 
     if (event.type === "push_complete" || event.type === "push_error") {

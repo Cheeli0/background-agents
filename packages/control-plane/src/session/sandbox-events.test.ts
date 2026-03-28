@@ -33,6 +33,7 @@ function createProcessor() {
   const scheduleInactivityCheck = vi.fn(async () => {});
   const processMessageQueue = vi.fn(async () => {});
   const updateLastActivity = vi.fn();
+  const persistSessionBranchName = vi.fn();
   const getIsProcessing = vi.fn(() => false);
   const waitUntil = vi.fn();
 
@@ -46,6 +47,7 @@ function createProcessor() {
       child: vi.fn(),
     },
     repository: repository as never,
+    persistSessionBranchName,
     callbackService: callbackService as never,
     wsManager: wsManager as never,
     broadcast,
@@ -68,6 +70,7 @@ function createProcessor() {
     scheduleInactivityCheck,
     processMessageQueue,
     updateLastActivity,
+    persistSessionBranchName,
     waitUntil,
   };
 }
@@ -162,6 +165,19 @@ describe("SessionSandboxEventProcessor", () => {
       sandboxWs,
       expect.objectContaining({ type: "push" })
     );
+    expect(h.persistSessionBranchName).toHaveBeenCalledWith("feature/test");
+  });
+
+  it("persists branch name from push_complete without a pending push", async () => {
+    const h = createProcessor();
+
+    await h.processor.processSandboxEvent({
+      type: "push_complete",
+      branchName: "codex/che-86-fix",
+      timestamp: 1000,
+    });
+
+    expect(h.persistSessionBranchName).toHaveBeenCalledWith("codex/che-86-fix");
   });
 
   describe("activity tracking for intermediate events", () => {
