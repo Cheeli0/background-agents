@@ -380,3 +380,121 @@ class TestOpenCodeAuthSetup:
         data = json.loads(_auth_file(tmp_path).read_text())
         assert data["zai"] == {"type": "api", "key": "zai-api-key"}
         assert data["zai-coding-plan"] == {"type": "api", "key": "zai-api-key"}
+
+    def test_fails_fast_for_fireworks_without_credentials(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="Fireworks AI credentials are not configured"),
+        ):
+            sup._setup_opencode_auth("fireworks-ai")
+
+    def test_accepts_direct_fireworks_provider_entry(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENCODE_AUTH_JSON": json.dumps(
+                        {
+                            "type": "api",
+                            "key": "fireworks-api-key",
+                        }
+                    )
+                },
+                clear=False,
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            sup._setup_opencode_auth("fireworks-ai")
+
+        data = json.loads(_auth_file(tmp_path).read_text())
+        assert data["fireworks"]["key"] == "fireworks-api-key"
+        assert data["fireworks-ai"]["key"] == "fireworks-api-key"
+
+    def test_accepts_full_auth_blob_with_fireworks_key(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENCODE_AUTH_JSON": json.dumps(
+                        {
+                            "fireworks-ai": {
+                                "type": "api",
+                                "key": "fireworks-api-key",
+                            }
+                        }
+                    )
+                },
+                clear=False,
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            sup._setup_opencode_auth("fireworks-ai")
+
+        data = json.loads(_auth_file(tmp_path).read_text())
+        assert data["fireworks"]["key"] == "fireworks-api-key"
+        assert data["fireworks-ai"]["key"] == "fireworks-api-key"
+
+    def test_rejects_fireworks_auth_with_non_api_type(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENCODE_AUTH_JSON": json.dumps(
+                        {
+                            "fireworks": {
+                                "type": "oauth",
+                                "key": "fireworks-api-key",
+                            }
+                        }
+                    )
+                },
+                clear=False,
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="type 'api'"),
+        ):
+            sup._setup_opencode_auth("fireworks-ai")
+
+    def test_rejects_fireworks_auth_without_key(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENCODE_AUTH_JSON": json.dumps(
+                        {
+                            "fireworks-ai": {
+                                "type": "api",
+                                "key": "",
+                            }
+                        }
+                    )
+                },
+                clear=False,
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="non-empty key"),
+        ):
+            sup._setup_opencode_auth("fireworks-ai")
+
+    def test_writes_fireworks_auth_json_when_api_key_present(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict("os.environ", {"FIREWORKS_API_KEY": "fireworks-api-key"}, clear=False),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            sup._setup_opencode_auth("fireworks-ai")
+
+        data = json.loads(_auth_file(tmp_path).read_text())
+        assert data["fireworks"] == {"type": "api", "key": "fireworks-api-key"}
+        assert data["fireworks-ai"] == {"type": "api", "key": "fireworks-api-key"}

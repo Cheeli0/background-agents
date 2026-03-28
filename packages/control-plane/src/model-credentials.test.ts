@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  FIREWORKS_API_KEY_SECRET,
   OPENCODE_AUTH_JSON_SECRET,
   ZAI_API_KEY_SECRET,
   extractCopilotAccessTokenFromAuthJson,
+  isFireworksAiModel,
   isGitHubCopilotModel,
   isZaiCodingPlanModel,
   validateModelCredentialsForRepo,
@@ -46,6 +48,13 @@ describe("model-credentials", () => {
       expect(isZaiCodingPlanModel("zai-coding-plan/glm-5")).toBe(true);
       expect(isZaiCodingPlanModel("zai-coding-plan/glm-4.7")).toBe(true);
       expect(isZaiCodingPlanModel("openai/gpt-5.4")).toBe(false);
+    });
+  });
+
+  describe("isFireworksAiModel", () => {
+    it("detects Fireworks AI-backed models", () => {
+      expect(isFireworksAiModel("fireworks-ai/kimi-k2p5-turbo")).toBe(true);
+      expect(isFireworksAiModel("openai/gpt-5.4")).toBe(false);
     });
   });
 
@@ -320,6 +329,129 @@ describe("model-credentials", () => {
       });
 
       const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-5", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toContain("non-empty key");
+    });
+
+    it("accepts a Fireworks AI provider entry pasted directly", async () => {
+      mockGetRepoSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
+          type: "api",
+          key: "fireworks-key",
+        }),
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("accepts a fireworks-ai auth entry", async () => {
+      mockGetRepoSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
+          "fireworks-ai": { type: "api", key: "fireworks-key" },
+        }),
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("accepts a fireworks alias auth entry", async () => {
+      mockGetGlobalSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
+          fireworks: { type: "api", key: "fireworks-key" },
+        }),
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
+        repoId: null,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("returns an error when Fireworks AI credentials are missing", async () => {
+      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toContain(OPENCODE_AUTH_JSON_SECRET);
+      expect(result).toContain(FIREWORKS_API_KEY_SECRET);
+      expect(result).toContain("Fireworks AI credentials");
+    });
+
+    it("accepts a direct FIREWORKS_API_KEY secret", async () => {
+      mockGetRepoSecrets.mockResolvedValue({
+        [FIREWORKS_API_KEY_SECRET]: "fireworks-key",
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("returns an error when the auth blob lacks Fireworks AI credentials", async () => {
+      mockGetGlobalSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
+          openai: { type: "oauth", refresh: "managed-by-control-plane" },
+        }),
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toContain("Fireworks AI credentials");
+    });
+
+    it("returns an error when Fireworks AI credentials use a non-api type", async () => {
+      mockGetGlobalSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
+          "fireworks-ai": { type: "oauth", key: "fireworks-key" },
+        }),
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toContain("type 'api'");
+    });
+
+    it("returns an error when Fireworks AI credentials have an empty key", async () => {
+      mockGetGlobalSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
+          fireworks: { type: "api", key: "   " },
+        }),
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
         repoId: 1,
         repoOwner: "acme",
         repoName: "widgets",

@@ -46,6 +46,7 @@ const MODEL_LABEL_MAP: Record<string, string> = {
   "glm-5-turbo": "zai-coding-plan/glm-5-turbo",
   "glm-4.7": "zai-coding-plan/glm-4.7",
   "glm-4.5-air": "zai-coding-plan/glm-4.5-air",
+  "kimi-k2p5-turbo": "fireworks-ai/kimi-k2p5-turbo",
 };
 
 const PROVIDER_LABEL_DEFAULT_MODEL: Record<string, ValidModel> = {
@@ -53,6 +54,7 @@ const PROVIDER_LABEL_DEFAULT_MODEL: Record<string, ValidModel> = {
   openai: "openai/gpt-5.4",
   "github-copilot": "github-copilot/claude-sonnet-4-6",
   opencode: "opencode/kimi-k2.5",
+  "fireworks-ai": "fireworks-ai/kimi-k2p5-turbo",
 };
 
 function extractLabelValue(labels: Array<{ name: string }>, prefix: string): string | null {

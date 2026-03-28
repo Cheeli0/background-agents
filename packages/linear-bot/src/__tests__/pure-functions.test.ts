@@ -30,6 +30,12 @@ describe("extractModelFromLabels", () => {
     expect(extractModelFromLabels([{ name: "model:glm-4.7" }])).toBe("zai-coding-plan/glm-4.7");
   });
 
+  it("returns Kimi K2.5 Turbo for model:kimi-k2p5-turbo label", () => {
+    expect(extractModelFromLabels([{ name: "model:kimi-k2p5-turbo" }])).toBe(
+      "fireworks-ai/kimi-k2p5-turbo"
+    );
+  });
+
   it("resolves provider-only labels using the matching base model when available", () => {
     expect(
       extractModelFromLabels([{ name: "provider:github-copilot" }], "anthropic/claude-sonnet-4-6")
@@ -40,6 +46,12 @@ describe("extractModelFromLabels", () => {
     expect(extractModelFromLabels([{ name: "provider:openai" }], "anthropic/claude-opus-4-6")).toBe(
       "openai/gpt-5.4"
     );
+  });
+
+  it("uses Fireworks AI default when only provider:fireworks-ai is present", () => {
+    expect(
+      extractModelFromLabels([{ name: "provider:fireworks-ai" }], "anthropic/claude-opus-4-6")
+    ).toBe("fireworks-ai/kimi-k2p5-turbo");
   });
 
   it("combines provider and model labels when both are present", () => {

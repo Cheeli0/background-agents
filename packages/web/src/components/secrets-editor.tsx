@@ -14,6 +14,7 @@ const MAX_VALUE_SIZE = 16384;
 const MAX_TOTAL_VALUE_SIZE = 65536;
 const MAX_SECRETS_PER_SCOPE = 50;
 const ZAI_API_KEY_SECRET = "ZAI_API_KEY";
+const FIREWORKS_API_KEY_SECRET = "FIREWORKS_API_KEY";
 
 const RESERVED_KEYS = new Set([
   "PYTHONUNBUFFERED",
@@ -342,6 +343,8 @@ export function SecretsEditor({
 
   const zaiHint =
     "For Z.AI models, add ZAI_API_KEY only. OPENCODE_AUTH_JSON also works if you prefer the full provider JSON.";
+  const fireworksHint =
+    "For Fireworks AI models, add FIREWORKS_API_KEY only. OPENCODE_AUTH_JSON also works if you prefer the full provider JSON.";
 
   return (
     <div className="mt-4 border border-border bg-background p-4">
@@ -486,7 +489,8 @@ export function SecretsEditor({
           </div>
 
           <p className="mt-2 text-[11px] text-muted-foreground">
-            Tip: <span className="font-mono">{ZAI_API_KEY_SECRET}</span>. {zaiHint}
+            Tip: <span className="font-mono">{ZAI_API_KEY_SECRET}</span>,{" "}
+            <span className="font-mono">{FIREWORKS_API_KEY_SECRET}</span>. {zaiHint} {fireworksHint}
           </p>
         </>
       )}
