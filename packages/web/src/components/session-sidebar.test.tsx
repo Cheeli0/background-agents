@@ -446,6 +446,55 @@ describe("SessionSidebar", () => {
     expect(sessionLink).not.toHaveTextContent("open-inspect/background-agents");
   });
 
+  it("shows the working branch beside the timestamp when available", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(2_000_000_000_000);
+
+    const sessions = [
+      {
+        ...createSession(1),
+        title: "Session with working branch",
+        updatedAt: 2_000_000_000_000 - 22 * 60 * 60 * 1000,
+        baseBranch: "main",
+        branchName: "codex/che-76-working-branch",
+      },
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    const sessionLink = await screen.findByRole("link", { name: /session with working branch/i });
+
+    expect(sessionLink).toHaveTextContent("22h");
+    expect(sessionLink).toHaveTextContent("codex/che-76-working-branch");
+    expect(sessionLink).not.toHaveTextContent("open-inspect/background-agents");
+  });
+
   it("keeps associated PR cache isolated from sidebar status cache", async () => {
     const sessions = [createSession(1)];
 

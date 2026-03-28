@@ -13,6 +13,7 @@ import {
   type SidebarSession,
   type SessionListResponse,
 } from "@/lib/session-list";
+import { truncateBranch } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
@@ -627,7 +628,9 @@ function SessionListItem({
   const displayTitle = session.title || repository.label;
   // Orphan child (parent filtered out) — show a subtle badge
   const isOrphanChild = session.parentSessionId && session.spawnSource === "agent";
-  const showBaseBranch = !!session.baseBranch && session.baseBranch !== "main";
+  const branchLabel =
+    session.branchName ||
+    (session.baseBranch && session.baseBranch !== "main" ? session.baseBranch : null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [title, setTitle] = useState(displayTitle);
@@ -789,11 +792,13 @@ function SessionListItem({
                 <span className="text-accent">sub-task</span>
               </>
             )}
-            {showBaseBranch && (
+            {branchLabel && (
               <>
                 <span>·</span>
                 <BranchIcon className="w-3 h-3 flex-shrink-0" />
-                <span className="truncate">{session.baseBranch}</span>
+                <span className="truncate" title={branchLabel}>
+                  {truncateBranch(branchLabel)}
+                </span>
               </>
             )}
           </div>
@@ -854,11 +859,13 @@ function SessionListItem({
                 <span className="text-accent">sub-task</span>
               </>
             )}
-            {showBaseBranch && (
+            {branchLabel && (
               <>
                 <span>·</span>
                 <BranchIcon className="w-3 h-3 flex-shrink-0" />
-                <span className="truncate">{session.baseBranch}</span>
+                <span className="truncate" title={branchLabel}>
+                  {truncateBranch(branchLabel)}
+                </span>
               </>
             )}
           </div>
