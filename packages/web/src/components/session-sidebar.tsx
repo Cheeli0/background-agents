@@ -145,6 +145,8 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   const isMobile = useIsMobile();
   const collapsedRepositoriesHydratedRef = useRef(false);
   const previousFirstPageSessionIdsRef = useRef<Set<string> | null>(null);
+  const preservePaginationStateRef = useRef(false);
+  const preservedOffsetRef = useRef<number | null>(null);
 
   useEffect(() => {
     try {
@@ -232,16 +234,28 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   let effectiveExtraSessions = extraSessions;
   if (prevDataRef.current !== data) {
     prevDataRef.current = data;
-    effectiveExtraSessions = [];
+    if (!preservePaginationStateRef.current) {
+      effectiveExtraSessions = [];
+    }
   }
 
   useEffect(() => {
     if (!data) return;
 
+    if (preservePaginationStateRef.current) {
+      preservePaginationStateRef.current = false;
+      setLoadingMore(false);
+      offsetRef.current = preservedOffsetRef.current ?? firstPageSessions.length;
+      preservedOffsetRef.current = null;
+      loadingMoreRef.current = false;
+      return;
+    }
+
     setExtraSessions([]);
     setHasMorePages(data.hasMore);
     setLoadingMore(false);
     offsetRef.current = firstPageSessions.length;
+    preservedOffsetRef.current = null;
     hasMoreRef.current = data.hasMore;
     loadingMoreRef.current = false;
   }, [data, firstPageSessions.length]);
@@ -384,17 +398,23 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
 
   const handleSessionArchived = useCallback(
     (sessionId: string) => {
-      setExtraSessions((previous) => previous.filter((session) => session.id !== sessionId));
-
-      if (!data) {
-        return;
-      }
+      preservePaginationStateRef.current = true;
+      setExtraSessions((previous) => {
+        const next = previous.filter((session) => session.id !== sessionId);
+        preservedOffsetRef.current = mergeUniqueSessions(firstPageSessions, next).length;
+        return next;
+      });
 
       void mutate(
         SIDEBAR_SESSIONS_KEY,
-        {
-          ...data,
-          sessions: data.sessions.filter((session) => session.id !== sessionId),
+        (currentData?: SessionListResponse) => {
+          const baseData = currentData ?? data;
+          return baseData
+            ? {
+                ...baseData,
+                sessions: baseData.sessions.filter((session) => session.id !== sessionId),
+              }
+            : currentData;
         },
         {
           populateCache: true,
@@ -402,8 +422,18 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
         }
       );
     },
-    [data, mutate]
+    [data, firstPageSessions, mutate]
   );
+
+  const handleSidebarMutation = useCallback(() => {
+    preservePaginationStateRef.current = true;
+    preservedOffsetRef.current = mergeUniqueSessions(firstPageSessions, extraSessions).length;
+  }, [extraSessions, firstPageSessions]);
+
+  const handleSidebarMutationError = useCallback(() => {
+    preservePaginationStateRef.current = false;
+    preservedOffsetRef.current = null;
+  }, []);
 
   return (
     <aside className="w-72 h-dvh flex flex-col border-r border-border-muted bg-background">
@@ -523,6 +553,8 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
                         currentSessionId={currentSessionId}
                         isMobile={isMobile}
                         onSessionSelect={onSessionSelect}
+                        onBeforeSidebarMutation={handleSidebarMutation}
+                        onSidebarMutationError={handleSidebarMutationError}
                         onArchiveCurrentSession={() => router.push("/")}
                         onArchiveSuccess={handleSessionArchived}
                       />
@@ -543,6 +575,8 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
                             currentSessionId={currentSessionId}
                             isMobile={isMobile}
                             onSessionSelect={onSessionSelect}
+                            onBeforeSidebarMutation={handleSidebarMutation}
+                            onSidebarMutationError={handleSidebarMutationError}
                             onArchiveCurrentSession={() => router.push("/")}
                             onArchiveSuccess={handleSessionArchived}
                           />
@@ -619,6 +653,8 @@ function SessionWithChildren({
   currentSessionId,
   isMobile,
   onSessionSelect,
+  onBeforeSidebarMutation,
+  onSidebarMutationError,
   onArchiveCurrentSession,
   onArchiveSuccess,
 }: {
@@ -627,6 +663,8 @@ function SessionWithChildren({
   currentSessionId: string | null;
   isMobile: boolean;
   onSessionSelect?: () => void;
+  onBeforeSidebarMutation?: () => void;
+  onSidebarMutationError?: () => void;
   onArchiveCurrentSession?: () => void;
   onArchiveSuccess?: (sessionId: string) => void;
 }) {
@@ -637,6 +675,8 @@ function SessionWithChildren({
         isActive={session.id === currentSessionId}
         isMobile={isMobile}
         onSessionSelect={onSessionSelect}
+        onBeforeSidebarMutation={onBeforeSidebarMutation}
+        onSidebarMutationError={onSidebarMutationError}
         onArchiveCurrentSession={onArchiveCurrentSession}
         onArchiveSuccess={onArchiveSuccess}
       />
@@ -659,6 +699,8 @@ function SessionListItem({
   isActive,
   isMobile,
   onSessionSelect,
+  onBeforeSidebarMutation,
+  onSidebarMutationError,
   onArchiveCurrentSession,
   onArchiveSuccess,
 }: {
@@ -666,6 +708,8 @@ function SessionListItem({
   isActive: boolean;
   isMobile: boolean;
   onSessionSelect?: () => void;
+  onBeforeSidebarMutation?: () => void;
+  onSidebarMutationError?: () => void;
   onArchiveCurrentSession?: () => void;
   onArchiveSuccess?: (sessionId: string) => void;
 }) {
@@ -750,6 +794,7 @@ function SessionListItem({
     });
 
     try {
+      onBeforeSidebarMutation?.();
       await mutate<SessionListResponse>(
         SIDEBAR_SESSIONS_KEY,
         async (currentData?: SessionListResponse) => {
@@ -771,6 +816,7 @@ function SessionListItem({
         }
       );
     } catch {
+      onSidebarMutationError?.();
       setTitle(previousTitle);
       setIsRenaming(true);
     }
