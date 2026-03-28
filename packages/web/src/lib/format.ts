@@ -103,6 +103,12 @@ export function truncateBranch(branchName: string, maxLength = 30): string {
   return "..." + branchName.slice(-maxLength);
 }
 
+export function truncateBranchStart(branchName: string, maxLength = 30): string {
+  if (!branchName) return "";
+  if (branchName.length <= maxLength) return branchName;
+  return branchName.slice(0, maxLength) + "...";
+}
+
 /**
  * Copy text to clipboard
  * Returns true if successful, false otherwise

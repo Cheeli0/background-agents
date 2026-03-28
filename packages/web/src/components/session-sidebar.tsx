@@ -13,6 +13,7 @@ import {
   type SidebarSession,
   type SessionListResponse,
 } from "@/lib/session-list";
+import { truncateBranchStart } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
@@ -625,9 +626,11 @@ function SessionListItem({
   const relativeTime = formatRelativeTime(timestamp);
   const repository = getSessionRepositoryInfo(session);
   const displayTitle = session.title || repository.label;
-  const repoInfo = repository.label;
   // Orphan child (parent filtered out) — show a subtle badge
   const isOrphanChild = session.parentSessionId && session.spawnSource === "agent";
+  const branchLabel =
+    session.branchName ||
+    (session.baseBranch && session.baseBranch !== "main" ? session.baseBranch : null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [title, setTitle] = useState(displayTitle);
@@ -783,8 +786,21 @@ function SessionListItem({
           />
           <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
             <span>{relativeTime}</span>
-            <span>·</span>
-            <span className="truncate">{repoInfo}</span>
+            {isOrphanChild && (
+              <>
+                <span>·</span>
+                <span className="text-accent">sub-task</span>
+              </>
+            )}
+            {branchLabel && (
+              <>
+                <span>·</span>
+                <BranchIcon className="w-3 h-3 flex-shrink-0" />
+                <span className="truncate" title={branchLabel}>
+                  {truncateBranchStart(branchLabel)}
+                </span>
+              </>
+            )}
           </div>
         </>
       ) : (
@@ -837,19 +853,19 @@ function SessionListItem({
           </div>
           <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
             <span>{relativeTime}</span>
-            <span>·</span>
-            <span className="truncate">{repoInfo}</span>
             {isOrphanChild && (
               <>
                 <span>·</span>
                 <span className="text-accent">sub-task</span>
               </>
             )}
-            {session.baseBranch && session.baseBranch !== "main" && (
+            {branchLabel && (
               <>
                 <span>·</span>
                 <BranchIcon className="w-3 h-3 flex-shrink-0" />
-                <span className="truncate">{session.baseBranch}</span>
+                <span className="truncate" title={branchLabel}>
+                  {truncateBranchStart(branchLabel)}
+                </span>
               </>
             )}
           </div>

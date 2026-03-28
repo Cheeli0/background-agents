@@ -3,6 +3,7 @@ import {
   formatModelOptionDescription,
   formatPremiumMultiplierLabel,
   formatProviderName,
+  truncateBranchStart,
 } from "./format";
 
 describe("formatPremiumMultiplierLabel", () => {
@@ -50,5 +51,13 @@ describe("formatModelOptionDescription", () => {
 describe("formatProviderName", () => {
   it("formats Z.AI Coding Plan provider names", () => {
     expect(formatProviderName("zai-coding-plan/glm-5")).toBe("Z.AI");
+  });
+});
+
+describe("truncateBranchStart", () => {
+  it("keeps the branch prefix and truncates the tail", () => {
+    expect(truncateBranchStart("che-76-inline-issue-list-metadata-layout", 12)).toBe(
+      "che-76-inlin..."
+    );
   });
 });

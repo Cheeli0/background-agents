@@ -59,6 +59,7 @@ export interface PullRequestServiceDeps {
   log: Logger;
   generateId: () => string;
   pushBranchToRemote: (headBranch: string, pushSpec: GitPushSpec) => Promise<PushBranchResult>;
+  syncSessionIndexBranchName: (sessionId: string, branchName: string | null) => void;
   broadcastArtifactCreated: (artifact: {
     id: string;
     type: "pr" | "branch";
@@ -158,6 +159,7 @@ export class SessionPullRequestService {
       }
 
       this.deps.repository.updateSessionBranch(session.id, headBranch);
+      this.deps.syncSessionIndexBranchName(sessionId, headBranch);
 
       const latestArtifacts = this.deps.repository.listArtifacts();
       const latestPrArtifact = latestArtifacts.find((artifact) => artifact.type === "pr");

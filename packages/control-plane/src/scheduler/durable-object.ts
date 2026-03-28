@@ -578,6 +578,7 @@ export class SchedulerDO extends DurableObject<Env> {
       model: automation.model,
       reasoningEffort: automation.reasoning_effort,
       baseBranch: automation.base_branch,
+      branchName: null,
       status: "created",
       spawnSource: "automation",
       creationSource: "automation",

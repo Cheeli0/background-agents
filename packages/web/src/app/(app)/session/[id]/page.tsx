@@ -326,6 +326,47 @@ function SessionPageContent() {
     }
   }, [sessionState?.model, sessionState?.reasoningEffort]);
 
+  // Keep the left session sidebar metadata current for this session without
+  // waiting for a full sessions revalidation cycle.
+  useEffect(() => {
+    if (!sessionState) {
+      return;
+    }
+
+    mutate<SessionsResponse>(
+      SIDEBAR_SESSIONS_KEY,
+      (currentData?: SessionsResponse) => {
+        if (!currentData?.sessions?.length) {
+          return currentData;
+        }
+
+        let changed = false;
+        const nextSessions = currentData.sessions.map((session) => {
+          if (session.id !== sessionId) {
+            return session;
+          }
+
+          const nextBranchName = sessionState.branchName ?? null;
+          const nextBaseBranch = sessionState.baseBranch || session.baseBranch;
+
+          if (session.branchName === nextBranchName && session.baseBranch === nextBaseBranch) {
+            return session;
+          }
+
+          changed = true;
+          return {
+            ...session,
+            branchName: nextBranchName,
+            baseBranch: nextBaseBranch,
+          };
+        });
+
+        return changed ? { ...currentData, sessions: nextSessions } : currentData;
+      },
+      { revalidate: false }
+    );
+  }, [sessionId, sessionState, sessionState?.baseBranch, sessionState?.branchName]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim() || isProcessing) return;

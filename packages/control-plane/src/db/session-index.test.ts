@@ -10,6 +10,7 @@ type SessionRow = {
   model: string;
   reasoning_effort: string | null;
   base_branch: string | null;
+  branch_name: string | null;
   status: string;
   parent_session_id: string | null;
   spawn_source: "user" | "agent" | "automation";
@@ -29,6 +30,7 @@ const QUERY_PATTERNS = {
   UPDATE_STATUS: /^UPDATE sessions SET status = \?/,
   UPDATE_UPDATED_AT: /^UPDATE sessions SET updated_at = \?/,
   UPDATE_TITLE: /^UPDATE sessions SET title = \?/,
+  UPDATE_BRANCH_NAME: /^UPDATE sessions SET branch_name = \?, updated_at = \? WHERE id = \?$/,
   DELETE_SESSION: /^DELETE FROM sessions WHERE id = \?$/,
   SELECT_BY_PARENT:
     /^SELECT \* FROM sessions WHERE parent_session_id = \? ORDER BY created_at DESC$/,
@@ -122,6 +124,7 @@ class FakeD1Database {
         model,
         reasoningEffort,
         baseBranch,
+        branchName,
         status,
         parentSessionId,
         spawnSource,
@@ -137,6 +140,7 @@ class FakeD1Database {
         string,
         string,
         string,
+        string | null,
         string | null,
         string | null,
         string,
@@ -159,6 +163,7 @@ class FakeD1Database {
           model,
           reasoning_effort: reasoningEffort,
           base_branch: baseBranch,
+          branch_name: branchName,
           status,
           parent_session_id: parentSessionId,
           spawn_source: spawnSource,
@@ -189,6 +194,17 @@ class FakeD1Database {
       const row = this.rows.get(id);
       if (row) {
         row.title = title;
+        row.updated_at = updatedAt;
+        return { meta: { changes: 1 } };
+      }
+      return { meta: { changes: 0 } };
+    }
+
+    if (QUERY_PATTERNS.UPDATE_BRANCH_NAME.test(normalized)) {
+      const [branchName, updatedAt, id] = args as [string | null, number, string];
+      const row = this.rows.get(id);
+      if (row) {
+        row.branch_name = branchName;
         row.updated_at = updatedAt;
         return { meta: { changes: 1 } };
       }
@@ -294,6 +310,7 @@ function makeSession(overrides: Partial<SessionEntry> = {}): SessionEntry {
     model: "anthropic/claude-haiku-4-5",
     reasoningEffort: null,
     baseBranch: null,
+    branchName: null,
     status: "created",
     createdAt: 1000,
     updatedAt: 1000,
@@ -319,6 +336,7 @@ describe("SessionIndexStore", () => {
       expect(result).toEqual({
         ...session,
         // Defaults applied for missing optional fields
+        branchName: null,
         parentSessionId: null,
         spawnSource: "user",
         creationSource: "web",
@@ -472,6 +490,22 @@ describe("SessionIndexStore", () => {
 
     it("returns false when session not found", async () => {
       const updated = await store.updateTitle("nonexistent", "New Title");
+      expect(updated).toBe(false);
+    });
+  });
+
+  describe("updateBranchName", () => {
+    it("updates the branch name of an existing session", async () => {
+      await store.create(makeSession());
+      const updated = await store.updateBranchName("test-id", "codex/working-branch");
+      expect(updated).toBe(true);
+
+      const session = await store.get("test-id");
+      expect(session?.branchName).toBe("codex/working-branch");
+    });
+
+    it("returns false when session not found", async () => {
+      const updated = await store.updateBranchName("nonexistent", "codex/working-branch");
       expect(updated).toBe(false);
     });
   });

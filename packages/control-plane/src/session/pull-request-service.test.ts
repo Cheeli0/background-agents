@@ -125,6 +125,7 @@ function createTestHarness() {
     log,
     generateId: () => `id-${++idCounter}`,
     pushBranchToRemote: vi.fn(async () => ({ success: true as const })),
+    syncSessionIndexBranchName: vi.fn(),
     broadcastArtifactCreated: vi.fn(),
   };
 
@@ -225,6 +226,10 @@ describe("SessionPullRequestService", () => {
     expect(createPrCall[0]).toEqual({ authType: "oauth", token: "user-token" });
     expect(createPrCall[1].body).toContain(
       "*Created with [Open-Inspect](https://app.example.com/session/session-name-1)*"
+    );
+    expect(harness.deps.syncSessionIndexBranchName).toHaveBeenCalledWith(
+      "session-name-1",
+      "open-inspect/session-name-1"
     );
     expect(harness.deps.broadcastArtifactCreated).toHaveBeenCalledWith({
       id: "id-1",

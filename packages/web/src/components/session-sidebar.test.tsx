@@ -389,12 +389,110 @@ describe("SessionSidebar", () => {
       "Session 2 with a very long title that should truncate in sidebar"
     );
     const mergedRow = longTitle.closest("a");
-    const mergedHeaderRow = longTitle.parentElement;
-
     expect(mergedIndicator).toHaveClass("text-[#8250df]");
     expect(closedIndicator).toHaveClass("text-[#cf222e]");
     expect(mergedRow).toContainElement(mergedIndicator);
-    expect(mergedHeaderRow?.firstElementChild).toBe(mergedIndicator);
+    expect(mergedIndicator.compareDocumentPosition(longTitle)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+  });
+
+  it("removes repository metadata while keeping existing secondary metadata", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(2_000_000_000_000);
+
+    const sessions = [
+      {
+        ...createSession(1),
+        title: "Session with branch metadata",
+        updatedAt: 2_000_000_000_000 - 10 * 60 * 1000,
+        baseBranch: "feature/che-76",
+      },
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    const sessionLink = await screen.findByRole("link", { name: /session with branch metadata/i });
+
+    expect(screen.getByText("10m")).toBeInTheDocument();
+    expect(sessionLink).toHaveTextContent("10m");
+    expect(sessionLink).toHaveTextContent("feature/che-76");
+    expect(sessionLink).not.toHaveTextContent("open-inspect/background-agents");
+  });
+
+  it("shows the working branch beside the timestamp when available", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(2_000_000_000_000);
+
+    const sessions = [
+      {
+        ...createSession(1),
+        title: "Session with working branch",
+        updatedAt: 2_000_000_000_000 - 22 * 60 * 60 * 1000,
+        baseBranch: "main",
+        branchName: "codex/che-76-working-branch",
+      },
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/associated-pr")) {
+        return jsonResponse({ pullRequest: null });
+      }
+
+      if (url.includes("/artifacts")) {
+        return jsonResponse({ artifacts: [] });
+      }
+
+      throw new Error(`Unexpected fetch for ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          fallback: { [SIDEBAR_SESSIONS_KEY]: { sessions, hasMore: false } },
+          dedupingInterval: 0,
+          revalidateOnFocus: false,
+        }}
+      >
+        <SessionSidebar />
+      </SWRConfig>
+    );
+
+    const sessionLink = await screen.findByRole("link", { name: /session with working branch/i });
+
+    expect(sessionLink).toHaveTextContent("22h");
+    expect(sessionLink).toHaveTextContent("codex/che-76-working-branch");
+    expect(sessionLink).not.toHaveTextContent("open-inspect/background-agents");
   });
 
   it("keeps associated PR cache isolated from sidebar status cache", async () => {

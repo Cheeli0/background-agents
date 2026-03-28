@@ -448,6 +448,8 @@ export class SessionDO extends DurableObject<Env> {
             generateId: () => generateId(),
             pushBranchToRemote: (headBranch, pushSpec) =>
               this.pushBranchToRemote(headBranch, pushSpec),
+            syncSessionIndexBranchName: (sessionId, branchName) =>
+              this.syncSessionIndexBranchName(sessionId, branchName),
             broadcastArtifactCreated: (artifact) => {
               this.broadcast({
                 type: "artifact_created",
@@ -1366,6 +1368,20 @@ export class SessionDO extends DurableObject<Env> {
           session_id: sessionId,
           status,
           updated_at: updatedAt,
+          error,
+        });
+      })
+    );
+  }
+
+  private syncSessionIndexBranchName(sessionId: string, branchName: string | null): void {
+    if (!this.env.DB) return;
+    const sessionStore = new SessionIndexStore(this.env.DB);
+    this.ctx.waitUntil(
+      sessionStore.updateBranchName(sessionId, branchName).catch((error) => {
+        this.log.error("session_index.update_branch_name.background_error", {
+          session_id: sessionId,
+          branch_name: branchName,
           error,
         });
       })
