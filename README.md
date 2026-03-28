@@ -12,7 +12,8 @@ Open-Inspect provides a hosted background coding agent that can:
 - Support multiple clients (web, Slack, Chrome extension)
 - Enable multiplayer sessions where multiple people can collaborate
 - Create PRs with proper commit attribution
-- Use your choice of AI model - Anthropic Claude, OpenAI via ChatGPT/Codex, or GitHub Copilot-backed GPT and Claude models
+- Use your choice of AI model - Anthropic Claude, OpenAI via ChatGPT/Codex, or GitHub Copilot-backed
+  GPT and Claude models
 
 ## Security Model (Single-Tenant Only)
 

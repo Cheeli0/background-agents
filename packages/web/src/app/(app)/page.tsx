@@ -495,7 +495,8 @@ function HomeContent({
                           options: group.models.map((model) => ({
                             value: model.id,
                             label: model.name,
-                            badge: formatPremiumMultiplierLabel(model.premiumMultiplier) ?? undefined,
+                            badge:
+                              formatPremiumMultiplierLabel(model.premiumMultiplier) ?? undefined,
                             description: model.description,
                           })),
                         })) as ComboboxGroup[]

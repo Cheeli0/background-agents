@@ -327,7 +327,10 @@ describe("SessionSidebar", () => {
   it("shows merged and closed PR status indicators in the sessions list", async () => {
     const sessions = [
       createSession(1),
-      { ...createSession(2), title: "Session 2 with a very long title that should truncate in sidebar" },
+      {
+        ...createSession(2),
+        title: "Session 2 with a very long title that should truncate in sidebar",
+      },
       createSession(3),
     ];
 

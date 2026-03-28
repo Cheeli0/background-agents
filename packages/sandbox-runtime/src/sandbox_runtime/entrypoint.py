@@ -444,7 +444,9 @@ class SandboxSupervisor:
                     )
 
                 if zai_entry.get("type") != "api":
-                    raise RuntimeError("Z.AI credentials in OPENCODE_AUTH_JSON must use type 'api'.")
+                    raise RuntimeError(
+                        "Z.AI credentials in OPENCODE_AUTH_JSON must use type 'api'."
+                    )
 
                 key = zai_entry.get("key")
                 if not isinstance(key, str) or not key.strip():

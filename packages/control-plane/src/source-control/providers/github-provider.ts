@@ -18,6 +18,8 @@ import type {
   BuildGitPushSpecConfig,
   GitPushSpec,
   GitPushAuthContext,
+  GetPullRequestChecksConfig,
+  PullRequestChecks,
   GetPullRequestStatusConfig,
   PullRequestStatus,
 } from "../types";
@@ -289,6 +291,12 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
         extractHttpStatus(upstreamError)
       );
     }
+  }
+
+  async getPullRequestChecks(
+    _config: GetPullRequestChecksConfig
+  ): Promise<PullRequestChecks | null> {
+    return null;
   }
 
   /**
