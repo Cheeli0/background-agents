@@ -50,6 +50,7 @@ class SandboxSupervisor:
     DEFAULT_SETUP_TIMEOUT_SECONDS = 300
     DEFAULT_START_TIMEOUT_SECONDS = 120
     CLONE_DEPTH_COMMITS = 100
+    FIREWORKS_MODEL_ROUTER_PREFIX = "accounts/fireworks/routers/"
 
     def __init__(self):
         self.opencode_process: asyncio.subprocess.Process | None = None
@@ -516,6 +517,12 @@ class SandboxSupervisor:
         # Build OpenCode config from session settings
         # Model format is "provider/model", e.g. "anthropic/claude-sonnet-4-6"
         model = self.session_config.get("model", "claude-sonnet-4-6")
+        if (
+            provider == "fireworks-ai"
+            and isinstance(model, str)
+            and not model.startswith(self.FIREWORKS_MODEL_ROUTER_PREFIX)
+        ):
+            model = f"{self.FIREWORKS_MODEL_ROUTER_PREFIX}{model}"
         opencode_provider = "copilot" if provider == "github-copilot" else provider
         opencode_config = {
             "model": f"{opencode_provider}/{model}",
