@@ -52,6 +52,10 @@ describe("formatProviderName", () => {
   it("formats Z.AI Coding Plan provider names", () => {
     expect(formatProviderName("zai-coding-plan/glm-5")).toBe("Z.AI");
   });
+
+  it("formats Fireworks AI provider names", () => {
+    expect(formatProviderName("fireworks-ai/kimi-k2p5-turbo")).toBe("Fireworks AI");
+  });
 });
 
 describe("truncateBranchStart", () => {

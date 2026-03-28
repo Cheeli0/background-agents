@@ -116,3 +116,50 @@ async def test_uses_zai_coding_plan_provider_name_in_config(tmp_path):
     env = exec_mock.await_args.kwargs["env"]
     config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
     assert config["model"] == "zai-coding-plan/glm-5"
+
+
+@pytest.mark.asyncio
+async def test_uses_fireworks_provider_name_in_config(tmp_path):
+    supervisor = _make_supervisor({"provider": "fireworks-ai", "model": "kimi-k2p5-turbo"})
+    supervisor.workspace_path = tmp_path
+    supervisor.repo_path = tmp_path / "missing-repo"
+    supervisor._setup_opencode_auth = MagicMock()
+    supervisor._install_tools = MagicMock()
+    supervisor._wait_for_health = AsyncMock()
+
+    with patch(
+        "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+        new=AsyncMock(return_value=_fake_process()),
+    ) as exec_mock:
+        await supervisor.start_opencode()
+
+    assert exec_mock.await_args is not None
+    env = exec_mock.await_args.kwargs["env"]
+    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    assert config["model"] == "fireworks-ai/accounts/fireworks/routers/kimi-k2p5-turbo"
+
+
+@pytest.mark.asyncio
+async def test_keeps_prefixed_fireworks_router_model_in_config(tmp_path):
+    supervisor = _make_supervisor(
+        {
+            "provider": "fireworks-ai",
+            "model": "accounts/fireworks/routers/kimi-k2p5-turbo",
+        }
+    )
+    supervisor.workspace_path = tmp_path
+    supervisor.repo_path = tmp_path / "missing-repo"
+    supervisor._setup_opencode_auth = MagicMock()
+    supervisor._install_tools = MagicMock()
+    supervisor._wait_for_health = AsyncMock()
+
+    with patch(
+        "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+        new=AsyncMock(return_value=_fake_process()),
+    ) as exec_mock:
+        await supervisor.start_opencode()
+
+    assert exec_mock.await_args is not None
+    env = exec_mock.await_args.kwargs["env"]
+    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    assert config["model"] == "fireworks-ai/accounts/fireworks/routers/kimi-k2p5-turbo"

@@ -30,42 +30,6 @@ Go to **Settings -> Secrets** and add either a repository secret or a global sec
 
 This is the simplest setup. You only need the API key in the UI.
 
-## Optional: OPENCODE_AUTH_JSON
-
-If you want to paste the provider object directly instead of using `ZAI_API_KEY`, Open-Inspect also
-accepts `OPENCODE_AUTH_JSON`.
-
-Preferred format:
-
-```json
-{
-  "zai-coding-plan": {
-    "type": "api",
-    "key": "your-api-key"
-  }
-}
-```
-
-Also accepted:
-
-```json
-{
-  "zai": {
-    "type": "api",
-    "key": "your-api-key"
-  }
-}
-```
-
-Or the direct provider entry by itself:
-
-```json
-{
-  "type": "api",
-  "key": "your-api-key"
-}
-```
-
 ## Notes
 
 - OpenCode uses the Z.AI provider ID `zai` and a dedicated Coding Plan provider ID
@@ -77,8 +41,7 @@ Or the direct provider entry by itself:
 
 ### Session creation fails with missing credentials
 
-Add `ZAI_API_KEY` in Open-Inspect settings. If you prefer JSON-based provider auth, store a valid
-`OPENCODE_AUTH_JSON` object with a `zai-coding-plan` or `zai` entry.
+Add `ZAI_API_KEY` in Open-Inspect settings.
 
 ### Model does not appear in the dropdown
 

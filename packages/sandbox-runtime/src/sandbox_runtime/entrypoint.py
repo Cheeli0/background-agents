@@ -50,6 +50,7 @@ class SandboxSupervisor:
     DEFAULT_SETUP_TIMEOUT_SECONDS = 300
     DEFAULT_START_TIMEOUT_SECONDS = 120
     CLONE_DEPTH_COMMITS = 100
+    FIREWORKS_MODEL_ROUTER_PREFIX = "accounts/fireworks/routers/"
 
     def __init__(self):
         self.opencode_process: asyncio.subprocess.Process | None = None
@@ -337,6 +338,17 @@ class SandboxSupervisor:
             "key": api_key,
         }
 
+    def _build_fireworks_auth_entry(self) -> dict[str, object] | None:
+        """Build the managed Fireworks AI auth entry for direct API-key sessions."""
+        api_key = os.environ.get("FIREWORKS_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        return {
+            "type": "api",
+            "key": api_key,
+        }
+
     def _write_opencode_auth(self, auth_data: dict[str, object]) -> None:
         """Write OpenCode auth.json atomically with secure permissions."""
         auth_dir = Path.home() / ".local" / "share" / "opencode"
@@ -374,35 +386,12 @@ class SandboxSupervisor:
 
         return auth_data
 
-    def _normalize_zai_auth(self, auth_data: dict[str, object]) -> dict[str, object]:
-        """Normalize Z.AI auth blobs from either full auth.json or direct provider entries."""
-        zai_entry = auth_data.get("zai-coding-plan") or auth_data.get("zai")
-        if isinstance(zai_entry, dict):
-            normalized = dict(auth_data)
-            normalized["zai-coding-plan"] = zai_entry
-            normalized["zai"] = zai_entry
-            return normalized
-
-        if (
-            ("type" in auth_data or "key" in auth_data)
-            and "openai" not in auth_data
-            and "anthropic" not in auth_data
-            and "github-copilot" not in auth_data
-            and "copilot" not in auth_data
-        ):
-            return {
-                "zai-coding-plan": dict(auth_data),
-                "zai": dict(auth_data),
-            }
-
-        return auth_data
-
     def _setup_opencode_auth(self, selected_provider: str) -> None:
         """Write OpenCode auth.json from repo secrets and managed OpenAI config."""
         auth_data: dict[str, object] = {}
 
         auth_json = os.environ.get("OPENCODE_AUTH_JSON")
-        if auth_json:
+        if auth_json and selected_provider not in ("zai-coding-plan", "fireworks-ai"):
             try:
                 parsed = json.loads(auth_json)
             except json.JSONDecodeError as e:
@@ -414,8 +403,6 @@ class SandboxSupervisor:
             auth_data = parsed
             if selected_provider == "github-copilot":
                 auth_data = self._normalize_copilot_auth(auth_data)
-            elif selected_provider == "zai-coding-plan":
-                auth_data = self._normalize_zai_auth(auth_data)
 
         try:
             openai_entry = self._build_openai_auth_entry()
@@ -426,6 +413,11 @@ class SandboxSupervisor:
             if zai_entry:
                 auth_data["zai"] = zai_entry
                 auth_data["zai-coding-plan"] = zai_entry
+
+            fireworks_entry = self._build_fireworks_auth_entry()
+            if fireworks_entry:
+                auth_data["fireworks"] = fireworks_entry
+                auth_data["fireworks-ai"] = fireworks_entry
 
             if selected_provider == "github-copilot":
                 copilot_entry = auth_data.get("github-copilot") or auth_data.get("copilot")
@@ -440,19 +432,30 @@ class SandboxSupervisor:
                 if not isinstance(zai_entry, dict):
                     raise RuntimeError(
                         "Z.AI credentials are not configured. "
-                        "Add OPENCODE_AUTH_JSON in repository Settings."
+                        "Add ZAI_API_KEY in repository Settings."
                     )
 
                 if zai_entry.get("type") != "api":
-                    raise RuntimeError(
-                        "Z.AI credentials in OPENCODE_AUTH_JSON must use type 'api'."
-                    )
+                    raise RuntimeError("Z.AI credentials must use type 'api'.")
 
                 key = zai_entry.get("key")
                 if not isinstance(key, str) or not key.strip():
+                    raise RuntimeError("Z.AI credentials must include a non-empty key.")
+
+            if selected_provider == "fireworks-ai":
+                fireworks_entry = auth_data.get("fireworks-ai") or auth_data.get("fireworks")
+                if not isinstance(fireworks_entry, dict):
                     raise RuntimeError(
-                        "Z.AI credentials in OPENCODE_AUTH_JSON must include a non-empty key."
+                        "Fireworks AI credentials are not configured. "
+                        "Add FIREWORKS_API_KEY in repository Settings."
                     )
+
+                if fireworks_entry.get("type") != "api":
+                    raise RuntimeError("Fireworks AI credentials must use type 'api'.")
+
+                key = fireworks_entry.get("key")
+                if not isinstance(key, str) or not key.strip():
+                    raise RuntimeError("Fireworks AI credentials must include a non-empty key.")
 
             if not auth_data:
                 return
@@ -514,6 +517,12 @@ class SandboxSupervisor:
         # Build OpenCode config from session settings
         # Model format is "provider/model", e.g. "anthropic/claude-sonnet-4-6"
         model = self.session_config.get("model", "claude-sonnet-4-6")
+        if (
+            provider == "fireworks-ai"
+            and isinstance(model, str)
+            and not model.startswith(self.FIREWORKS_MODEL_ROUTER_PREFIX)
+        ):
+            model = f"{self.FIREWORKS_MODEL_ROUTER_PREFIX}{model}"
         opencode_provider = "copilot" if provider == "github-copilot" else provider
         opencode_config = {
             "model": f"{opencode_provider}/{model}",

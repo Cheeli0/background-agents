@@ -38,6 +38,8 @@ const ZAI_CODING_PLAN_MODELS = [
   "zai-coding-plan/glm-4.5-air",
 ] as const;
 
+const FIREWORKS_AI_MODELS = ["fireworks-ai/kimi-k2p5-turbo"] as const;
+
 /**
  * Valid model names supported by the system.
  * All models use "provider/model" format.
@@ -58,6 +60,7 @@ export const VALID_MODELS = [
   "opencode/minimax-m2.5",
   "opencode/glm-5",
   ...ZAI_CODING_PLAN_MODELS,
+  ...FIREWORKS_AI_MODELS,
 ] as const;
 
 export type ValidModel = (typeof VALID_MODELS)[number];
@@ -334,6 +337,16 @@ export const MODEL_OPTIONS: ModelCategory[] = [
     ],
   },
   {
+    category: "Fireworks AI",
+    models: [
+      {
+        id: "fireworks-ai/kimi-k2p5-turbo",
+        name: "Kimi K2.5 Turbo",
+        description: "Moonshot AI model served via Fireworks AI",
+      },
+    ],
+  },
+  {
     category: "OpenCode Zen",
     models: [
       { id: "opencode/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
@@ -371,6 +384,7 @@ export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
   "zai-coding-plan/glm-5-turbo",
   "zai-coding-plan/glm-4.7",
   "zai-coding-plan/glm-4.5-air",
+  "fireworks-ai/kimi-k2p5-turbo",
 ];
 
 // === Normalization ===

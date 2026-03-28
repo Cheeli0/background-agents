@@ -6,8 +6,8 @@ import type { Env } from "./types";
 
 export const OPENCODE_AUTH_JSON_SECRET = "OPENCODE_AUTH_JSON";
 export const ZAI_API_KEY_SECRET = "ZAI_API_KEY";
+export const FIREWORKS_API_KEY_SECRET = "FIREWORKS_API_KEY";
 const COPILOT_ACCESS_TOKEN_EXPIRY_BUFFER_MS = 60 * 1000;
-const ZAI_PROVIDER_IDS = ["zai-coding-plan", "zai"] as const;
 
 interface RepoSecretContext {
   repoId?: number | null;
@@ -23,29 +23,8 @@ export function isZaiCodingPlanModel(model: string): boolean {
   return extractProviderAndModel(model).provider === "zai-coding-plan";
 }
 
-function isApiKeyEntry(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function getZaiAuthEntry(authObject: Record<string, unknown>): Record<string, unknown> | null {
-  for (const providerId of ZAI_PROVIDER_IDS) {
-    const entry = authObject[providerId];
-    if (isApiKeyEntry(entry)) {
-      return entry;
-    }
-  }
-
-  if (
-    ("type" in authObject || "key" in authObject) &&
-    !("openai" in authObject) &&
-    !("anthropic" in authObject) &&
-    !("github-copilot" in authObject) &&
-    !("copilot" in authObject)
-  ) {
-    return authObject;
-  }
-
-  return null;
+export function isFireworksAiModel(model: string): boolean {
+  return extractProviderAndModel(model).provider === "fireworks-ai";
 }
 
 function hasCopilotAuthEntry(authObject: Record<string, unknown>): boolean {
@@ -145,13 +124,20 @@ export async function validateModelCredentialsForRepo(
 ): Promise<string | null> {
   const requiresCopilotCredentials = isGitHubCopilotModel(model);
   const requiresZaiCredentials = isZaiCodingPlanModel(model);
+  const requiresFireworksCredentials = isFireworksAiModel(model);
 
-  if (!requiresCopilotCredentials && !requiresZaiCredentials) {
+  if (!requiresCopilotCredentials && !requiresZaiCredentials && !requiresFireworksCredentials) {
     return null;
   }
 
   if (!env.DB || !env.REPO_SECRETS_ENCRYPTION_KEY) {
-    return "GitHub Copilot models require secrets storage to be configured.";
+    if (requiresCopilotCredentials) {
+      return "GitHub Copilot models require secrets storage to be configured.";
+    }
+    if (requiresZaiCredentials) {
+      return "Z.AI models require secrets storage to be configured.";
+    }
+    return "Fireworks AI models require secrets storage to be configured.";
   }
 
   const globalStore = new GlobalSecretsStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
@@ -163,20 +149,30 @@ export async function validateModelCredentialsForRepo(
     repoSecrets = await repoStore.getDecryptedSecrets(repo.repoId);
   }
 
-  const authJson = mergeSecrets(globalSecrets, repoSecrets).merged[OPENCODE_AUTH_JSON_SECRET];
-  const zaiApiKey = mergeSecrets(globalSecrets, repoSecrets).merged[ZAI_API_KEY_SECRET];
+  const mergedSecrets = mergeSecrets(globalSecrets, repoSecrets).merged;
+  const authJson = mergedSecrets[OPENCODE_AUTH_JSON_SECRET];
+  const zaiApiKey = mergedSecrets[ZAI_API_KEY_SECRET];
+  const fireworksApiKey = mergedSecrets[FIREWORKS_API_KEY_SECRET];
+
+  if (requiresZaiCredentials && !zaiApiKey?.trim()) {
+    return (
+      "Z.AI credentials are not configured. " +
+      `Add ${ZAI_API_KEY_SECRET} as a repo or global secret.`
+    );
+  }
+
+  if (requiresFireworksCredentials && !fireworksApiKey?.trim()) {
+    return (
+      "Fireworks AI credentials are not configured. " +
+      `Add ${FIREWORKS_API_KEY_SECRET} as a repo or global secret.`
+    );
+  }
+
+  if (!requiresCopilotCredentials) {
+    return null;
+  }
+
   if (!authJson?.trim()) {
-    if (requiresZaiCredentials) {
-      if (zaiApiKey?.trim()) {
-        return null;
-      }
-
-      return (
-        "Z.AI credentials are not configured. " +
-        `Add ${ZAI_API_KEY_SECRET} or ${OPENCODE_AUTH_JSON_SECRET} as a repo or global secret.`
-      );
-    }
-
     return (
       "GitHub Copilot credentials are not configured. " +
       "Add OPENCODE_AUTH_JSON as a repo or global secret."
@@ -201,28 +197,6 @@ export async function validateModelCredentialsForRepo(
       "Store either the full auth object with a github-copilot/copilot entry " +
       "or the provider entry itself."
     );
-  }
-
-  if (requiresZaiCredentials) {
-    if (zaiApiKey?.trim()) {
-      return null;
-    }
-
-    const entry = getZaiAuthEntry(authObject);
-    if (!entry) {
-      return (
-        "OPENCODE_AUTH_JSON does not contain Z.AI credentials. " +
-        `Store either a zai/zai-coding-plan entry or the provider entry itself, or use ${ZAI_API_KEY_SECRET}.`
-      );
-    }
-
-    if (entry.type !== "api") {
-      return "Z.AI credentials in OPENCODE_AUTH_JSON must use type 'api'.";
-    }
-
-    if (typeof entry.key !== "string" || entry.key.trim().length === 0) {
-      return "Z.AI credentials in OPENCODE_AUTH_JSON must include a non-empty key.";
-    }
   }
 
   return null;

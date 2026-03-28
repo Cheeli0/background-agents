@@ -55,6 +55,10 @@ describe("model utilities", () => {
       expect(isValidModel("zai-coding-plan/glm-4.5-air")).toBe(true);
     });
 
+    it("returns true for Fireworks AI-backed models", () => {
+      expect(isValidModel("fireworks-ai/kimi-k2p5-turbo")).toBe(true);
+    });
+
     it("accepts bare GPT model names via normalization", () => {
       expect(isValidModel("gpt-5.4")).toBe(true);
       expect(isValidModel("gpt-5.2")).toBe(true);
@@ -159,6 +163,13 @@ describe("model utilities", () => {
       expect(extractProviderAndModel("zai-coding-plan/glm-4.7")).toEqual({
         provider: "zai-coding-plan",
         model: "glm-4.7",
+      });
+    });
+
+    it("extracts Fireworks AI provider from Kimi models", () => {
+      expect(extractProviderAndModel("fireworks-ai/kimi-k2p5-turbo")).toEqual({
+        provider: "fireworks-ai",
+        model: "kimi-k2p5-turbo",
       });
     });
 
