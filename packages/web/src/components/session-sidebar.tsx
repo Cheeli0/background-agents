@@ -13,7 +13,7 @@ import {
   type SidebarSession,
   type SessionListResponse,
 } from "@/lib/session-list";
-import { truncateBranch } from "@/lib/format";
+import { truncateBranchStart } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
@@ -797,7 +797,7 @@ function SessionListItem({
                 <span>·</span>
                 <BranchIcon className="w-3 h-3 flex-shrink-0" />
                 <span className="truncate" title={branchLabel}>
-                  {truncateBranch(branchLabel)}
+                  {truncateBranchStart(branchLabel)}
                 </span>
               </>
             )}
@@ -864,7 +864,7 @@ function SessionListItem({
                 <span>·</span>
                 <BranchIcon className="w-3 h-3 flex-shrink-0" />
                 <span className="truncate" title={branchLabel}>
-                  {truncateBranch(branchLabel)}
+                  {truncateBranchStart(branchLabel)}
                 </span>
               </>
             )}
