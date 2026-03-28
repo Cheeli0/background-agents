@@ -18,7 +18,7 @@ import {
   updateAgentSession,
   getRepoSuggestions,
 } from "./utils/linear-client";
-import { generateInternalToken } from "./utils/internal";
+import { buildInternalAuthHeaders } from "./utils/internal";
 import { classifyRepo } from "./classifier";
 import { getAvailableRepos } from "./classifier/repos";
 import { getLinearConfig, getLinearGlobalClassificationModel } from "./utils/integration-config";
@@ -123,13 +123,10 @@ export function buildFollowUpPrompt(params: {
 }
 
 async function getAuthHeaders(env: Env, traceId?: string): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (env.INTERNAL_CALLBACK_SECRET) {
-    const authToken = await generateInternalToken(env.INTERNAL_CALLBACK_SECRET);
-    headers["Authorization"] = `Bearer ${authToken}`;
-  }
-  if (traceId) headers["x-trace-id"] = traceId;
-  return headers;
+  return {
+    "Content-Type": "application/json",
+    ...(await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId)),
+  };
 }
 
 // ─── Sub-handlers ────────────────────────────────────────────────────────────
@@ -400,6 +397,7 @@ async function handleNewSession(
       labelNames,
       projectInfo?.name,
       globalClassificationModel,
+      comment?.body,
       traceId
     );
 

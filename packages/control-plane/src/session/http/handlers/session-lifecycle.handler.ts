@@ -377,7 +377,9 @@ export function createSessionLifecycleHandler(
       };
       const pullRequest = Array.isArray(body.pullRequests) ? (body.pullRequests[0] ?? null) : null;
 
-      return Response.json({ pullRequest: pullRequest ?? artifactPullRequest } satisfies AssociatedPrResponse);
+      return Response.json({
+        pullRequest: pullRequest ?? artifactPullRequest,
+      } satisfies AssociatedPrResponse);
     },
 
     async updateTitle(request: Request): Promise<Response> {

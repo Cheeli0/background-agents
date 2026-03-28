@@ -27,7 +27,7 @@ export interface RepositoryInfo {
 /**
  * Supported source control provider names.
  */
-export type SourceControlProviderName = "github" | "bitbucket";
+export type SourceControlProviderName = "github" | "bitbucket" | "gitlab";
 
 /**
  * Authentication context for source control API operations.
@@ -339,7 +339,5 @@ export interface SourceControlProvider {
    *
    * Optional to preserve compatibility with providers that don't expose this.
    */
-  getPullRequestStatus?(
-    config: GetPullRequestStatusConfig
-  ): Promise<PullRequestStatus | null>;
+  getPullRequestStatus?(config: GetPullRequestStatusConfig): Promise<PullRequestStatus | null>;
 }

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { formatModelName, formatProviderName, truncateBranch, copyToClipboard } from "@/lib/format";
 import { formatRelativeTime } from "@/lib/time";
 import { getSafeExternalUrl } from "@/lib/urls";
+import { getScmBranchUrl, getScmRepoUrl } from "@/lib/scm";
 import type { Artifact } from "@/types/session";
 import type {
   SessionArtifactPr,
@@ -16,9 +17,9 @@ import { PullRequestStatusIcon } from "@/components/pull-request-status-icon";
 import {
   ClockIcon,
   SparkleIcon,
-  GitHubIcon,
   GitBranchWorkIcon,
   BranchIcon,
+  RepoIcon,
   CopyIcon,
   CheckIcon,
   CheckCircleIcon,
@@ -120,9 +121,7 @@ export function MetadataSection({
       : null;
   const sidebarPrStatus = useSessionPrStatus(sessionId ?? null);
   const branchUrl =
-    branchName && repoOwner && repoName
-      ? `https://github.com/${repoOwner}/${repoName}/tree/${encodeURIComponent(branchName)}`
-      : null;
+    branchName && repoOwner && repoName ? getScmBranchUrl(repoOwner, repoName, branchName) : null;
 
   const handleCopyBranch = async () => {
     if (branchName) {
@@ -214,7 +213,7 @@ export function MetadataSection({
           <BranchIcon className="w-4 h-4" />
           {repoOwner && repoName ? (
             <a
-              href={`https://github.com/${repoOwner}/${repoName}/tree/${encodeURIComponent(baseBranch)}`}
+              href={getScmBranchUrl(repoOwner, repoName, baseBranch)}
               target="_blank"
               rel="noopener noreferrer"
               className="text-accent truncate max-w-[180px] hover:underline"
@@ -266,9 +265,9 @@ export function MetadataSection({
       {/* Repository tag */}
       {repoOwner && repoName && (
         <div className="flex items-center gap-2 text-sm">
-          <GitHubIcon className="w-4 h-4 text-muted-foreground" />
+          <RepoIcon className="w-4 h-4 text-muted-foreground" />
           <a
-            href={`https://github.com/${repoOwner}/${repoName}`}
+            href={getScmRepoUrl(repoOwner, repoName)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-accent hover:underline"
