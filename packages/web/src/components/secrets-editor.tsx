@@ -341,10 +341,8 @@ export function SecretsEditor({
   const helperText =
     "Keys are automatically uppercased. Paste a `.env` block into either field to import.";
 
-  const zaiHint =
-    "For Z.AI models, add ZAI_API_KEY only. OPENCODE_AUTH_JSON also works if you prefer the full provider JSON.";
-  const fireworksHint =
-    "For Fireworks AI models, add FIREWORKS_API_KEY only. OPENCODE_AUTH_JSON also works if you prefer the full provider JSON.";
+  const zaiHint = "For Z.AI models, add ZAI_API_KEY only.";
+  const fireworksHint = "For Fireworks AI models, add FIREWORKS_API_KEY only.";
 
   return (
     <div className="mt-4 border border-border bg-background p-4">

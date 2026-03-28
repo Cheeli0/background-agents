@@ -197,72 +197,6 @@ describe("model-credentials", () => {
       expect(result).toContain("GitHub Copilot credentials");
     });
 
-    it("accepts a Z.AI provider entry pasted directly", async () => {
-      mockGetRepoSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          type: "api",
-          key: "zai-key",
-        }),
-      });
-
-      const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-5", {
-        repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
-
-      expect(result).toBeNull();
-    });
-
-    it("accepts a zai-coding-plan auth entry", async () => {
-      mockGetRepoSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          "zai-coding-plan": { type: "api", key: "zai-key" },
-        }),
-      });
-
-      const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-5-turbo", {
-        repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
-
-      expect(result).toBeNull();
-    });
-
-    it("accepts a zai auth entry", async () => {
-      mockGetGlobalSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          zai: { type: "api", key: "zai-key" },
-        }),
-      });
-
-      const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-4.7", {
-        repoId: null,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
-
-      expect(result).toBeNull();
-    });
-
-    it("prioritizes zai-coding-plan when both Z.AI provider entries exist", async () => {
-      mockGetGlobalSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          "zai-coding-plan": { type: "oauth", key: "not-api" },
-          zai: { type: "api", key: "zai-key" },
-        }),
-      });
-
-      const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-4.7", {
-        repoId: null,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
-
-      expect(result).toContain("type 'api'");
-    });
-
     it("returns an error when Z.AI credentials are missing", async () => {
       const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-4.5-air", {
         repoId: 1,
@@ -270,7 +204,6 @@ describe("model-credentials", () => {
         repoName: "widgets",
       });
 
-      expect(result).toContain(OPENCODE_AUTH_JSON_SECRET);
       expect(result).toContain(ZAI_API_KEY_SECRET);
       expect(result).toContain("Z.AI credentials");
     });
@@ -289,10 +222,10 @@ describe("model-credentials", () => {
       expect(result).toBeNull();
     });
 
-    it("returns an error when the auth blob lacks Z.AI credentials", async () => {
+    it("rejects OPENCODE_AUTH_JSON-only credentials for Z.AI", async () => {
       mockGetGlobalSecrets.mockResolvedValue({
         [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          openai: { type: "oauth", refresh: "managed-by-control-plane" },
+          zai: { type: "api", key: "zai-key" },
         }),
       });
 
@@ -303,82 +236,17 @@ describe("model-credentials", () => {
       });
 
       expect(result).toContain("Z.AI credentials");
+      expect(result).toContain(ZAI_API_KEY_SECRET);
     });
 
-    it("returns an error when Z.AI credentials use a non-api type", async () => {
+    it("accepts ZAI_API_KEY even when OPENCODE_AUTH_JSON is invalid", async () => {
       mockGetGlobalSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          zai: { type: "oauth", key: "zai-key" },
-        }),
+        [OPENCODE_AUTH_JSON_SECRET]: "{invalid",
+        [ZAI_API_KEY_SECRET]: "zai-key",
       });
 
       const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-5", {
         repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
-
-      expect(result).toContain("type 'api'");
-    });
-
-    it("returns an error when Z.AI credentials have an empty key", async () => {
-      mockGetGlobalSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          zai: { type: "api", key: "   " },
-        }),
-      });
-
-      const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-5", {
-        repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
-
-      expect(result).toContain("non-empty key");
-    });
-
-    it("accepts a Fireworks AI provider entry pasted directly", async () => {
-      mockGetRepoSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          type: "api",
-          key: "fireworks-key",
-        }),
-      });
-
-      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
-        repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
-
-      expect(result).toBeNull();
-    });
-
-    it("accepts a fireworks-ai auth entry", async () => {
-      mockGetRepoSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          "fireworks-ai": { type: "api", key: "fireworks-key" },
-        }),
-      });
-
-      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
-        repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
-
-      expect(result).toBeNull();
-    });
-
-    it("accepts a fireworks alias auth entry", async () => {
-      mockGetGlobalSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          fireworks: { type: "api", key: "fireworks-key" },
-        }),
-      });
-
-      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
-        repoId: null,
         repoOwner: "acme",
         repoName: "widgets",
       });
@@ -393,7 +261,6 @@ describe("model-credentials", () => {
         repoName: "widgets",
       });
 
-      expect(result).toContain(OPENCODE_AUTH_JSON_SECRET);
       expect(result).toContain(FIREWORKS_API_KEY_SECRET);
       expect(result).toContain("Fireworks AI credentials");
     });
@@ -412,10 +279,10 @@ describe("model-credentials", () => {
       expect(result).toBeNull();
     });
 
-    it("returns an error when the auth blob lacks Fireworks AI credentials", async () => {
+    it("rejects OPENCODE_AUTH_JSON-only credentials for Fireworks AI", async () => {
       mockGetGlobalSecrets.mockResolvedValue({
         [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          openai: { type: "oauth", refresh: "managed-by-control-plane" },
+          fireworks: { type: "api", key: "fireworks-key" },
         }),
       });
 
@@ -426,13 +293,13 @@ describe("model-credentials", () => {
       });
 
       expect(result).toContain("Fireworks AI credentials");
+      expect(result).toContain(FIREWORKS_API_KEY_SECRET);
     });
 
-    it("returns an error when Fireworks AI credentials use a non-api type", async () => {
+    it("accepts FIREWORKS_API_KEY even when OPENCODE_AUTH_JSON is invalid", async () => {
       mockGetGlobalSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          "fireworks-ai": { type: "oauth", key: "fireworks-key" },
-        }),
+        [OPENCODE_AUTH_JSON_SECRET]: "{invalid",
+        [FIREWORKS_API_KEY_SECRET]: "fireworks-key",
       });
 
       const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
@@ -441,23 +308,7 @@ describe("model-credentials", () => {
         repoName: "widgets",
       });
 
-      expect(result).toContain("type 'api'");
-    });
-
-    it("returns an error when Fireworks AI credentials have an empty key", async () => {
-      mockGetGlobalSecrets.mockResolvedValue({
-        [OPENCODE_AUTH_JSON_SECRET]: JSON.stringify({
-          fireworks: { type: "api", key: "   " },
-        }),
-      });
-
-      const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
-        repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
-
-      expect(result).toContain("non-empty key");
+      expect(result).toBeNull();
     });
   });
 
