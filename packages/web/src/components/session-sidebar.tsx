@@ -628,7 +628,6 @@ function SessionListItem({
   // Orphan child (parent filtered out) — show a subtle badge
   const isOrphanChild = session.parentSessionId && session.spawnSource === "agent";
   const showBaseBranch = !!session.baseBranch && session.baseBranch !== "main";
-  const showSecondaryMetadata = isOrphanChild || showBaseBranch;
   const [isRenaming, setIsRenaming] = useState(false);
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [title, setTitle] = useState(displayTitle);
@@ -823,57 +822,46 @@ function SessionListItem({
           onTouchCancel={handleTouchEnd}
           className="block pr-8"
         >
-          <div className="flex items-start gap-1.5 min-w-0">
-            <div className="shrink-0 pt-0.5">
-              <SessionPrStatusIndicator sessionId={session.id} />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <SessionPrStatusIndicator sessionId={session.id} />
+            <div className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+              {displayTitle}
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-start gap-1.5 min-w-0">
-                <span className="shrink-0 pt-0.5 text-xs text-muted-foreground">
-                  {relativeTime}
-                </span>
-                <div className="min-w-0 flex-1 break-words text-sm font-medium leading-5 text-foreground">
-                  {displayTitle}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-1 pt-0.5">
-              {showCompletedIndicator && (
-                <span
-                  className="inline-flex items-center text-success"
-                  aria-label="Session completed"
-                  title="Session completed"
-                >
-                  <CheckCircleIcon className="h-3.5 w-3.5" />
-                </span>
-              )}
-              {showWaitingForUserIndicator && (
-                <span
-                  className="inline-flex items-center text-accent"
-                  aria-label="Waiting for your input"
-                  title="Waiting for your input"
-                >
-                  <KeyboardIcon className="h-3.5 w-3.5" />
-                </span>
-              )}
-            </div>
+            {showCompletedIndicator && (
+              <span
+                className="inline-flex items-center text-success"
+                aria-label="Session completed"
+                title="Session completed"
+              >
+                <CheckCircleIcon className="h-3.5 w-3.5" />
+              </span>
+            )}
+            {showWaitingForUserIndicator && (
+              <span
+                className="inline-flex items-center text-accent"
+                aria-label="Waiting for your input"
+                title="Waiting for your input"
+              >
+                <KeyboardIcon className="h-3.5 w-3.5" />
+              </span>
+            )}
           </div>
-          {showSecondaryMetadata && (
-            <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-              {isOrphanChild && (
-                <>
-                  <span className="text-accent">sub-task</span>
-                  {showBaseBranch && <span>·</span>}
-                </>
-              )}
-              {showBaseBranch && (
-                <>
-                  <BranchIcon className="w-3 h-3 flex-shrink-0" />
-                  <span className="truncate">{session.baseBranch}</span>
-                </>
-              )}
-            </div>
-          )}
+          <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
+            <span>{relativeTime}</span>
+            {isOrphanChild && (
+              <>
+                <span>·</span>
+                <span className="text-accent">sub-task</span>
+              </>
+            )}
+            {showBaseBranch && (
+              <>
+                <span>·</span>
+                <BranchIcon className="w-3 h-3 flex-shrink-0" />
+                <span className="truncate">{session.baseBranch}</span>
+              </>
+            )}
+          </div>
         </Link>
       )}
 

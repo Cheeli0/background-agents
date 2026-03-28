@@ -397,15 +397,15 @@ describe("SessionSidebar", () => {
     );
   });
 
-  it("keeps timestamps inline and removes repository metadata from session rows", async () => {
+  it("removes repository metadata while keeping existing secondary metadata", async () => {
     vi.spyOn(Date, "now").mockReturnValue(2_000_000_000_000);
 
     const sessions = [
       {
         ...createSession(1),
-        title:
-          "A long session title that should wrap onto multiple lines without pushing the timestamp below it",
+        title: "Session with branch metadata",
         updatedAt: 2_000_000_000_000 - 10 * 60 * 1000,
+        baseBranch: "feature/che-76",
       },
     ];
 
@@ -438,14 +438,11 @@ describe("SessionSidebar", () => {
       </SWRConfig>
     );
 
-    const sessionLink = await screen.findByRole("link", {
-      name: /a long session title that should wrap onto multiple lines/i,
-    });
+    const sessionLink = await screen.findByRole("link", { name: /session with branch metadata/i });
 
     expect(screen.getByText("10m")).toBeInTheDocument();
-    expect(sessionLink).toHaveTextContent(
-      "10mA long session title that should wrap onto multiple lines without pushing the timestamp below it"
-    );
+    expect(sessionLink).toHaveTextContent("10m");
+    expect(sessionLink).toHaveTextContent("feature/che-76");
     expect(sessionLink).not.toHaveTextContent("open-inspect/background-agents");
   });
 
