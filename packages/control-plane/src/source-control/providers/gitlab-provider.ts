@@ -18,6 +18,8 @@ import type {
   BuildGitPushSpecConfig,
   GitPushSpec,
   GitPushAuthContext,
+  GetPullRequestChecksConfig,
+  PullRequestChecks,
 } from "../types";
 import { SourceControlProviderError } from "../errors";
 import type { GitLabProviderConfig } from "./types";
@@ -329,6 +331,12 @@ export class GitLabSourceControlProvider implements SourceControlProvider {
         error
       );
     }
+  }
+
+  async getPullRequestChecks(
+    _config: GetPullRequestChecksConfig
+  ): Promise<PullRequestChecks | null> {
+    return null;
   }
 
   /**

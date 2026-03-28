@@ -1,6 +1,5 @@
 import type { Env } from "../types";
 import type { LinearGlobalConfig } from "@open-inspect/shared";
-import type { LinearGlobalConfig } from "@open-inspect/shared";
 import { buildInternalAuthHeaders, generateInternalToken } from "./internal";
 
 export interface ResolvedLinearConfig {

@@ -145,9 +145,9 @@ class TestOpenCodeAuthSetup:
             patch.dict("os.environ", {"OPENAI_OAUTH_REFRESH_TOKEN": "rt_abc123"}, clear=False),
             patch("pathlib.Path.home", return_value=tmp_path),
             patch("os.open", side_effect=fail_on_tmp),
+            pytest.raises(RuntimeError, match="Failed to configure OpenCode credentials"),
         ):
-            with pytest.raises(RuntimeError, match="Failed to configure OpenCode credentials"):
-                sup._setup_opencode_auth("openai")
+            sup._setup_opencode_auth("openai")
 
         auth_dir = tmp_path / ".local" / "share" / "opencode"
         tmp_file = auth_dir / ".auth.json.tmp"
@@ -159,9 +159,9 @@ class TestOpenCodeAuthSetup:
         with (
             patch.dict("os.environ", {"OPENCODE_AUTH_JSON": "{invalid"}, clear=False),
             patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="OPENCODE_AUTH_JSON must be valid JSON"),
         ):
-            with pytest.raises(RuntimeError, match="OPENCODE_AUTH_JSON must be valid JSON"):
-                sup._setup_opencode_auth("github-copilot")
+            sup._setup_opencode_auth("github-copilot")
 
     def test_rejects_non_object_auth_json(self, tmp_path):
         sup = _make_supervisor()
@@ -169,16 +169,18 @@ class TestOpenCodeAuthSetup:
         with (
             patch.dict("os.environ", {"OPENCODE_AUTH_JSON": '["bad"]'}, clear=False),
             patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="OPENCODE_AUTH_JSON must be a JSON object"),
         ):
-            with pytest.raises(RuntimeError, match="OPENCODE_AUTH_JSON must be a JSON object"):
-                sup._setup_opencode_auth("github-copilot")
+            sup._setup_opencode_auth("github-copilot")
 
     def test_fails_fast_for_copilot_without_credentials(self, tmp_path):
         sup = _make_supervisor()
 
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            with pytest.raises(RuntimeError, match="GitHub Copilot credentials are not configured"):
-                sup._setup_opencode_auth("github-copilot")
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="GitHub Copilot credentials are not configured"),
+        ):
+            sup._setup_opencode_auth("github-copilot")
 
     def test_accepts_copilot_auth_blob(self, tmp_path):
         sup = _make_supervisor()
@@ -264,9 +266,11 @@ class TestOpenCodeAuthSetup:
     def test_fails_fast_for_zai_without_credentials(self, tmp_path):
         sup = _make_supervisor()
 
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            with pytest.raises(RuntimeError, match="Z\.AI credentials are not configured"):
-                sup._setup_opencode_auth("zai-coding-plan")
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match=r"Z\.AI credentials are not configured"),
+        ):
+            sup._setup_opencode_auth("zai-coding-plan")
 
     def test_accepts_direct_zai_provider_entry(self, tmp_path):
         sup = _make_supervisor()
@@ -337,9 +341,9 @@ class TestOpenCodeAuthSetup:
                 clear=False,
             ),
             patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="type 'api'"),
         ):
-            with pytest.raises(RuntimeError, match="type 'api'"):
-                sup._setup_opencode_auth("zai-coding-plan")
+            sup._setup_opencode_auth("zai-coding-plan")
 
     def test_rejects_zai_auth_without_key(self, tmp_path):
         sup = _make_supervisor()
@@ -360,9 +364,9 @@ class TestOpenCodeAuthSetup:
                 clear=False,
             ),
             patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="non-empty key"),
         ):
-            with pytest.raises(RuntimeError, match="non-empty key"):
-                sup._setup_opencode_auth("zai-coding-plan")
+            sup._setup_opencode_auth("zai-coding-plan")
 
     def test_writes_zai_auth_json_when_api_key_present(self, tmp_path):
         sup = _make_supervisor()
