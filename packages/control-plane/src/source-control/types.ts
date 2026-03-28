@@ -339,7 +339,5 @@ export interface SourceControlProvider {
    *
    * Optional to preserve compatibility with providers that don't expose this.
    */
-  getPullRequestStatus?(
-    config: GetPullRequestStatusConfig
-  ): Promise<PullRequestStatus | null>;
+  getPullRequestStatus?(config: GetPullRequestStatusConfig): Promise<PullRequestStatus | null>;
 }

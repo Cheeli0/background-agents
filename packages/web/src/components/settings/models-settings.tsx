@@ -100,8 +100,8 @@ export function ModelsSettings() {
         Choose which models appear in the model selector across the web UI and Slack bot.
       </p>
       <p className="text-sm text-muted-foreground mb-6">
-        GitHub Copilot models show their premium request multiplier here. Free means the
-        multiplier is <code>0</code>.
+        GitHub Copilot models show their premium request multiplier here. Free means the multiplier
+        is <code>0</code>.
       </p>
 
       <div className="space-y-6">
@@ -125,7 +125,9 @@ export function ModelsSettings() {
               <div className="space-y-2">
                 {group.models.map((model) => {
                   const isEnabled = enabledModels.has(model.id);
-                  const premiumMultiplierLabel = formatPremiumMultiplierLabel(model.premiumMultiplier);
+                  const premiumMultiplierLabel = formatPremiumMultiplierLabel(
+                    model.premiumMultiplier
+                  );
                   return (
                     <label
                       key={model.id}
