@@ -10,6 +10,7 @@ export interface SessionEntry {
   model: string;
   reasoningEffort: string | null;
   baseBranch: string | null;
+  branchName?: string | null;
   status: SessionStatus;
   parentSessionId?: string | null;
   spawnSource?: SpawnSource;
@@ -29,6 +30,7 @@ interface SessionRow {
   model: string;
   reasoning_effort: string | null;
   base_branch: string | null;
+  branch_name: string | null;
   status: SessionStatus;
   parent_session_id: string | null;
   spawn_source: SpawnSource;
@@ -64,6 +66,7 @@ function toEntry(row: SessionRow): SessionEntry {
     model: row.model,
     reasoningEffort: row.reasoning_effort,
     baseBranch: row.base_branch,
+    branchName: row.branch_name,
     status: row.status,
     parentSessionId: row.parent_session_id,
     spawnSource: row.spawn_source,
@@ -82,8 +85,8 @@ export class SessionIndexStore {
   async create(session: SessionEntry): Promise<void> {
     await this.db
       .prepare(
-        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, model, reasoning_effort, base_branch, status, parent_session_id, spawn_source, creation_source, spawn_depth, automation_id, automation_run_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, model, reasoning_effort, base_branch, branch_name, status, parent_session_id, spawn_source, creation_source, spawn_depth, automation_id, automation_run_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         session.id,
@@ -93,6 +96,7 @@ export class SessionIndexStore {
         session.model,
         session.reasoningEffort,
         session.baseBranch,
+        session.branchName ?? null,
         session.status,
         session.parentSessionId ?? null,
         session.spawnSource ?? "user",
@@ -104,6 +108,15 @@ export class SessionIndexStore {
         session.updatedAt
       )
       .run();
+  }
+
+  async updateBranchName(id: string, branchName: string | null): Promise<boolean> {
+    const result = await this.db
+      .prepare("UPDATE sessions SET branch_name = ?, updated_at = ? WHERE id = ?")
+      .bind(branchName, Date.now(), id)
+      .run();
+
+    return (result.meta?.changes ?? 0) > 0;
   }
 
   async get(id: string): Promise<SessionEntry | null> {
