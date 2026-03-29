@@ -137,10 +137,10 @@ describe("MetadataSection", () => {
 
   it("shows Z.AI as the provider for GLM models", () => {
     render(
-      <MetadataSection createdAt={Date.now()} baseBranch="main" model="zai-coding-plan/glm-5" />
+      <MetadataSection createdAt={Date.now()} baseBranch="main" model="zai-coding-plan/glm-5.1" />
     );
 
-    expect(screen.getByText("GLM 5")).toBeInTheDocument();
+    expect(screen.getByText("GLM 5.1")).toBeInTheDocument();
     expect(screen.getByText("Provider: Z.AI")).toBeInTheDocument();
   });
 

@@ -428,4 +428,27 @@ describe("handleAgentSessionEvent started-state behavior", () => {
 
     expect(requestBody.model).toBe("fireworks-ai/kimi-k2p5-turbo");
   });
+
+  it("uses Z.AI provider and model labels for session model selection", async () => {
+    const { env, controlPlaneFetch } = createEnv({
+      projectMapping: { "project-1": { owner: "acme", name: "platform" } },
+    });
+    const linearFetch = createLinearFetch({
+      currentStateType: "backlog",
+      labels: [
+        { id: "label-1", name: "provider:zai" },
+        { id: "label-2", name: "model:glm-5.1" },
+      ],
+    });
+    globalThis.fetch = linearFetch as typeof globalThis.fetch;
+
+    await handleAgentSessionEvent(createCreatedWebhook(), env, "trace-7");
+
+    const createSessionCall = controlPlaneFetch.mock.calls.find(
+      ([url]) => url === "https://internal/sessions"
+    );
+    const requestBody = JSON.parse(String(createSessionCall?.[1]?.body)) as { model: string };
+
+    expect(requestBody.model).toBe("zai-coding-plan/glm-5.1");
+  });
 });
