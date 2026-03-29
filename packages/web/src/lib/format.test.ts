@@ -50,6 +50,7 @@ describe("formatModelOptionDescription", () => {
 
 describe("formatProviderName", () => {
   it("formats Z.AI Coding Plan provider names", () => {
+    expect(formatProviderName("zai-coding-plan/glm-5.1")).toBe("Z.AI");
     expect(formatProviderName("zai-coding-plan/glm-5")).toBe("Z.AI");
   });
 

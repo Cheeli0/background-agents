@@ -32,6 +32,7 @@ const GITHUB_COPILOT_MODELS = [
 ] as const;
 
 const ZAI_CODING_PLAN_MODELS = [
+  "zai-coding-plan/glm-5.1",
   "zai-coding-plan/glm-5",
   "zai-coding-plan/glm-5-turbo",
   "zai-coding-plan/glm-4.7",
@@ -315,6 +316,11 @@ export const MODEL_OPTIONS: ModelCategory[] = [
     category: "Z.AI",
     models: [
       {
+        id: "zai-coding-plan/glm-5.1",
+        name: "GLM 5.1",
+        description: "Latest flagship agentic engineering model",
+      },
+      {
         id: "zai-coding-plan/glm-5",
         name: "GLM 5",
         description: "Flagship agentic engineering model",
@@ -380,6 +386,7 @@ export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
   "github-copilot/gpt-5-mini",
   "github-copilot/gpt-5.3-codex",
   "github-copilot/gpt-5.4",
+  "zai-coding-plan/glm-5.1",
   "zai-coding-plan/glm-5",
   "zai-coding-plan/glm-5-turbo",
   "zai-coding-plan/glm-4.7",

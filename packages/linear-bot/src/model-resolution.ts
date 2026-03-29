@@ -34,6 +34,7 @@ export function resolveStaticRepo(
 }
 
 const MODEL_LABEL_MAP: Record<string, string> = {
+  "glm-5.1": "zai-coding-plan/glm-5.1",
   haiku: "anthropic/claude-haiku-4-5",
   sonnet: "anthropic/claude-sonnet-4-5",
   opus: "anthropic/claude-opus-4-5",
@@ -53,8 +54,14 @@ const PROVIDER_LABEL_DEFAULT_MODEL: Record<string, ValidModel> = {
   anthropic: "anthropic/claude-sonnet-4-6",
   openai: "openai/gpt-5.4",
   "github-copilot": "github-copilot/claude-sonnet-4-6",
+  "zai-coding-plan": "zai-coding-plan/glm-5.1",
+  zai: "zai-coding-plan/glm-5.1",
   opencode: "opencode/kimi-k2.5",
   "fireworks-ai": "fireworks-ai/kimi-k2p5-turbo",
+};
+
+const PROVIDER_LABEL_ALIASES: Record<string, string> = {
+  "z.ai": "zai-coding-plan",
 };
 
 function extractLabelValue(labels: Array<{ name: string }>, prefix: string): string | null {
@@ -66,6 +73,11 @@ function extractLabelValue(labels: Array<{ name: string }>, prefix: string): str
   }
 
   return null;
+}
+
+function normalizeProviderLabel(providerLabel: string | null): string | null {
+  if (!providerLabel) return null;
+  return PROVIDER_LABEL_ALIASES[providerLabel] ?? providerLabel;
 }
 
 function resolveProviderQualifiedModel(provider: string, model: string): string | null {
@@ -148,7 +160,7 @@ export function extractModelFromLabels(
   labels: Array<{ name: string }>,
   baseModel?: string
 ): string | null {
-  const providerLabel = extractLabelValue(labels, "provider");
+  const providerLabel = normalizeProviderLabel(extractLabelValue(labels, "provider"));
   const modelLabel = extractLabelValue(labels, "model");
 
   if (modelLabel) {

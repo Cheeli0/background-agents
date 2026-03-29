@@ -371,7 +371,7 @@ function GlobalSettingsSection({
           />
         </label>
         <label className="flex items-center justify-between px-3 py-2 border border-border rounded-sm cursor-pointer hover:bg-muted/50 transition text-sm">
-          <span>Allow model labels (model:*)</span>
+          <span>Allow model/provider labels (`model:*`, `provider:*`)</span>
           <Checkbox
             checked={allowLabelModelOverride}
             onCheckedChange={(checked) => {

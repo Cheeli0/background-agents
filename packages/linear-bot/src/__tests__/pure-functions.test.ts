@@ -22,6 +22,10 @@ describe("extractModelFromLabels", () => {
     expect(extractModelFromLabels([{ name: "model:gpt-5.4" }])).toBe("openai/gpt-5.4");
   });
 
+  it("returns GLM 5.1 for model:glm-5.1 label", () => {
+    expect(extractModelFromLabels([{ name: "model:glm-5.1" }])).toBe("zai-coding-plan/glm-5.1");
+  });
+
   it("returns GLM 5 for model:glm-5 label", () => {
     expect(extractModelFromLabels([{ name: "model:glm-5" }])).toBe("zai-coding-plan/glm-5");
   });
@@ -52,6 +56,18 @@ describe("extractModelFromLabels", () => {
     expect(
       extractModelFromLabels([{ name: "provider:fireworks-ai" }], "anthropic/claude-opus-4-6")
     ).toBe("fireworks-ai/kimi-k2p5-turbo");
+  });
+
+  it("uses GLM 5.1 when only provider:zai is present", () => {
+    expect(extractModelFromLabels([{ name: "provider:zai" }], "anthropic/claude-opus-4-6")).toBe(
+      "zai-coding-plan/glm-5.1"
+    );
+  });
+
+  it("accepts provider:z.ai as a Z.AI alias", () => {
+    expect(extractModelFromLabels([{ name: "provider:z.ai" }, { name: "model:glm-5.1" }])).toBe(
+      "zai-coding-plan/glm-5.1"
+    );
   });
 
   it("combines provider and model labels when both are present", () => {
