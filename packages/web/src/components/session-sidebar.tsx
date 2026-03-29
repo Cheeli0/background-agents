@@ -123,6 +123,17 @@ export function buildSessionHref(session: SessionItem) {
   };
 }
 
+export function updateSessionTitleInList(
+  sessions: SessionItem[],
+  sessionId: string,
+  title: string,
+  updatedAt: number
+) {
+  return sessions.map((session) =>
+    session.id === sessionId ? { ...session, title, updatedAt } : session
+  );
+}
+
 interface SessionSidebarProps {
   onNewSession?: () => void;
   onToggle?: () => void;
@@ -436,6 +447,12 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
     preservedOffsetRef.current = null;
   }, []);
 
+  const handleSessionRenamed = useCallback((sessionId: string, title: string) => {
+    setExtraSessions((previous) =>
+      updateSessionTitleInList(previous, sessionId, title, Date.now())
+    );
+  }, []);
+
   return (
     <aside className="w-72 h-dvh flex flex-col border-r border-border-muted bg-background">
       {/* Header */}
@@ -556,6 +573,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
                         onSessionSelect={onSessionSelect}
                         onBeforeSidebarMutation={handleSidebarMutation}
                         onSidebarMutationError={handleSidebarMutationError}
+                        onRenameSuccess={handleSessionRenamed}
                         onArchiveCurrentSession={() => router.push("/")}
                         onArchiveSuccess={handleSessionArchived}
                       />
@@ -578,6 +596,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
                             onSessionSelect={onSessionSelect}
                             onBeforeSidebarMutation={handleSidebarMutation}
                             onSidebarMutationError={handleSidebarMutationError}
+                            onRenameSuccess={handleSessionRenamed}
                             onArchiveCurrentSession={() => router.push("/")}
                             onArchiveSuccess={handleSessionArchived}
                           />
@@ -656,6 +675,7 @@ function SessionWithChildren({
   onSessionSelect,
   onBeforeSidebarMutation,
   onSidebarMutationError,
+  onRenameSuccess,
   onArchiveCurrentSession,
   onArchiveSuccess,
 }: {
@@ -666,6 +686,7 @@ function SessionWithChildren({
   onSessionSelect?: () => void;
   onBeforeSidebarMutation?: () => void;
   onSidebarMutationError?: () => void;
+  onRenameSuccess?: (sessionId: string, title: string) => void;
   onArchiveCurrentSession?: () => void;
   onArchiveSuccess?: (sessionId: string) => void;
 }) {
@@ -678,6 +699,7 @@ function SessionWithChildren({
         onSessionSelect={onSessionSelect}
         onBeforeSidebarMutation={onBeforeSidebarMutation}
         onSidebarMutationError={onSidebarMutationError}
+        onRenameSuccess={onRenameSuccess}
         onArchiveCurrentSession={onArchiveCurrentSession}
         onArchiveSuccess={onArchiveSuccess}
       />
@@ -702,6 +724,7 @@ function SessionListItem({
   onSessionSelect,
   onBeforeSidebarMutation,
   onSidebarMutationError,
+  onRenameSuccess,
   onArchiveCurrentSession,
   onArchiveSuccess,
 }: {
@@ -711,6 +734,7 @@ function SessionListItem({
   onSessionSelect?: () => void;
   onBeforeSidebarMutation?: () => void;
   onSidebarMutationError?: () => void;
+  onRenameSuccess?: (sessionId: string, title: string) => void;
   onArchiveCurrentSession?: () => void;
   onArchiveSuccess?: (sessionId: string) => void;
 }) {
@@ -818,6 +842,7 @@ function SessionListItem({
           revalidate: false,
         }
       );
+      onRenameSuccess?.(session.id, trimmed);
     } catch {
       onSidebarMutationError?.();
       setTitle(previousTitle);
