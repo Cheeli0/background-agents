@@ -16,7 +16,13 @@ import {
 import { truncateBranchStart } from "@/lib/format";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
 import { useIsMobile } from "@/hooks/use-media-query";
-import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
+import { useSessionPanelPreferences } from "@/hooks/use-session-panel-preferences";
+import {
+  fetchSessionPrStatus,
+  sessionPrStatusKey,
+  type SessionPrStatus,
+  useSessionPrStatus,
+} from "@/hooks/use-session-pr-status";
 import {
   MoreIcon,
   SidebarIcon,
@@ -75,6 +81,8 @@ export const MOBILE_LONG_PRESS_MS = 450;
 const MOBILE_LONG_PRESS_MOVE_THRESHOLD_PX = 10;
 const UNKNOWN_REPOSITORY_LABEL = "Unknown repository";
 export const REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY = "open-inspect-sidebar-collapsed-repositories";
+const MAX_VISIBLE_SESSIONS_PER_REPOSITORY = 10;
+const AUTO_ARCHIVABLE_PR_STATUSES = new Set<SessionPrStatus>(["merged", "closed"]);
 
 function getSessionRepositoryInfo(
   session: Pick<SessionItem, "repoOwner" | "repoName">
@@ -100,6 +108,70 @@ function getSessionRepositoryInfo(
 
 function shouldAutoExpandRepositoryGroup(session: { creationSource?: string | null }) {
   return !!session.creationSource && EXTERNAL_SESSION_CREATION_SOURCES.has(session.creationSource);
+}
+
+function sortSessionsByRecentActivity(sessions: SessionItem[]) {
+  return [...sessions].sort((a, b) => {
+    const aTime = a.updatedAt || a.createdAt;
+    const bTime = b.updatedAt || b.createdAt;
+    return bTime - aTime;
+  });
+}
+
+function partitionVisibleSessions(sortedSessions: SessionItem[]) {
+  const visibleIds = new Set(sortedSessions.map((session) => session.id));
+  const childrenMap = new Map<string, SessionItem[]>();
+  const topLevelSessions: SessionItem[] = [];
+
+  for (const session of sortedSessions) {
+    const parentId = session.parentSessionId;
+    if (parentId && visibleIds.has(parentId)) {
+      const siblings = childrenMap.get(parentId) ?? [];
+      siblings.push(session);
+      childrenMap.set(parentId, siblings);
+    } else {
+      topLevelSessions.push(session);
+    }
+  }
+
+  return { topLevelSessions, childrenMap };
+}
+
+function buildRepositoryGroups(topLevelSessions: SessionItem[]) {
+  const repositoryGroupsMap = new Map<string, RepositorySessionGroup>();
+
+  for (const session of topLevelSessions) {
+    const repository = getSessionRepositoryInfo(session);
+    const existingGroup = repositoryGroupsMap.get(repository.key) ?? {
+      repository,
+      activeSessions: [],
+      inactiveSessions: [],
+    };
+    const timestamp = session.updatedAt || session.createdAt;
+    if (isInactiveSession(timestamp)) {
+      existingGroup.inactiveSessions.push(session);
+    } else {
+      existingGroup.activeSessions.push(session);
+    }
+    repositoryGroupsMap.set(repository.key, existingGroup);
+  }
+
+  return [...repositoryGroupsMap.values()];
+}
+
+function collectRepositoryOverflowSessions(topLevelSessions: SessionItem[]) {
+  const sessionsByRepository = new Map<string, SessionItem[]>();
+
+  for (const session of topLevelSessions) {
+    const repositoryKey = getSessionRepositoryInfo(session).key;
+    const repositorySessions = sessionsByRepository.get(repositoryKey) ?? [];
+    repositorySessions.push(session);
+    sessionsByRepository.set(repositoryKey, repositorySessions);
+  }
+
+  return [...sessionsByRepository.values()].flatMap((repositorySessions) =>
+    repositorySessions.slice(MAX_VISIBLE_SESSIONS_PER_REPOSITORY)
+  );
 }
 
 function SessionPrStatusIndicator({ sessionId }: { sessionId: string }) {
@@ -134,6 +206,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   const pathname = usePathname();
   const router = useRouter();
   const { mutate } = useSWRConfig();
+  const { autoArchiveClosedOrMergedPrSessions } = useSessionPanelPreferences();
   const [searchQuery, setSearchQuery] = useState("");
   const [extraSessions, setExtraSessions] = useState<SessionItem[]>([]);
   const [hasMorePages, setHasMorePages] = useState(false);
@@ -148,6 +221,14 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   const previousFirstPageSessionIdsRef = useRef<Set<string> | null>(null);
   const preservePaginationStateRef = useRef(false);
   const preservedOffsetRef = useRef<number | null>(null);
+  const autoArchivingSessionIdsRef = useRef<Set<string>>(new Set());
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -322,66 +403,34 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
     [firstPageSessions, effectiveExtraSessions]
   );
 
-  // Sort sessions by updatedAt (most recent first), filter by search query,
-  // and group children under their parent sessions before grouping by repository.
-  const { repositoryGroups, childrenMap } = useMemo(() => {
-    const filtered = sessions
-      .filter((session) => session.status !== "archived")
-      .filter((session) => {
-        if (!searchQuery) return true;
-        const query = searchQuery.toLowerCase();
-        const title = session.title?.toLowerCase() || "";
-        const repo = getSessionRepositoryInfo(session).label.toLowerCase();
-        return title.includes(query) || repo.includes(query);
-      });
+  const visibleSessions = useMemo(
+    () => sessions.filter((session) => session.status !== "archived"),
+    [sessions]
+  );
 
-    // Sort by updatedAt descending
-    const sorted = [...filtered].sort((a, b) => {
-      const aTime = a.updatedAt || a.createdAt;
-      const bTime = b.updatedAt || b.createdAt;
-      return bTime - aTime;
+  const autoArchiveOverflowSessions = useMemo(() => {
+    const sortedSessions = sortSessionsByRecentActivity(visibleSessions);
+    const { topLevelSessions } = partitionVisibleSessions(sortedSessions);
+    return collectRepositoryOverflowSessions(topLevelSessions);
+  }, [visibleSessions]);
+
+  const { repositoryGroups, childrenMap } = useMemo(() => {
+    const filtered = visibleSessions.filter((session) => {
+      if (!searchQuery) return true;
+      const query = searchQuery.toLowerCase();
+      const title = session.title?.toLowerCase() || "";
+      const repo = getSessionRepositoryInfo(session).label.toLowerCase();
+      return title.includes(query) || repo.includes(query);
     });
 
-    // Build set of visible session IDs for orphan detection
-    const visibleIds = new Set(sorted.map((s) => s.id));
+    const sortedSessions = sortSessionsByRecentActivity(filtered);
+    const { topLevelSessions, childrenMap } = partitionVisibleSessions(sortedSessions);
 
-    // Group children by parent ID
-    const children = new Map<string, SessionItem[]>();
-    const topLevel: SessionItem[] = [];
-
-    for (const session of sorted) {
-      const parentId = session.parentSessionId;
-      if (parentId && visibleIds.has(parentId)) {
-        // Parent is visible — nest under it
-        const siblings = children.get(parentId) ?? [];
-        siblings.push(session);
-        children.set(parentId, siblings);
-      } else {
-        // Top-level session (or orphan child whose parent is filtered out)
-        topLevel.push(session);
-      }
-    }
-
-    const repositoryGroupsMap = new Map<string, RepositorySessionGroup>();
-
-    for (const session of topLevel) {
-      const repository = getSessionRepositoryInfo(session);
-      const existingGroup = repositoryGroupsMap.get(repository.key) ?? {
-        repository,
-        activeSessions: [],
-        inactiveSessions: [],
-      };
-      const timestamp = session.updatedAt || session.createdAt;
-      if (isInactiveSession(timestamp)) {
-        existingGroup.inactiveSessions.push(session);
-      } else {
-        existingGroup.activeSessions.push(session);
-      }
-      repositoryGroupsMap.set(repository.key, existingGroup);
-    }
-
-    return { repositoryGroups: [...repositoryGroupsMap.values()], childrenMap: children };
-  }, [sessions, searchQuery]);
+    return {
+      repositoryGroups: buildRepositoryGroups(topLevelSessions),
+      childrenMap,
+    };
+  }, [searchQuery, visibleSessions]);
 
   const currentSessionId = pathname?.startsWith("/session/") ? pathname.split("/")[2] : null;
 
@@ -435,6 +484,47 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
     preservePaginationStateRef.current = false;
     preservedOffsetRef.current = null;
   }, []);
+
+  useEffect(() => {
+    if (!autoArchiveClosedOrMergedPrSessions || autoArchiveOverflowSessions.length === 0) {
+      return;
+    }
+
+    const candidateSessions = autoArchiveOverflowSessions.filter(
+      (session) => !autoArchivingSessionIdsRef.current.has(session.id)
+    );
+
+    if (candidateSessions.length === 0) {
+      return;
+    }
+
+    void Promise.all(
+      candidateSessions.map(async (session) => {
+        autoArchivingSessionIdsRef.current.add(session.id);
+
+        try {
+          const prStatus = await fetchSessionPrStatus(sessionPrStatusKey(session.id));
+          if (!prStatus || !AUTO_ARCHIVABLE_PR_STATUSES.has(prStatus)) {
+            return;
+          }
+
+          const response = await fetch(`/api/sessions/${session.id}/archive`, { method: "POST" });
+
+          if (!response.ok) {
+            throw new Error(`Failed to auto-archive session: ${response.status}`);
+          }
+
+          if (isMountedRef.current) {
+            handleSessionArchived(session.id);
+          }
+        } catch (error) {
+          console.error("Failed to auto-archive session", error);
+        } finally {
+          autoArchivingSessionIdsRef.current.delete(session.id);
+        }
+      })
+    );
+  }, [autoArchiveClosedOrMergedPrSessions, autoArchiveOverflowSessions, handleSessionArchived]);
 
   return (
     <aside className="w-72 h-dvh flex flex-col border-r border-border-muted bg-background">
