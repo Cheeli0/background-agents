@@ -36,6 +36,7 @@ configure_logging()
 # Fallback git identity when prompt author has no SCM name/email configured.
 # Matches the co-author trailer used in generateCommitMessage (shared/git.ts).
 FALLBACK_GIT_USER = GitUser(name="OpenInspect", email="open-inspect@noreply.github.com")
+FIREWORKS_MODEL_ROUTER_PREFIX = "accounts/fireworks/routers/"
 
 
 class OpenCodeIdentifier:
@@ -792,6 +793,11 @@ class AgentBridge:
                 provider_id, model_id = model.split("/", 1)
             else:
                 provider_id, model_id = "anthropic", model
+            if (
+                provider_id == "fireworks-ai"
+                and not model_id.startswith(FIREWORKS_MODEL_ROUTER_PREFIX)
+            ):
+                model_id = f"{FIREWORKS_MODEL_ROUTER_PREFIX}{model_id}"
             model_spec: dict[str, Any] = {
                 "providerID": provider_id,
                 "modelID": model_id,
