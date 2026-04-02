@@ -497,6 +497,15 @@ export class SessionDO extends DurableObject<Env> {
         ctx: this.ctx,
         log: this.log,
         repository: this.repository,
+        persistSessionBranchName: (branchName) => {
+          const session = this.getSession();
+          if (!session || session.branch_name === branchName) {
+            return;
+          }
+
+          this.repository.updateSessionBranch(session.id, branchName);
+          this.syncSessionIndexBranchName(this.getPublicSessionId(session), branchName);
+        },
         callbackService: this.callbackService,
         wsManager: this.wsManager,
         broadcast: (message) => this.broadcast(message),

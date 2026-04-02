@@ -96,6 +96,35 @@ describe("D1 SessionIndexStore", () => {
     expect(listed!.reasoningEffort).toBe("high");
   });
 
+  it("stores and returns persisted branch names in session listings", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const now = Date.now();
+
+    await store.create({
+      id: "session-with-branch",
+      title: "Branch session",
+      repoOwner: "acme",
+      repoName: "api",
+      model: "anthropic/claude-sonnet-4-5",
+      reasoningEffort: null,
+      baseBranch: "main",
+      branchName: null,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const updated = await store.updateBranchName("session-with-branch", "codex/che-86-branch");
+    expect(updated).toBe(true);
+
+    const session = await store.get("session-with-branch");
+    expect(session?.branchName).toBe("codex/che-86-branch");
+
+    const result = await store.list({});
+    const listed = result.sessions.find((entry) => entry.id === "session-with-branch");
+    expect(listed?.branchName).toBe("codex/che-86-branch");
+  });
+
   it("stores null reasoning effort when not provided", async () => {
     const store = new SessionIndexStore(env.DB);
     const now = Date.now();
