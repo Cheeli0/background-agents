@@ -84,6 +84,14 @@ export const REPOSITORY_GROUP_COLLAPSE_STORAGE_KEY = "open-inspect-sidebar-colla
 const MAX_VISIBLE_SESSIONS_PER_REPOSITORY = 10;
 const AUTO_ARCHIVABLE_PR_STATUSES = new Set<SessionPrStatus>(["merged", "closed"]);
 
+function haveSameSessionIds(left: SessionItem[], right: SessionItem[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((session, index) => session.id === right[index]?.id);
+}
+
 function getSessionRepositoryInfo(
   session: Pick<SessionItem, "repoOwner" | "repoName">
 ): RepositoryInfo {
@@ -216,6 +224,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   const offsetRef = useRef(0);
   const hasMoreRef = useRef(false);
   const loadingMoreRef = useRef(false);
+  const extraSessionsRef = useRef<SessionItem[]>([]);
   const isMobile = useIsMobile();
   const collapsedRepositoriesHydratedRef = useRef(false);
   const previousFirstPageSessionIdsRef = useRef<Set<string> | null>(null);
@@ -313,13 +322,26 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
   // Track data reference to clear extraSessions synchronously during render,
   // preventing one frame of stale extra sessions after SWR revalidation.
   const prevDataRef = useRef(data);
+  const prevFirstPageSessionsRef = useRef(firstPageSessions);
+  const firstPageChangedRef = useRef(false);
   let effectiveExtraSessions = extraSessions;
   if (prevDataRef.current !== data) {
+    const previousFirstPageSessions = prevFirstPageSessionsRef.current;
+    const canPreserveExtraSessions = haveSameSessionIds(
+      previousFirstPageSessions,
+      firstPageSessions
+    );
+    firstPageChangedRef.current = !canPreserveExtraSessions;
     prevDataRef.current = data;
-    if (!preservePaginationStateRef.current) {
+    prevFirstPageSessionsRef.current = firstPageSessions;
+    if (!preservePaginationStateRef.current && !canPreserveExtraSessions) {
       effectiveExtraSessions = [];
     }
   }
+
+  useEffect(() => {
+    extraSessionsRef.current = extraSessions;
+  }, [extraSessions]);
 
   useEffect(() => {
     if (!data) return;
@@ -333,6 +355,16 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
       return;
     }
 
+    if (!firstPageChangedRef.current) {
+      setHasMorePages(data.hasMore);
+      setLoadingMore(false);
+      offsetRef.current = firstPageSessions.length + extraSessionsRef.current.length;
+      preservedOffsetRef.current = null;
+      hasMoreRef.current = data.hasMore;
+      loadingMoreRef.current = false;
+      return;
+    }
+
     setExtraSessions([]);
     setHasMorePages(data.hasMore);
     setLoadingMore(false);
@@ -340,7 +372,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
     preservedOffsetRef.current = null;
     hasMoreRef.current = data.hasMore;
     loadingMoreRef.current = false;
-  }, [data, firstPageSessions.length]);
+  }, [data, firstPageSessions]);
 
   const loadMoreSessions = useCallback(async () => {
     if (!authSession || loadingMoreRef.current || !hasMoreRef.current) return;
