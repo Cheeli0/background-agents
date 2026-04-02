@@ -2,20 +2,21 @@
 # Modal Sandbox Infrastructure
 # =============================================================================
 
-# Calculate hash of Modal source files for change detection
-# Uses sha256sum (Linux) or shasum (macOS) for cross-platform compatibility
-# Includes .py, .js, and .ts files (sandbox plugins and tools)
-data "external" "modal_source_hash" {
-  program = ["bash", "-c", <<-EOF
-    cd ${var.project_root}
-    if command -v sha256sum &> /dev/null; then
-      hash=$(find packages/modal-infra/src packages/sandbox-runtime/src -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" \) -exec sha256sum {} \; | sha256sum | cut -d' ' -f1)
-    else
-      hash=$(find packages/modal-infra/src packages/sandbox-runtime/src -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" \) -exec shasum -a 256 {} \; | shasum -a 256 | cut -d' ' -f1)
-    fi
-    echo "{\"hash\": \"$hash\"}"
-  EOF
-  ]
+locals {
+  modal_source_files = sort(concat(
+    [for file in fileset("${var.project_root}/packages/modal-infra/src", "**/*.py") : "${var.project_root}/packages/modal-infra/src/${file}"],
+    [for file in fileset("${var.project_root}/packages/modal-infra/src", "**/*.js") : "${var.project_root}/packages/modal-infra/src/${file}"],
+    [for file in fileset("${var.project_root}/packages/modal-infra/src", "**/*.ts") : "${var.project_root}/packages/modal-infra/src/${file}"],
+    [for file in fileset("${var.project_root}/packages/sandbox-runtime/src", "**/*.py") : "${var.project_root}/packages/sandbox-runtime/src/${file}"],
+    [for file in fileset("${var.project_root}/packages/sandbox-runtime/src", "**/*.js") : "${var.project_root}/packages/sandbox-runtime/src/${file}"],
+    [for file in fileset("${var.project_root}/packages/sandbox-runtime/src", "**/*.ts") : "${var.project_root}/packages/sandbox-runtime/src/${file}"],
+  ))
+
+  # Include both relative path and per-file hash so renames and content changes trigger redeploys.
+  modal_source_hash = sha256(join("\n", [
+    for file in local.modal_source_files :
+    "${trimprefix(file, "${var.project_root}/")}:${filesha256(file)}"
+  ]))
 }
 
 module "modal_app" {
@@ -28,7 +29,7 @@ module "modal_app" {
   workspace     = var.modal_workspace
   deploy_path   = "${var.project_root}/packages/modal-infra"
   deploy_module = "deploy"
-  source_hash   = data.external.modal_source_hash.result.hash
+  source_hash   = local.modal_source_hash
 
   volume_name = "open-inspect-data"
 

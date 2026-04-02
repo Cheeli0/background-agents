@@ -17,8 +17,8 @@ resource "null_resource" "modal_secrets" {
   }
 
   provisioner "local-exec" {
-    command     = "${path.module}/scripts/create-secrets.sh"
-    interpreter = ["bash"]
+    command     = "create-secrets"
+    interpreter = ["node", "${path.module}/scripts/modal-helper.mjs"]
 
     environment = {
       MODAL_TOKEN_ID     = var.modal_token_id
@@ -37,7 +37,8 @@ resource "null_resource" "modal_volume" {
   }
 
   provisioner "local-exec" {
-    command = "modal volume create ${var.volume_name} || echo 'Volume may already exist'"
+    command     = var.volume_name
+    interpreter = ["node", "${path.module}/scripts/modal-helper.mjs", "create-volume"]
 
     environment = {
       MODAL_TOKEN_ID     = var.modal_token_id
@@ -59,8 +60,8 @@ resource "null_resource" "modal_deploy" {
   }
 
   provisioner "local-exec" {
-    command     = "${path.module}/scripts/deploy.sh"
-    interpreter = ["bash"]
+    command     = "deploy"
+    interpreter = ["node", "${path.module}/scripts/modal-helper.mjs"]
 
     environment = {
       MODAL_TOKEN_ID     = var.modal_token_id
@@ -81,12 +82,11 @@ resource "null_resource" "modal_deploy" {
 data "external" "modal_app_info" {
   count = var.fetch_app_info ? 1 : 0
 
-  program = ["bash", "-c", <<-EOF
-    export MODAL_TOKEN_ID="${var.modal_token_id}"
-    export MODAL_TOKEN_SECRET="${var.modal_token_secret}"
-    # Return app info as JSON
-    echo '{"app_name": "${var.app_name}", "status": "deployed"}'
-  EOF
+  program = [
+    "node",
+    "${path.module}/scripts/modal-helper.mjs",
+    "app-info",
+    var.app_name
   ]
 
   depends_on = [null_resource.modal_deploy]
