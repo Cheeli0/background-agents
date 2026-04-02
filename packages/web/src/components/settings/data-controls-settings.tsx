@@ -5,16 +5,13 @@ import Link from "next/link";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import { buildSessionHref, type SessionItem } from "@/components/session-sidebar";
-import { useSessionPanelPreferences } from "@/hooks/use-session-panel-preferences";
 import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 import { formatRelativeTime } from "@/lib/time";
-import { Switch } from "@/components/ui/switch";
 
 const PAGE_SIZE = 20;
 const ARCHIVED_SESSIONS_KEY = `/api/sessions?status=archived&limit=${PAGE_SIZE}&offset=0`;
 
 export function DataControlsSettings() {
-  const { autoArchiveClosedOrMergedPrSessions, update } = useSessionPanelPreferences();
   const [extraSessions, setExtraSessions] = useState<SessionItem[]>([]);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [loadingMore, setLoadingMore] = useState(false);
@@ -79,33 +76,6 @@ export function DataControlsSettings() {
       <p className="text-sm text-muted-foreground mb-6">Manage your archived chats and data.</p>
 
       <div>
-        <h3 className="text-base font-medium text-foreground mb-1">Session panel</h3>
-        <p className="text-sm text-muted-foreground mb-4">
-          Control how the sidebar trims older pull request sessions.
-        </p>
-
-        <div className="border border-border rounded divide-y divide-border mb-8">
-          <label
-            htmlFor="auto-archive-closed-pr-sessions"
-            className="flex items-center justify-between px-4 py-3 gap-4 cursor-pointer"
-          >
-            <div>
-              <span className="text-sm text-foreground">Auto-archive closed or merged PRs</span>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                When a repository has more than 10 visible sessions, automatically archive older
-                closed or merged PR sessions beyond the first 10 items.
-              </p>
-            </div>
-            <Switch
-              id="auto-archive-closed-pr-sessions"
-              checked={autoArchiveClosedOrMergedPrSessions}
-              onCheckedChange={(checked) =>
-                update({ autoArchiveClosedOrMergedPrSessions: checked === true })
-              }
-            />
-          </label>
-        </div>
-
         <h3 className="text-base font-medium text-foreground mb-1">Archived chats</h3>
         <p className="text-sm text-muted-foreground mb-4">
           {loading
