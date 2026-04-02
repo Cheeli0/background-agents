@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { SWRConfig, useSWRConfig } from "swr";
-import { MOBILE_LONG_PRESS_MS, SessionSidebar } from "./session-sidebar";
+import type { SidebarSession } from "@/lib/session-list";
+import { MOBILE_LONG_PRESS_MS, SessionSidebar, updateSessionTitleInList } from "./session-sidebar";
 import { useSessionAssociatedPr } from "@/hooks/use-session-associated-pr";
 import { buildSessionsPageKey, SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
 
@@ -103,6 +104,29 @@ function AssociatedPrProbe({ sessionId }: { sessionId: string }) {
   const { associatedPr } = useSessionAssociatedPr(sessionId);
   return <span>{associatedPr ? `PR #${associatedPr.number}` : "No PR"}</span>;
 }
+
+describe("updateSessionTitleInList", () => {
+  it("updates only the matching session title", () => {
+    const originalSessions = [createSession(1), createSession(2)] as SidebarSession[];
+
+    const updatedSessions = updateSessionTitleInList(
+      originalSessions,
+      "session-2",
+      "Renamed Session 2",
+      9999
+    );
+
+    expect(updatedSessions).toEqual([
+      originalSessions[0],
+      {
+        ...originalSessions[1],
+        title: "Renamed Session 2",
+        updatedAt: 9999,
+      },
+    ]);
+    expect(originalSessions[1].title).toBe("Session 2");
+  });
+});
 
 describe("SessionSidebar", () => {
   it("loads the next page when scrolled near the bottom", async () => {
