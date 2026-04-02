@@ -45,6 +45,7 @@ describe("model-credentials", () => {
 
   describe("isZaiCodingPlanModel", () => {
     it("detects Z.AI Coding Plan-backed models", () => {
+      expect(isZaiCodingPlanModel("zai-coding-plan/glm-5.1")).toBe(true);
       expect(isZaiCodingPlanModel("zai-coding-plan/glm-5")).toBe(true);
       expect(isZaiCodingPlanModel("zai-coding-plan/glm-4.7")).toBe(true);
       expect(isZaiCodingPlanModel("openai/gpt-5.4")).toBe(false);
@@ -213,7 +214,7 @@ describe("model-credentials", () => {
         [ZAI_API_KEY_SECRET]: "zai-key",
       });
 
-      const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-5", {
+      const result = await validateModelCredentialsForRepo(env, "zai-coding-plan/glm-5.1", {
         repoId: 1,
         repoOwner: "acme",
         repoName: "widgets",
