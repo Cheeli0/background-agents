@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_MODEL } from "@open-inspect/shared";
 import type { Env } from "../src/types";
 import type { Logger } from "../src/logger";
 
@@ -77,7 +78,7 @@ describe("getGitHubConfig", () => {
     const result = await getGitHubConfig(env, "acme/widgets", log);
 
     expect(result).toEqual({
-      model: "anthropic/claude-haiku-4-5",
+      model: DEFAULT_MODEL,
       reasoningEffort: null,
       autoReviewOnOpen: false,
       enabledRepos: [],
@@ -103,7 +104,7 @@ describe("getGitHubConfig", () => {
     const result = await getGitHubConfig(env, "acme/widgets", log);
 
     expect(result).toEqual({
-      model: "anthropic/claude-haiku-4-5",
+      model: DEFAULT_MODEL,
       reasoningEffort: null,
       autoReviewOnOpen: false,
       enabledRepos: [],
@@ -127,7 +128,7 @@ describe("getGitHubConfig", () => {
     const result = await getGitHubConfig(env, "acme/widgets");
 
     expect(result).toEqual({
-      model: "anthropic/claude-haiku-4-5",
+      model: DEFAULT_MODEL,
       reasoningEffort: null,
       autoReviewOnOpen: false,
       enabledRepos: [],
@@ -146,7 +147,7 @@ describe("getGitHubConfig", () => {
     const result = await getGitHubConfig(env, "acme/widgets", log);
 
     expect(result).toEqual({
-      model: "anthropic/claude-haiku-4-5",
+      model: DEFAULT_MODEL,
       reasoningEffort: null,
       autoReviewOnOpen: true,
       enabledRepos: null,
@@ -155,5 +156,30 @@ describe("getGitHubConfig", () => {
       commentActionInstructions: null,
     });
     expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("uses the shared system default when resolved config omits model", async () => {
+    const env = createMockEnv(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            config: {
+              model: null,
+              reasoningEffort: null,
+              autoReviewOnOpen: true,
+              enabledRepos: null,
+              allowedTriggerUsers: null,
+              codeReviewInstructions: null,
+              commentActionInstructions: null,
+            },
+          }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const result = await getGitHubConfig(env, "acme/widgets", createMockLogger());
+
+    expect(result.model).toBe(DEFAULT_MODEL);
   });
 });

@@ -63,19 +63,19 @@ The bot is deployed via Terraform as a standalone Cloudflare Worker alongside th
 
 ### Environment Bindings
 
-| Binding                      | Type                  | Description                                                                         |
-| ---------------------------- | --------------------- | ----------------------------------------------------------------------------------- |
-| `GITHUB_KV`                  | KV namespace          | Delivery dedupe store keyed by `X-GitHub-Delivery`                                  |
-| `CONTROL_PLANE`              | Service binding       | Fetcher to the control plane worker                                                 |
-| `DEPLOYMENT_NAME`            | Plain text            | Deployment identifier for logging                                                   |
-| `DEFAULT_MODEL`              | Plain text            | Model ID for new sessions (e.g., `anthropic/claude-haiku-4-5`)                      |
-| `GITHUB_BOT_USERNAME`        | Plain text            | Bot's GitHub login (e.g., `my-app[bot]`) for @mention detection and loop prevention |
-| `GITHUB_APP_ID`              | Secret                | GitHub App ID for JWT generation                                                    |
-| `GITHUB_APP_PRIVATE_KEY`     | Secret                | GitHub App private key (must be PKCS#8 format)                                      |
-| `GITHUB_APP_INSTALLATION_ID` | Secret                | GitHub App installation ID for token exchange                                       |
-| `GITHUB_WEBHOOK_SECRET`      | Secret                | Shared secret for verifying webhook signatures                                      |
-| `INTERNAL_CALLBACK_SECRET`   | Secret                | Shared secret for HMAC auth to the control plane                                    |
-| `LOG_LEVEL`                  | Plain text (optional) | Log level override (`debug`, `info`, `warn`, `error`)                               |
+| Binding                      | Type                  | Description                                                                                             |
+| ---------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `GITHUB_KV`                  | KV namespace          | Delivery dedupe store keyed by `X-GitHub-Delivery`                                                      |
+| `CONTROL_PLANE`              | Service binding       | Fetcher to the control plane worker                                                                     |
+| `DEPLOYMENT_NAME`            | Plain text            | Deployment identifier for logging                                                                       |
+| `DEFAULT_MODEL`              | Plain text            | Legacy worker fallback; normal GitHub invocations use integration settings or the shared system default |
+| `GITHUB_BOT_USERNAME`        | Plain text            | Bot's GitHub login (e.g., `my-app[bot]`) for @mention detection and loop prevention                     |
+| `GITHUB_APP_ID`              | Secret                | GitHub App ID for JWT generation                                                                        |
+| `GITHUB_APP_PRIVATE_KEY`     | Secret                | GitHub App private key (must be PKCS#8 format)                                                          |
+| `GITHUB_APP_INSTALLATION_ID` | Secret                | GitHub App installation ID for token exchange                                                           |
+| `GITHUB_WEBHOOK_SECRET`      | Secret                | Shared secret for verifying webhook signatures                                                          |
+| `INTERNAL_CALLBACK_SECRET`   | Secret                | Shared secret for HMAC auth to the control plane                                                        |
+| `LOG_LEVEL`                  | Plain text (optional) | Log level override (`debug`, `info`, `warn`, `error`)                                                   |
 
 ### GitHub App Configuration
 
@@ -131,10 +131,18 @@ All events are processed asynchronously via `executionCtx.waitUntil()`. The webh
 1. Check `issue.pull_request` exists — ignore non-PR comments
 2. Check comment body contains `@{GITHUB_BOT_USERNAME}` — ignore if no mention
 3. Check `sender.login !== GITHUB_BOT_USERNAME` — prevent loops
-4. Strip @mention, post eyes reaction, create session, send comment action prompt
+4. Resolve repo settings from GitHub integration settings, including the default model for PR
+   comment sessions
+5. Strip @mention, post eyes reaction, create session, send comment action prompt
 
 **Review Comment:** Same as issue comment, but the prompt additionally includes `filePath`,
 `diffHunk`, and `commentId` for thread-specific context and reply threading.
+
+## Configuration
+
+GitHub integration settings support a global default model and per-repository overrides. PR reviews,
+PR comments, and review-thread mentions all use the resolved GitHub integration model when one is
+configured. If no GitHub model is configured, the bot falls back to the shared system default model.
 
 ## Authentication
 

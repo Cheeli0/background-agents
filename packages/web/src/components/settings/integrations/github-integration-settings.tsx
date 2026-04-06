@@ -100,7 +100,11 @@ export function GitHubIntegrationSettings() {
         )}
       </Section>
 
-      <GlobalSettingsSection settings={settings} availableRepos={availableRepos} />
+      <GlobalSettingsSection
+        settings={settings}
+        availableRepos={availableRepos}
+        enabledModelOptions={enabledModelOptions}
+      />
 
       <Section
         title="Repository Overrides"
@@ -119,10 +123,14 @@ export function GitHubIntegrationSettings() {
 function GlobalSettingsSection({
   settings,
   availableRepos,
+  enabledModelOptions,
 }: {
   settings: GitHubGlobalConfig | null | undefined;
   availableRepos: EnrichedRepository[];
+  enabledModelOptions: ModelCategory[];
 }) {
+  const [model, setModel] = useState(settings?.defaults?.model ?? "");
+  const [effort, setEffort] = useState(settings?.defaults?.reasoningEffort ?? "");
   const [autoReviewOnOpen, setAutoReviewOnOpen] = useState(
     settings?.defaults?.autoReviewOnOpen ?? true
   );
@@ -152,6 +160,8 @@ function GlobalSettingsSection({
   useEffect(() => {
     if (settings !== undefined && !initialized) {
       if (settings) {
+        setModel(settings.defaults?.model ?? "");
+        setEffort(settings.defaults?.reasoningEffort ?? "");
         setAutoReviewOnOpen(settings.defaults?.autoReviewOnOpen ?? true);
         setEnabledRepos(settings.enabledRepos ?? []);
         setRepoScopeMode(settings.enabledRepos === undefined ? "all" : "selected");
@@ -167,6 +177,7 @@ function GlobalSettingsSection({
   }, [settings, initialized]);
 
   const isConfigured = settings !== null && settings !== undefined;
+  const reasoningConfig = model ? MODEL_REASONING_CONFIG[model as ValidModel] : undefined;
 
   const handleReset = () => {
     setShowResetDialog(true);
@@ -181,6 +192,8 @@ function GlobalSettingsSection({
 
       if (res.ok) {
         mutate(GLOBAL_SETTINGS_KEY);
+        setModel("");
+        setEffort("");
         setAutoReviewOnOpen(true);
         setEnabledRepos([]);
         setRepoScopeMode("all");
@@ -208,6 +221,8 @@ function GlobalSettingsSection({
 
     const body: GitHubGlobalConfig = {
       defaults: {
+        ...(model ? { model } : {}),
+        ...(effort ? { reasoningEffort: effort } : {}),
         autoReviewOnOpen,
         ...(triggerUserMode === "specific" ? { allowedTriggerUsers } : {}),
         ...(codeReviewInstructions ? { codeReviewInstructions } : {}),
@@ -284,6 +299,72 @@ function GlobalSettingsSection({
           }}
         />
       </label>
+
+      <div className="grid sm:grid-cols-2 gap-3 mb-4">
+        <label className="text-sm">
+          <span className="block text-foreground font-medium mb-1">Default model</span>
+          <Select
+            value={model}
+            onValueChange={(nextModel) => {
+              setModel(nextModel);
+              if (effort && nextModel && !isValidReasoningEffort(nextModel, effort)) {
+                setEffort("");
+              }
+              setDirty(true);
+              setError("");
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Use system default" />
+            </SelectTrigger>
+            <SelectContent>
+              {enabledModelOptions.map((group) => (
+                <SelectGroup key={group.category}>
+                  <SelectLabel>{group.category}</SelectLabel>
+                  {group.models.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      <ModelOptionLabel name={m.name} premiumMultiplier={m.premiumMultiplier} />
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground mt-1">
+            Used for PR reviews and @mention-triggered PR comment sessions when no repo override is
+            set.
+          </p>
+        </label>
+
+        <label className="text-sm">
+          <span className="block text-foreground font-medium mb-1">Reasoning effort</span>
+          <Select
+            value={effort}
+            onValueChange={(value) => {
+              setEffort(value);
+              setDirty(true);
+              setError("");
+            }}
+            disabled={!reasoningConfig}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue
+                placeholder={reasoningConfig ? "Use model default" : "Not supported for this model"}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {reasoningConfig?.efforts.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {value}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground mt-1">
+            Optional override for models that support configurable reasoning levels.
+          </p>
+        </label>
+      </div>
 
       <div className="mb-4">
         <p className="text-sm font-medium text-foreground mb-2">Repository Scope</p>

@@ -1,3 +1,4 @@
+import { DEFAULT_MODEL } from "@open-inspect/shared";
 import type { Env } from "../types";
 import type { Logger } from "../logger";
 import { buildInternalAuthHeaders } from "./internal";
@@ -41,7 +42,7 @@ export async function getGitHubConfig(
       error: err instanceof Error ? err : new Error(String(err)),
       fallback: "fail_closed",
     });
-    return { ...FAIL_CLOSED, model: env.DEFAULT_MODEL };
+    return { ...FAIL_CLOSED, model: DEFAULT_MODEL };
   }
 
   if (!response.ok) {
@@ -50,7 +51,7 @@ export async function getGitHubConfig(
       status: response.status,
       fallback: "fail_closed",
     });
-    return { ...FAIL_CLOSED, model: env.DEFAULT_MODEL };
+    return { ...FAIL_CLOSED, model: DEFAULT_MODEL };
   }
 
   const data = (await response.json()) as {
@@ -67,7 +68,7 @@ export async function getGitHubConfig(
 
   if (!data.config) {
     return {
-      model: env.DEFAULT_MODEL,
+      model: DEFAULT_MODEL,
       reasoningEffort: null,
       autoReviewOnOpen: true,
       enabledRepos: null,
@@ -78,7 +79,7 @@ export async function getGitHubConfig(
   }
 
   return {
-    model: data.config.model ?? env.DEFAULT_MODEL,
+    model: data.config.model ?? DEFAULT_MODEL,
     reasoningEffort: data.config.reasoningEffort,
     autoReviewOnOpen: data.config.autoReviewOnOpen,
     enabledRepos: data.config.enabledRepos,
