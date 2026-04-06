@@ -7,6 +7,7 @@ import type { Env } from "./types";
 export const OPENCODE_AUTH_JSON_SECRET = "OPENCODE_AUTH_JSON";
 export const ZAI_API_KEY_SECRET = "ZAI_API_KEY";
 export const FIREWORKS_API_KEY_SECRET = "FIREWORKS_API_KEY";
+export const MINIMAX_API_KEY_SECRET = "MINIMAX_API_KEY";
 const COPILOT_ACCESS_TOKEN_EXPIRY_BUFFER_MS = 60 * 1000;
 
 interface RepoSecretContext {
@@ -25,6 +26,11 @@ export function isZaiCodingPlanModel(model: string): boolean {
 
 export function isFireworksAiModel(model: string): boolean {
   return extractProviderAndModel(model).provider === "fireworks-ai";
+}
+
+export function isOpenCodeMiniMaxModel(model: string): boolean {
+  const { provider, model: providerModel } = extractProviderAndModel(model);
+  return provider === "opencode" && providerModel.startsWith("minimax-");
 }
 
 function hasCopilotAuthEntry(authObject: Record<string, unknown>): boolean {
@@ -125,8 +131,14 @@ export async function validateModelCredentialsForRepo(
   const requiresCopilotCredentials = isGitHubCopilotModel(model);
   const requiresZaiCredentials = isZaiCodingPlanModel(model);
   const requiresFireworksCredentials = isFireworksAiModel(model);
+  const requiresMiniMaxCredentials = isOpenCodeMiniMaxModel(model);
 
-  if (!requiresCopilotCredentials && !requiresZaiCredentials && !requiresFireworksCredentials) {
+  if (
+    !requiresCopilotCredentials &&
+    !requiresZaiCredentials &&
+    !requiresFireworksCredentials &&
+    !requiresMiniMaxCredentials
+  ) {
     return null;
   }
 
@@ -136,6 +148,9 @@ export async function validateModelCredentialsForRepo(
     }
     if (requiresZaiCredentials) {
       return "Z.AI models require secrets storage to be configured.";
+    }
+    if (requiresMiniMaxCredentials) {
+      return "MiniMax models require secrets storage to be configured.";
     }
     return "Fireworks AI models require secrets storage to be configured.";
   }
@@ -153,6 +168,7 @@ export async function validateModelCredentialsForRepo(
   const authJson = mergedSecrets[OPENCODE_AUTH_JSON_SECRET];
   const zaiApiKey = mergedSecrets[ZAI_API_KEY_SECRET];
   const fireworksApiKey = mergedSecrets[FIREWORKS_API_KEY_SECRET];
+  const minimaxApiKey = mergedSecrets[MINIMAX_API_KEY_SECRET];
 
   if (requiresZaiCredentials && !zaiApiKey?.trim()) {
     return (
@@ -165,6 +181,13 @@ export async function validateModelCredentialsForRepo(
     return (
       "Fireworks AI credentials are not configured. " +
       `Add ${FIREWORKS_API_KEY_SECRET} as a repo or global secret.`
+    );
+  }
+
+  if (requiresMiniMaxCredentials && !minimaxApiKey?.trim()) {
+    return (
+      "MiniMax credentials are not configured. " +
+      `Add ${MINIMAX_API_KEY_SECRET} as a repo or global secret.`
     );
   }
 

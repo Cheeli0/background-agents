@@ -53,6 +53,22 @@ class SandboxSupervisor:
     FIREWORKS_MODEL_ROUTER_PREFIX = "accounts/fireworks/routers/"
     SIDECAR_TIMEOUT_SECONDS = 5
 
+    @staticmethod
+    def _plugin_deployments(provider: str, model: str) -> list[tuple[Path, str, str | None]]:
+        """Return auth plugins to deploy for the selected provider."""
+        return [
+            (
+                Path("/app/sandbox_runtime/plugins/codex-auth-plugin.ts"),
+                "codex-auth-plugin.ts",
+                "OPENAI_OAUTH_REFRESH_TOKEN" if provider == "openai" else None,
+            ),
+            (
+                Path("/app/sandbox_runtime/plugins/minimax-auth-plugin.ts"),
+                "minimax-auth-plugin.ts",
+                "MINIMAX_API_KEY" if provider == "opencode" and model.startswith("minimax-") else None,
+            ),
+        ]
+
     def __init__(self):
         self.opencode_process: asyncio.subprocess.Process | None = None
         self.bridge_process: asyncio.subprocess.Process | None = None
@@ -635,18 +651,16 @@ class SandboxSupervisor:
 
         self._install_tools(workdir)
 
-        # Deploy codex auth proxy plugin if OpenAI OAuth is configured
+        # Deploy provider auth plugins when credentials are available.
         opencode_dir = workdir / ".opencode"
-        plugin_source = Path("/app/sandbox_runtime/plugins/codex-auth-plugin.ts")
-        if (
-            plugin_source.exists()
-            and provider == "openai"
-            and os.environ.get("OPENAI_OAUTH_REFRESH_TOKEN")
-        ):
-            plugin_dir = opencode_dir / "plugins"
+        plugin_dir = opencode_dir / "plugins"
+        for plugin_source, target_name, required_env in self._plugin_deployments(provider, model):
+            if not required_env or not plugin_source.exists() or not os.environ.get(required_env):
+                continue
+
             plugin_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy(plugin_source, plugin_dir / "codex-auth-plugin.ts")
-            self.log.info("openai_oauth.plugin_deployed")
+            shutil.copy(plugin_source, plugin_dir / target_name)
+            self.log.info("opencode.plugin_deployed", plugin=target_name, provider=provider)
 
         env = {
             **os.environ,

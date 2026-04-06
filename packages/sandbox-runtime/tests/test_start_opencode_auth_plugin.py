@@ -9,6 +9,19 @@ import pytest
 from sandbox_runtime.entrypoint import SandboxSupervisor
 
 
+@pytest.fixture(autouse=True)
+def _clear_managed_auth_env(monkeypatch):
+    for key in (
+        "OPENAI_OAUTH_REFRESH_TOKEN",
+        "OPENAI_OAUTH_ACCOUNT_ID",
+        "OPENCODE_AUTH_JSON",
+        "ZAI_API_KEY",
+        "FIREWORKS_API_KEY",
+        "MINIMAX_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 def _make_supervisor(session_config: dict | None = None) -> SandboxSupervisor:
     """Create a SandboxSupervisor with default test config."""
     config = session_config or {"provider": "openai", "model": "gpt-5.4"}
@@ -22,6 +35,7 @@ def _make_supervisor(session_config: dict | None = None) -> SandboxSupervisor:
             "REPO_NAME": "app",
             "SESSION_CONFIG": json.dumps(config),
         },
+        clear=True,
     ):
         return SandboxSupervisor()
 
@@ -65,6 +79,37 @@ async def test_deploys_codex_plugin_for_openai_provider(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_deploys_minimax_plugin_for_opencode_provider(tmp_path):
+    supervisor = _make_supervisor({"provider": "opencode", "model": "minimax-m2.7"})
+    supervisor.workspace_path = tmp_path
+    supervisor.repo_path = tmp_path / "missing-repo"
+    supervisor._setup_opencode_auth = MagicMock()
+    supervisor._install_tools = MagicMock()
+    supervisor._wait_for_health = AsyncMock()
+
+    original_exists = Path.exists
+
+    def fake_exists(path_obj):
+        if str(path_obj) == "/app/sandbox_runtime/plugins/minimax-auth-plugin.ts":
+            return True
+        return original_exists(path_obj)
+
+    with (
+        patch.dict("os.environ", {"MINIMAX_API_KEY": "mm-key"}, clear=False),
+        patch("pathlib.Path.exists", new=fake_exists),
+        patch("sandbox_runtime.entrypoint.shutil.copy") as copy_mock,
+        patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            new=AsyncMock(return_value=_fake_process()),
+        ),
+    ):
+        await supervisor.start_opencode()
+
+    copy_targets = [str(call.args[1]).replace("\\", "/") for call in copy_mock.call_args_list]
+    assert any(target.endswith(".opencode/plugins/minimax-auth-plugin.ts") for target in copy_targets)
+
+
+@pytest.mark.asyncio
 async def test_skips_codex_plugin_for_github_copilot_provider(tmp_path):
     supervisor = _make_supervisor({"provider": "github-copilot", "model": "gpt-5"})
     supervisor.workspace_path = tmp_path
@@ -94,6 +139,38 @@ async def test_skips_codex_plugin_for_github_copilot_provider(tmp_path):
     copy_targets = [str(call.args[1]).replace("\\", "/") for call in copy_mock.call_args_list]
     assert not any(
         target.endswith(".opencode/plugins/codex-auth-plugin.ts") for target in copy_targets
+    )
+
+
+@pytest.mark.asyncio
+async def test_skips_minimax_plugin_without_api_key(tmp_path):
+    supervisor = _make_supervisor({"provider": "opencode", "model": "minimax-m2.7"})
+    supervisor.workspace_path = tmp_path
+    supervisor.repo_path = tmp_path / "missing-repo"
+    supervisor._setup_opencode_auth = MagicMock()
+    supervisor._install_tools = MagicMock()
+    supervisor._wait_for_health = AsyncMock()
+
+    original_exists = Path.exists
+
+    def fake_exists(path_obj):
+        if str(path_obj) == "/app/sandbox_runtime/plugins/minimax-auth-plugin.ts":
+            return True
+        return original_exists(path_obj)
+
+    with (
+        patch("pathlib.Path.exists", new=fake_exists),
+        patch("sandbox_runtime.entrypoint.shutil.copy") as copy_mock,
+        patch(
+            "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+            new=AsyncMock(return_value=_fake_process()),
+        ),
+    ):
+        await supervisor.start_opencode()
+
+    copy_targets = [str(call.args[1]).replace("\\", "/") for call in copy_mock.call_args_list]
+    assert not any(
+        target.endswith(".opencode/plugins/minimax-auth-plugin.ts") for target in copy_targets
     )
 
 

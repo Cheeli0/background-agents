@@ -60,6 +60,13 @@ describe("model utilities", () => {
       expect(isValidModel("fireworks-ai/kimi-k2p5-turbo")).toBe(true);
     });
 
+    it("returns true for OpenCode Zen models", () => {
+      expect(isValidModel("opencode/kimi-k2.5")).toBe(true);
+      expect(isValidModel("opencode/minimax-m2.5")).toBe(true);
+      expect(isValidModel("opencode/minimax-m2.7")).toBe(true);
+      expect(isValidModel("opencode/glm-5")).toBe(true);
+    });
+
     it("accepts bare GPT model names via normalization", () => {
       expect(isValidModel("gpt-5.4")).toBe(true);
       expect(isValidModel("gpt-5.2")).toBe(true);
@@ -310,6 +317,13 @@ describe("model utilities", () => {
       expect(supportsReasoning("openai/gpt-5.3-codex-spark")).toBe(true);
     });
 
+    it("returns true for OpenCode Zen models with reasoning config", () => {
+      expect(supportsReasoning("opencode/kimi-k2.5")).toBe(true);
+      expect(supportsReasoning("opencode/minimax-m2.5")).toBe(true);
+      expect(supportsReasoning("opencode/minimax-m2.7")).toBe(true);
+      expect(supportsReasoning("opencode/glm-5")).toBe(true);
+    });
+
     it("returns false for invalid models", () => {
       expect(supportsReasoning("gpt-4")).toBe(false);
       expect(supportsReasoning("github-copilot/gpt-5.1")).toBe(false);
@@ -347,6 +361,13 @@ describe("model utilities", () => {
     it("returns undefined for invalid models", () => {
       expect(getDefaultReasoningEffort("gpt-4")).toBeUndefined();
       expect(getDefaultReasoningEffort("invalid")).toBeUndefined();
+    });
+
+    it("returns high for OpenCode Zen models", () => {
+      expect(getDefaultReasoningEffort("opencode/kimi-k2.5")).toBe("high");
+      expect(getDefaultReasoningEffort("opencode/minimax-m2.5")).toBe("high");
+      expect(getDefaultReasoningEffort("opencode/minimax-m2.7")).toBe("high");
+      expect(getDefaultReasoningEffort("opencode/glm-5")).toBe("high");
     });
   });
 
@@ -394,6 +415,14 @@ describe("model utilities", () => {
       expect(config).toEqual({
         efforts: ["none", "low", "medium", "high", "xhigh"],
         default: undefined,
+      });
+    });
+
+    it("returns config for OpenCode Zen models", () => {
+      const config = getReasoningConfig("opencode/minimax-m2.7");
+      expect(config).toEqual({
+        efforts: ["low", "medium", "high", "xhigh"],
+        default: "high",
       });
     });
 
@@ -448,6 +477,14 @@ describe("model utilities", () => {
       expect(isValidReasoningEffort("openai/gpt-5.2", "none")).toBe(true);
       expect(isValidReasoningEffort("openai/gpt-5.4", "none")).toBe(true);
       expect(isValidReasoningEffort("openai/gpt-5.2-codex", "none")).toBe(false);
+    });
+
+    it("returns true for OpenCode Zen effort levels", () => {
+      expect(isValidReasoningEffort("opencode/minimax-m2.7", "low")).toBe(true);
+      expect(isValidReasoningEffort("opencode/minimax-m2.7", "medium")).toBe(true);
+      expect(isValidReasoningEffort("opencode/minimax-m2.7", "high")).toBe(true);
+      expect(isValidReasoningEffort("opencode/minimax-m2.7", "xhigh")).toBe(true);
+      expect(isValidReasoningEffort("opencode/minimax-m2.7", "max")).toBe(false);
     });
 
     it("returns false for invalid models", () => {

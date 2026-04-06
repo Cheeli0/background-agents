@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   FIREWORKS_API_KEY_SECRET,
+  MINIMAX_API_KEY_SECRET,
   OPENCODE_AUTH_JSON_SECRET,
   ZAI_API_KEY_SECRET,
   extractCopilotAccessTokenFromAuthJson,
   isFireworksAiModel,
   isGitHubCopilotModel,
+  isOpenCodeMiniMaxModel,
   isZaiCodingPlanModel,
   validateModelCredentialsForRepo,
 } from "./model-credentials";
@@ -56,6 +58,15 @@ describe("model-credentials", () => {
     it("detects Fireworks AI-backed models", () => {
       expect(isFireworksAiModel("fireworks-ai/kimi-k2p5-turbo")).toBe(true);
       expect(isFireworksAiModel("openai/gpt-5.4")).toBe(false);
+    });
+  });
+
+  describe("isOpenCodeMiniMaxModel", () => {
+    it("detects OpenCode MiniMax models", () => {
+      expect(isOpenCodeMiniMaxModel("opencode/minimax-m2.5")).toBe(true);
+      expect(isOpenCodeMiniMaxModel("opencode/minimax-m2.7")).toBe(true);
+      expect(isOpenCodeMiniMaxModel("opencode/kimi-k2.5")).toBe(false);
+      expect(isOpenCodeMiniMaxModel("zai-coding-plan/glm-5")).toBe(false);
     });
   });
 
@@ -304,6 +315,46 @@ describe("model-credentials", () => {
       });
 
       const result = await validateModelCredentialsForRepo(env, "fireworks-ai/kimi-k2p5-turbo", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("returns an error when MiniMax credentials are missing", async () => {
+      const result = await validateModelCredentialsForRepo(env, "opencode/minimax-m2.7", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toContain(MINIMAX_API_KEY_SECRET);
+      expect(result).toContain("MiniMax credentials");
+    });
+
+    it("accepts a direct MINIMAX_API_KEY secret", async () => {
+      mockGetRepoSecrets.mockResolvedValue({
+        [MINIMAX_API_KEY_SECRET]: "minimax-key",
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "opencode/minimax-m2.7", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("accepts MINIMAX_API_KEY even when OPENCODE_AUTH_JSON is invalid", async () => {
+      mockGetGlobalSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: "{invalid",
+        [MINIMAX_API_KEY_SECRET]: "minimax-key",
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "opencode/minimax-m2.7", {
         repoId: 1,
         repoOwner: "acme",
         repoName: "widgets",
