@@ -10,6 +10,7 @@
  * spawn attempts within the same request.
  */
 
+import { MAX_TUNNEL_PORTS, type SandboxSettings } from "@open-inspect/shared";
 import type { SandboxStatus } from "../../types";
 import type { SandboxRow, SessionRow } from "../../session/types";
 import { SandboxProviderError, type SandboxProvider, type CreateSandboxConfig } from "../provider";
@@ -34,8 +35,12 @@ import {
 import { extractProviderAndModel } from "../../utils/models";
 import { createLogger, type Logger } from "../../logger";
 import { hashToken } from "../../auth/crypto";
+import { mintJwt } from "../../auth/jwt";
 
 const log = createLogger("lifecycle-manager");
+
+/** TTL for terminal auth JWTs (24 hours, matching typical sandbox lifetime). */
+const TERMINAL_TOKEN_TTL_SECONDS = 86400;
 
 // ==================== Dependency Interfaces ====================
 
@@ -87,6 +92,14 @@ export interface SandboxStorage {
   updateSandboxCodeServer(url: string, password: string): void | Promise<void>;
   /** Clear stale code-server URL and password (e.g. on sandbox teardown) */
   clearSandboxCodeServer(): void;
+  /** Update tunnel URLs for extra ports on the sandbox row */
+  updateSandboxTunnelUrls(urls: Record<string, string>): void | Promise<void>;
+  /** Clear stale tunnel URLs (e.g. on sandbox teardown) */
+  clearSandboxTunnelUrls(): void;
+  /** Update ttyd proxy URL and (encrypted) JWT token on the sandbox row */
+  updateSandboxTtyd(url: string, token: string): void | Promise<void>;
+  /** Clear stale ttyd URL and token (e.g. on sandbox teardown) */
+  clearSandboxTtyd(): void;
 }
 
 /**
@@ -368,8 +381,8 @@ export class SandboxLifecycleManager {
       const timeoutSeconds =
         session.spawn_source === "agent" ? CHILD_SANDBOX_TIMEOUT_SECONDS : undefined;
 
-      // Create sandbox via provider
       const codeServerEnabled = session.code_server_enabled === 1;
+      const sandboxSettings = this.parseSandboxSettings(session);
       const createConfig: CreateSandboxConfig = {
         sessionId,
         sandboxId: expectedSandboxId,
@@ -385,6 +398,7 @@ export class SandboxLifecycleManager {
         timeoutSeconds,
         branch: session.base_branch,
         codeServerEnabled,
+        sandboxSettings,
       };
 
       const result = await this.provider.createSandbox(createConfig);
@@ -395,14 +409,20 @@ export class SandboxLifecycleManager {
         provider_object_id: result.providerObjectId,
       });
 
-      // Store provider's internal object ID for snapshot API
       if (result.providerObjectId) {
         this.storage.updateSandboxModalObjectId(result.providerObjectId);
       }
-
-      // Store code-server details and push to connected clients
       if (result.codeServerUrl && result.codeServerPassword) {
         await this.storeAndBroadcastCodeServer(result.codeServerUrl, result.codeServerPassword);
+      }
+      await this.storeAndBroadcastTunnelUrls(result.tunnelUrls);
+      if (result.ttydUrl) {
+        await this.storeAndBroadcastTtyd(
+          result.ttydUrl,
+          sandboxAuthToken,
+          sessionId,
+          expectedSandboxId
+        );
       }
 
       this.storage.updateSandboxStatus("connecting");
@@ -500,6 +520,7 @@ export class SandboxLifecycleManager {
         session.spawn_source === "agent" ? CHILD_SANDBOX_TIMEOUT_SECONDS : undefined;
 
       const codeServerEnabled = session.code_server_enabled === 1;
+      const sandboxSettings = this.parseSandboxSettings(session);
       const result = await this.provider.restoreFromSnapshot({
         snapshotImageId,
         sessionId: session.session_name || session.id,
@@ -514,6 +535,7 @@ export class SandboxLifecycleManager {
         timeoutSeconds,
         branch: session.base_branch,
         codeServerEnabled,
+        sandboxSettings,
       });
 
       if (result.success) {
@@ -523,20 +545,26 @@ export class SandboxLifecycleManager {
           provider_object_id: result.providerObjectId,
         });
 
-        // Store provider's internal object ID for future snapshots
         if (result.providerObjectId) {
           this.storage.updateSandboxModalObjectId(result.providerObjectId);
         }
-
-        // Store code-server details and push to connected clients
         if (result.codeServerUrl && result.codeServerPassword) {
           await this.storeAndBroadcastCodeServer(result.codeServerUrl, result.codeServerPassword);
+        }
+        await this.storeAndBroadcastTunnelUrls(result.tunnelUrls);
+        if (result.ttydUrl) {
+          await this.storeAndBroadcastTtyd(
+            result.ttydUrl,
+            sandboxAuthToken,
+            session.session_name || session.id,
+            expectedSandboxId
+          );
         }
 
         this.storage.updateSandboxStatus("connecting");
         this.broadcaster.broadcast({ type: "sandbox_status", status: "connecting" });
 
-        // Schedule connecting timeout watchdog (same as doSpawn)
+        // Schedule connecting timeout watchdog
         await this.alarmScheduler.scheduleAlarm(
           Date.now() + this.config.connectingTimeout.timeoutMs
         );
@@ -695,6 +723,8 @@ export class SandboxLifecycleManager {
       await this.callbacks.onSandboxTerminating?.();
       this.storage.updateSandboxStatus("failed");
       this.storage.clearSandboxCodeServer();
+      this.storage.clearSandboxTunnelUrls();
+      this.storage.clearSandboxTtyd();
       this.broadcaster.broadcast({ type: "sandbox_status", status: "failed" });
       this.broadcaster.broadcast({
         type: "sandbox_error",
@@ -725,6 +755,8 @@ export class SandboxLifecycleManager {
       );
       this.storage.updateSandboxStatus("stale");
       this.storage.clearSandboxCodeServer();
+      this.storage.clearSandboxTunnelUrls();
+      this.storage.clearSandboxTtyd();
       this.broadcaster.broadcast({ type: "sandbox_status", status: "stale" });
 
       // Best-effort shutdown: tell sandbox to exit cleanly (connection may already be dead).
@@ -761,6 +793,8 @@ export class SandboxLifecycleManager {
         // Set status to stopped FIRST to block reconnection attempts
         this.storage.updateSandboxStatus("stopped");
         this.storage.clearSandboxCodeServer();
+        this.storage.clearSandboxTunnelUrls();
+        this.storage.clearSandboxTtyd();
         this.broadcaster.broadcast({ type: "sandbox_status", status: "stopped" });
 
         // Take snapshot
@@ -880,6 +914,69 @@ export class SandboxLifecycleManager {
       url,
       password,
     });
+  }
+
+  private parseSandboxSettings(session: SessionRow): SandboxSettings {
+    if (!session.sandbox_settings) return {};
+    try {
+      const parsed: unknown = JSON.parse(session.sandbox_settings);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+
+      const settings = parsed as Record<string, unknown>;
+      const result: SandboxSettings = {};
+
+      // Validate tunnelPorts at the boundary — data may come from untrusted callers
+      if (settings.tunnelPorts !== undefined) {
+        if (!Array.isArray(settings.tunnelPorts)) return {};
+        const valid = settings.tunnelPorts.filter(
+          (p: unknown) => typeof p === "number" && Number.isInteger(p) && p >= 1 && p <= 65535
+        );
+        result.tunnelPorts = valid.slice(0, MAX_TUNNEL_PORTS);
+      }
+
+      if (typeof settings.terminalEnabled === "boolean") {
+        result.terminalEnabled = settings.terminalEnabled;
+      }
+
+      return result;
+    } catch {
+      this.log.warn("Failed to parse sandbox_settings, using defaults");
+      return {};
+    }
+  }
+
+  private async storeAndBroadcastTunnelUrls(
+    urls: Record<string, string> | undefined
+  ): Promise<void> {
+    if (!urls || Object.keys(urls).length === 0) return;
+    this.log.info("Storing and broadcasting tunnel URLs", { ports: Object.keys(urls) });
+    await this.storage.updateSandboxTunnelUrls(urls);
+    this.broadcaster.broadcast({ type: "tunnel_urls", urls });
+  }
+
+  /**
+   * Mint a terminal JWT, persist the ttyd proxy URL + token, and broadcast to clients.
+   * The storage adapter encrypts the token before persisting (same pattern as code-server).
+   */
+  private async storeAndBroadcastTtyd(
+    url: string,
+    sandboxAuthToken: string,
+    sessionId: string,
+    sandboxId: string
+  ): Promise<void> {
+    const token = await mintJwt(
+      {
+        sub: sessionId,
+        sid: sandboxId,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + TERMINAL_TOKEN_TTL_SECONDS,
+      },
+      sandboxAuthToken
+    );
+
+    this.log.info("Storing and broadcasting ttyd info", { url });
+    await this.storage.updateSandboxTtyd(url, token);
+    this.broadcaster.broadcast({ type: "ttyd_info", url, token });
   }
 
   /**
