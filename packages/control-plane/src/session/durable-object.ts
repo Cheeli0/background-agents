@@ -568,6 +568,15 @@ export class SessionDO extends DurableObject<Env> {
         this.repository.updateSandboxCodeServer(url, encrypted);
       },
       clearSandboxCodeServer: () => this.repository.clearSandboxCodeServer(),
+      updateSandboxTunnelUrls: (urls) => this.repository.updateSandboxTunnelUrls(urls),
+      clearSandboxTunnelUrls: () => this.repository.clearSandboxTunnelUrls(),
+      updateSandboxTtyd: async (url, token) => {
+        const encrypted = this.env.REPO_SECRETS_ENCRYPTION_KEY
+          ? await encryptToken(token, this.env.REPO_SECRETS_ENCRYPTION_KEY)
+          : token;
+        this.repository.updateSandboxTtyd(url, encrypted);
+      },
+      clearSandboxTtyd: () => this.repository.clearSandboxTtyd(),
     };
 
     // Broadcaster adapter
@@ -1480,6 +1489,16 @@ export class SessionDO extends DurableObject<Env> {
       }
     }
 
+    // Decrypt ttyd token if stored encrypted
+    let ttydToken: string | null = sandbox?.ttyd_token ?? null;
+    if (ttydToken && this.env.REPO_SECRETS_ENCRYPTION_KEY) {
+      try {
+        ttydToken = await decryptToken(ttydToken, this.env.REPO_SECRETS_ENCRYPTION_KEY);
+      } catch {
+        ttydToken = null;
+      }
+    }
+
     return {
       id: this.getPublicSessionId(session),
       title: session?.title ?? null,
@@ -1497,6 +1516,9 @@ export class SessionDO extends DurableObject<Env> {
       parentSessionId: session?.parent_session_id ?? null,
       codeServerUrl: sandbox?.code_server_url ?? null,
       codeServerPassword,
+      tunnelUrls: sandbox?.tunnel_urls ? this.safeParseTunnelUrls(sandbox.tunnel_urls) : null,
+      ttydUrl: sandbox?.ttyd_url ?? null,
+      ttydToken,
     };
   }
 
@@ -1505,6 +1527,15 @@ export class SessionDO extends DurableObject<Env> {
    */
   private getIsProcessing(): boolean {
     return this.repository.getProcessingMessage() !== null;
+  }
+
+  private safeParseTunnelUrls(raw: string): Record<string, string> | null {
+    try {
+      return JSON.parse(raw) as Record<string, string>;
+    } catch {
+      this.log.warn("Invalid sandbox tunnel_urls JSON");
+      return null;
+    }
   }
 
   // Database helpers

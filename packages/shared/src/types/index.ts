@@ -305,6 +305,8 @@ export type ServerMessage =
       title: string | null;
     }
   | { type: "code_server_info"; url: string; password: string }
+  | { type: "ttyd_info"; url: string; token: string }
+  | { type: "tunnel_urls"; urls: Record<string, string> }
   | { type: "error"; code: string; message: string };
 
 // Session state sent to clients
@@ -325,6 +327,9 @@ export interface SessionState {
   parentSessionId?: string | null;
   codeServerUrl?: string | null;
   codeServerPassword?: string | null;
+  tunnelUrls?: Record<string, string> | null;
+  ttydUrl?: string | null;
+  ttydToken?: string | null;
 }
 
 // Participant presence info
@@ -346,6 +351,8 @@ export interface InstallationRepository {
   description: string | null;
   private: boolean;
   defaultBranch: string;
+  language?: string | null;
+  topics?: string[];
 }
 
 export interface RepoMetadata {
@@ -369,6 +376,8 @@ export interface RepoConfig {
   description: string;
   defaultBranch: string;
   private: boolean;
+  language?: string | null;
+  topics?: string[];
   aliases?: string[];
   keywords?: string[];
   channelAssociations?: string[];
