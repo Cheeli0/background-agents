@@ -9,6 +9,19 @@ import pytest
 from sandbox_runtime.entrypoint import SandboxSupervisor
 
 
+@pytest.fixture(autouse=True)
+def _clear_managed_auth_env(monkeypatch):
+    for key in (
+        "OPENAI_OAUTH_REFRESH_TOKEN",
+        "OPENAI_OAUTH_ACCOUNT_ID",
+        "OPENCODE_AUTH_JSON",
+        "ZAI_API_KEY",
+        "FIREWORKS_API_KEY",
+        "MINIMAX_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 def _make_supervisor() -> SandboxSupervisor:
     """Create a SandboxSupervisor with default test config."""
     with patch.dict(
@@ -20,6 +33,7 @@ def _make_supervisor() -> SandboxSupervisor:
             "REPO_OWNER": "acme",
             "REPO_NAME": "app",
         },
+        clear=True,
     ):
         return SandboxSupervisor()
 
