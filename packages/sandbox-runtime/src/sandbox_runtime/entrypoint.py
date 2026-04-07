@@ -65,7 +65,9 @@ class SandboxSupervisor:
             (
                 Path("/app/sandbox_runtime/plugins/minimax-auth-plugin.ts"),
                 "minimax-auth-plugin.ts",
-                "MINIMAX_API_KEY" if provider == "opencode" and model.startswith("minimax-") else None,
+                "MINIMAX_API_KEY"
+                if provider == "opencode" and model.startswith("minimax-")
+                else None,
             ),
         ]
 

@@ -106,7 +106,9 @@ async def test_deploys_minimax_plugin_for_opencode_provider(tmp_path):
         await supervisor.start_opencode()
 
     copy_targets = [str(call.args[1]).replace("\\", "/") for call in copy_mock.call_args_list]
-    assert any(target.endswith(".opencode/plugins/minimax-auth-plugin.ts") for target in copy_targets)
+    assert any(
+        target.endswith(".opencode/plugins/minimax-auth-plugin.ts") for target in copy_targets
+    )
 
 
 @pytest.mark.asyncio
