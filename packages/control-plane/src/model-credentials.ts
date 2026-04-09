@@ -28,6 +28,10 @@ export function isFireworksAiModel(model: string): boolean {
   return extractProviderAndModel(model).provider === "fireworks-ai";
 }
 
+export function isMiniMaxCodingPlanModel(model: string): boolean {
+  return extractProviderAndModel(model).provider === "minimax-coding-plan";
+}
+
 export function isOpenCodeMiniMaxModel(model: string): boolean {
   const { provider, model: providerModel } = extractProviderAndModel(model);
   return provider === "opencode" && providerModel.startsWith("minimax-");
@@ -131,7 +135,8 @@ export async function validateModelCredentialsForRepo(
   const requiresCopilotCredentials = isGitHubCopilotModel(model);
   const requiresZaiCredentials = isZaiCodingPlanModel(model);
   const requiresFireworksCredentials = isFireworksAiModel(model);
-  const requiresMiniMaxCredentials = isOpenCodeMiniMaxModel(model);
+  const requiresMiniMaxCredentials =
+    isMiniMaxCodingPlanModel(model) || isOpenCodeMiniMaxModel(model);
 
   if (
     !requiresCopilotCredentials &&

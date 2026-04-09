@@ -40,6 +40,12 @@ describe("extractModelFromLabels", () => {
     );
   });
 
+  it("returns MiniMax M2.7 for model:minimax-m2.7 label", () => {
+    expect(extractModelFromLabels([{ name: "model:minimax-m2.7" }])).toBe(
+      "minimax-coding-plan/MiniMax-M2.7"
+    );
+  });
+
   it("resolves provider-only labels using the matching base model when available", () => {
     expect(
       extractModelFromLabels([{ name: "provider:github-copilot" }], "anthropic/claude-sonnet-4-6")
@@ -68,6 +74,12 @@ describe("extractModelFromLabels", () => {
     expect(extractModelFromLabels([{ name: "provider:z.ai" }, { name: "model:glm-5.1" }])).toBe(
       "zai-coding-plan/glm-5.1"
     );
+  });
+
+  it("uses MiniMax M2.7 when only provider:minimax is present", () => {
+    expect(
+      extractModelFromLabels([{ name: "provider:minimax" }], "anthropic/claude-opus-4-6")
+    ).toBe("minimax-coding-plan/MiniMax-M2.7");
   });
 
   it("combines provider and model labels when both are present", () => {

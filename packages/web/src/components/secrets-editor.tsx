@@ -344,7 +344,7 @@ export function SecretsEditor({
 
   const zaiHint = "For Z.AI models, add ZAI_API_KEY only.";
   const fireworksHint = "For Fireworks AI models, add FIREWORKS_API_KEY only.";
-  const minimaxHint = "For OpenCode MiniMax models, add MINIMAX_API_KEY only.";
+  const minimaxHint = "For MiniMax Coding Plan models, add MINIMAX_API_KEY only.";
 
   return (
     <div className="mt-4 border border-border bg-background p-4">

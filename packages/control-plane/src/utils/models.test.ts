@@ -63,8 +63,11 @@ describe("model utilities", () => {
     it("returns true for OpenCode Zen models", () => {
       expect(isValidModel("opencode/kimi-k2.5")).toBe(true);
       expect(isValidModel("opencode/minimax-m2.5")).toBe(true);
-      expect(isValidModel("opencode/minimax-m2.7")).toBe(true);
       expect(isValidModel("opencode/glm-5")).toBe(true);
+    });
+
+    it("returns true for MiniMax Coding Plan-backed models", () => {
+      expect(isValidModel("minimax-coding-plan/MiniMax-M2.7")).toBe(true);
     });
 
     it("accepts bare GPT model names via normalization", () => {
@@ -320,8 +323,11 @@ describe("model utilities", () => {
     it("returns true for OpenCode Zen models with reasoning config", () => {
       expect(supportsReasoning("opencode/kimi-k2.5")).toBe(true);
       expect(supportsReasoning("opencode/minimax-m2.5")).toBe(true);
-      expect(supportsReasoning("opencode/minimax-m2.7")).toBe(true);
       expect(supportsReasoning("opencode/glm-5")).toBe(true);
+    });
+
+    it("returns true for MiniMax Coding Plan models with reasoning config", () => {
+      expect(supportsReasoning("minimax-coding-plan/MiniMax-M2.7")).toBe(true);
     });
 
     it("returns false for invalid models", () => {
@@ -366,8 +372,11 @@ describe("model utilities", () => {
     it("returns high for OpenCode Zen models", () => {
       expect(getDefaultReasoningEffort("opencode/kimi-k2.5")).toBe("high");
       expect(getDefaultReasoningEffort("opencode/minimax-m2.5")).toBe("high");
-      expect(getDefaultReasoningEffort("opencode/minimax-m2.7")).toBe("high");
       expect(getDefaultReasoningEffort("opencode/glm-5")).toBe("high");
+    });
+
+    it("returns high for MiniMax Coding Plan models", () => {
+      expect(getDefaultReasoningEffort("minimax-coding-plan/MiniMax-M2.7")).toBe("high");
     });
   });
 
@@ -418,8 +427,8 @@ describe("model utilities", () => {
       });
     });
 
-    it("returns config for OpenCode Zen models", () => {
-      const config = getReasoningConfig("opencode/minimax-m2.7");
+    it("returns config for MiniMax Coding Plan models", () => {
+      const config = getReasoningConfig("minimax-coding-plan/MiniMax-M2.7");
       expect(config).toEqual({
         efforts: ["low", "medium", "high", "xhigh"],
         default: "high",
@@ -479,12 +488,12 @@ describe("model utilities", () => {
       expect(isValidReasoningEffort("openai/gpt-5.2-codex", "none")).toBe(false);
     });
 
-    it("returns true for OpenCode Zen effort levels", () => {
-      expect(isValidReasoningEffort("opencode/minimax-m2.7", "low")).toBe(true);
-      expect(isValidReasoningEffort("opencode/minimax-m2.7", "medium")).toBe(true);
-      expect(isValidReasoningEffort("opencode/minimax-m2.7", "high")).toBe(true);
-      expect(isValidReasoningEffort("opencode/minimax-m2.7", "xhigh")).toBe(true);
-      expect(isValidReasoningEffort("opencode/minimax-m2.7", "max")).toBe(false);
+    it("returns true for MiniMax Coding Plan effort levels", () => {
+      expect(isValidReasoningEffort("minimax-coding-plan/MiniMax-M2.7", "low")).toBe(true);
+      expect(isValidReasoningEffort("minimax-coding-plan/MiniMax-M2.7", "medium")).toBe(true);
+      expect(isValidReasoningEffort("minimax-coding-plan/MiniMax-M2.7", "high")).toBe(true);
+      expect(isValidReasoningEffort("minimax-coding-plan/MiniMax-M2.7", "xhigh")).toBe(true);
+      expect(isValidReasoningEffort("minimax-coding-plan/MiniMax-M2.7", "max")).toBe(false);
     });
 
     it("returns false for invalid models", () => {

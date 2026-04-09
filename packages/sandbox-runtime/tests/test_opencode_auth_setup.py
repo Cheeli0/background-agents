@@ -322,6 +322,51 @@ class TestOpenCodeAuthSetup:
         assert data["zai"] == {"type": "api", "key": "zai-api-key"}
         assert data["zai-coding-plan"] == {"type": "api", "key": "zai-api-key"}
 
+    def test_fails_fast_for_minimax_without_credentials(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="MiniMax credentials are not configured"),
+        ):
+            sup._setup_opencode_auth("minimax-coding-plan")
+
+    def test_rejects_opencode_auth_json_for_minimax(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENCODE_AUTH_JSON": json.dumps(
+                        {
+                            "minimax": {
+                                "type": "api",
+                                "key": "minimax-api-key",
+                            }
+                        }
+                    )
+                },
+                clear=False,
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="Add MINIMAX_API_KEY"),
+        ):
+            sup._setup_opencode_auth("minimax-coding-plan")
+
+    def test_writes_minimax_auth_json_when_api_key_present(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict("os.environ", {"MINIMAX_API_KEY": "minimax-api-key"}, clear=False),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            sup._setup_opencode_auth("minimax-coding-plan")
+
+        data = json.loads(_auth_file(tmp_path).read_text())
+        assert data["minimax"] == {"type": "api", "key": "minimax-api-key"}
+        assert data["minimax-coding-plan"] == {"type": "api", "key": "minimax-api-key"}
+
     def test_fails_fast_for_fireworks_without_credentials(self, tmp_path):
         sup = _make_supervisor()
 
