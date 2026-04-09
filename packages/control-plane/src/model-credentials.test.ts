@@ -7,6 +7,7 @@ import {
   extractCopilotAccessTokenFromAuthJson,
   isFireworksAiModel,
   isGitHubCopilotModel,
+  isMiniMaxCodingPlanModel,
   isOpenCodeMiniMaxModel,
   isZaiCodingPlanModel,
   validateModelCredentialsForRepo,
@@ -64,9 +65,16 @@ describe("model-credentials", () => {
   describe("isOpenCodeMiniMaxModel", () => {
     it("detects OpenCode MiniMax models", () => {
       expect(isOpenCodeMiniMaxModel("opencode/minimax-m2.5")).toBe(true);
-      expect(isOpenCodeMiniMaxModel("opencode/minimax-m2.7")).toBe(true);
+      expect(isOpenCodeMiniMaxModel("minimax-coding-plan/MiniMax-M2.7")).toBe(false);
       expect(isOpenCodeMiniMaxModel("opencode/kimi-k2.5")).toBe(false);
       expect(isOpenCodeMiniMaxModel("zai-coding-plan/glm-5")).toBe(false);
+    });
+  });
+
+  describe("isMiniMaxCodingPlanModel", () => {
+    it("detects MiniMax Coding Plan-backed models", () => {
+      expect(isMiniMaxCodingPlanModel("minimax-coding-plan/MiniMax-M2.7")).toBe(true);
+      expect(isMiniMaxCodingPlanModel("opencode/minimax-m2.5")).toBe(false);
     });
   });
 
@@ -324,11 +332,15 @@ describe("model-credentials", () => {
     });
 
     it("returns an error when MiniMax credentials are missing", async () => {
-      const result = await validateModelCredentialsForRepo(env, "opencode/minimax-m2.7", {
-        repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
+      const result = await validateModelCredentialsForRepo(
+        env,
+        "minimax-coding-plan/MiniMax-M2.7",
+        {
+          repoId: 1,
+          repoOwner: "acme",
+          repoName: "widgets",
+        }
+      );
 
       expect(result).toContain(MINIMAX_API_KEY_SECRET);
       expect(result).toContain("MiniMax credentials");
@@ -339,11 +351,15 @@ describe("model-credentials", () => {
         [MINIMAX_API_KEY_SECRET]: "minimax-key",
       });
 
-      const result = await validateModelCredentialsForRepo(env, "opencode/minimax-m2.7", {
-        repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
+      const result = await validateModelCredentialsForRepo(
+        env,
+        "minimax-coding-plan/MiniMax-M2.7",
+        {
+          repoId: 1,
+          repoOwner: "acme",
+          repoName: "widgets",
+        }
+      );
 
       expect(result).toBeNull();
     });
@@ -354,11 +370,15 @@ describe("model-credentials", () => {
         [MINIMAX_API_KEY_SECRET]: "minimax-key",
       });
 
-      const result = await validateModelCredentialsForRepo(env, "opencode/minimax-m2.7", {
-        repoId: 1,
-        repoOwner: "acme",
-        repoName: "widgets",
-      });
+      const result = await validateModelCredentialsForRepo(
+        env,
+        "minimax-coding-plan/MiniMax-M2.7",
+        {
+          repoId: 1,
+          repoOwner: "acme",
+          repoName: "widgets",
+        }
+      );
 
       expect(result).toBeNull();
     });

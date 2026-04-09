@@ -39,6 +39,8 @@ const ZAI_CODING_PLAN_MODELS = [
   "zai-coding-plan/glm-4.5-air",
 ] as const;
 
+const MINIMAX_CODING_PLAN_MODELS = ["minimax-coding-plan/MiniMax-M2.7"] as const;
+
 const FIREWORKS_AI_MODELS = ["fireworks-ai/kimi-k2p5-turbo"] as const;
 
 /**
@@ -59,9 +61,9 @@ export const VALID_MODELS = [
   ...GITHUB_COPILOT_MODELS,
   "opencode/kimi-k2.5",
   "opencode/minimax-m2.5",
-  "opencode/minimax-m2.7",
   "opencode/glm-5",
   ...ZAI_CODING_PLAN_MODELS,
+  ...MINIMAX_CODING_PLAN_MODELS,
   ...FIREWORKS_AI_MODELS,
 ] as const;
 
@@ -110,7 +112,10 @@ export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningCo
   "openai/gpt-5.3-codex-spark": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
   "opencode/kimi-k2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
   "opencode/minimax-m2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "opencode/minimax-m2.7": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+  "minimax-coding-plan/MiniMax-M2.7": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
   "opencode/glm-5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
 };
 
@@ -348,6 +353,16 @@ export const MODEL_OPTIONS: ModelCategory[] = [
     ],
   },
   {
+    category: "MiniMax",
+    models: [
+      {
+        id: "minimax-coding-plan/MiniMax-M2.7",
+        name: "MiniMax M2.7",
+        description: "Latest MiniMax",
+      },
+    ],
+  },
+  {
     category: "Fireworks AI",
     models: [
       {
@@ -362,7 +377,6 @@ export const MODEL_OPTIONS: ModelCategory[] = [
     models: [
       { id: "opencode/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
       { id: "opencode/minimax-m2.5", name: "MiniMax M2.5", description: "MiniMax" },
-      { id: "opencode/minimax-m2.7", name: "MiniMax M2.7", description: "Latest MiniMax" },
       { id: "opencode/glm-5", name: "GLM 5", description: "Z.ai via OpenCode Zen" },
     ],
   },
@@ -397,6 +411,7 @@ export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
   "zai-coding-plan/glm-5-turbo",
   "zai-coding-plan/glm-4.7",
   "zai-coding-plan/glm-4.5-air",
+  "minimax-coding-plan/MiniMax-M2.7",
   "fireworks-ai/kimi-k2p5-turbo",
 ];
 

@@ -451,4 +451,27 @@ describe("handleAgentSessionEvent started-state behavior", () => {
 
     expect(requestBody.model).toBe("zai-coding-plan/glm-5.1");
   });
+
+  it("uses MiniMax provider and model labels for session model selection", async () => {
+    const { env, controlPlaneFetch } = createEnv({
+      projectMapping: { "project-1": { owner: "acme", name: "platform" } },
+    });
+    const linearFetch = createLinearFetch({
+      currentStateType: "backlog",
+      labels: [
+        { id: "label-1", name: "provider:minimax" },
+        { id: "label-2", name: "model:minimax-m2.7" },
+      ],
+    });
+    globalThis.fetch = linearFetch as typeof globalThis.fetch;
+
+    await handleAgentSessionEvent(createCreatedWebhook(), env, "trace-8");
+
+    const createSessionCall = controlPlaneFetch.mock.calls.find(
+      ([url]) => url === "https://internal/sessions"
+    );
+    const requestBody = JSON.parse(String(createSessionCall?.[1]?.body)) as { model: string };
+
+    expect(requestBody.model).toBe("minimax-coding-plan/MiniMax-M2.7");
+  });
 });

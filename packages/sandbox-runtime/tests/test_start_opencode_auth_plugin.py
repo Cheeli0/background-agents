@@ -80,7 +80,7 @@ async def test_deploys_codex_plugin_for_openai_provider(tmp_path):
 
 @pytest.mark.asyncio
 async def test_deploys_minimax_plugin_for_opencode_provider(tmp_path):
-    supervisor = _make_supervisor({"provider": "opencode", "model": "minimax-m2.7"})
+    supervisor = _make_supervisor({"provider": "opencode", "model": "minimax-m2.5"})
     supervisor.workspace_path = tmp_path
     supervisor.repo_path = tmp_path / "missing-repo"
     supervisor._setup_opencode_auth = MagicMock()
@@ -146,7 +146,7 @@ async def test_skips_codex_plugin_for_github_copilot_provider(tmp_path):
 
 @pytest.mark.asyncio
 async def test_skips_minimax_plugin_without_api_key(tmp_path):
-    supervisor = _make_supervisor({"provider": "opencode", "model": "minimax-m2.7"})
+    supervisor = _make_supervisor({"provider": "opencode", "model": "minimax-m2.5"})
     supervisor.workspace_path = tmp_path
     supervisor.repo_path = tmp_path / "missing-repo"
     supervisor._setup_opencode_auth = MagicMock()
@@ -195,6 +195,27 @@ async def test_uses_zai_coding_plan_provider_name_in_config(tmp_path):
     env = exec_mock.await_args.kwargs["env"]
     config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
     assert config["model"] == "zai-coding-plan/glm-5"
+
+
+@pytest.mark.asyncio
+async def test_uses_minimax_coding_plan_provider_name_in_config(tmp_path):
+    supervisor = _make_supervisor({"provider": "minimax-coding-plan", "model": "MiniMax-M2.7"})
+    supervisor.workspace_path = tmp_path
+    supervisor.repo_path = tmp_path / "missing-repo"
+    supervisor._setup_opencode_auth = MagicMock()
+    supervisor._install_tools = MagicMock()
+    supervisor._wait_for_health = AsyncMock()
+
+    with patch(
+        "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+        new=AsyncMock(return_value=_fake_process()),
+    ) as exec_mock:
+        await supervisor.start_opencode()
+
+    assert exec_mock.await_args is not None
+    env = exec_mock.await_args.kwargs["env"]
+    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    assert config["model"] == "minimax-coding-plan/MiniMax-M2.7"
 
 
 @pytest.mark.asyncio

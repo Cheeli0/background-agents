@@ -57,6 +57,10 @@ describe("formatProviderName", () => {
   it("formats Fireworks AI provider names", () => {
     expect(formatProviderName("fireworks-ai/kimi-k2p5-turbo")).toBe("Fireworks AI");
   });
+
+  it("formats MiniMax Coding Plan provider names", () => {
+    expect(formatProviderName("minimax-coding-plan/MiniMax-M2.7")).toBe("MiniMax");
+  });
 });
 
 describe("truncateBranchStart", () => {

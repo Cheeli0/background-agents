@@ -370,6 +370,17 @@ class SandboxSupervisor:
             "key": api_key,
         }
 
+    def _build_minimax_auth_entry(self) -> dict[str, object] | None:
+        """Build the managed MiniMax auth entry for direct API-key sessions."""
+        api_key = os.environ.get("MINIMAX_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        return {
+            "type": "api",
+            "key": api_key,
+        }
+
     def _write_opencode_auth(self, auth_data: dict[str, object]) -> None:
         """Write OpenCode auth.json atomically with secure permissions."""
         auth_dir = Path.home() / ".local" / "share" / "opencode"
@@ -412,7 +423,11 @@ class SandboxSupervisor:
         auth_data: dict[str, object] = {}
 
         auth_json = os.environ.get("OPENCODE_AUTH_JSON")
-        if auth_json and selected_provider not in ("zai-coding-plan", "fireworks-ai"):
+        if auth_json and selected_provider not in (
+            "zai-coding-plan",
+            "fireworks-ai",
+            "minimax-coding-plan",
+        ):
             try:
                 parsed = json.loads(auth_json)
             except json.JSONDecodeError as e:
@@ -439,6 +454,11 @@ class SandboxSupervisor:
             if fireworks_entry:
                 auth_data["fireworks"] = fireworks_entry
                 auth_data["fireworks-ai"] = fireworks_entry
+
+            minimax_entry = self._build_minimax_auth_entry()
+            if minimax_entry:
+                auth_data["minimax"] = minimax_entry
+                auth_data["minimax-coding-plan"] = minimax_entry
 
             if selected_provider == "github-copilot":
                 copilot_entry = auth_data.get("github-copilot") or auth_data.get("copilot")
@@ -477,6 +497,21 @@ class SandboxSupervisor:
                 key = fireworks_entry.get("key")
                 if not isinstance(key, str) or not key.strip():
                     raise RuntimeError("Fireworks AI credentials must include a non-empty key.")
+
+            if selected_provider == "minimax-coding-plan":
+                minimax_entry = auth_data.get("minimax-coding-plan") or auth_data.get("minimax")
+                if not isinstance(minimax_entry, dict):
+                    raise RuntimeError(
+                        "MiniMax credentials are not configured. "
+                        "Add MINIMAX_API_KEY in repository Settings."
+                    )
+
+                if minimax_entry.get("type") != "api":
+                    raise RuntimeError("MiniMax credentials must use type 'api'.")
+
+                key = minimax_entry.get("key")
+                if not isinstance(key, str) or not key.strip():
+                    raise RuntimeError("MiniMax credentials must include a non-empty key.")
 
             if not auth_data:
                 return
