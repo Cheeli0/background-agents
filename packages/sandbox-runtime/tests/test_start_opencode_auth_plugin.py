@@ -199,9 +199,7 @@ async def test_uses_zai_coding_plan_provider_name_in_config(tmp_path):
 
 @pytest.mark.asyncio
 async def test_uses_minimax_coding_plan_provider_name_in_config(tmp_path):
-    supervisor = _make_supervisor(
-        {"provider": "minimax-coding-plan", "model": "MiniMax-M2.7"}
-    )
+    supervisor = _make_supervisor({"provider": "minimax-coding-plan", "model": "MiniMax-M2.7"})
     supervisor.workspace_path = tmp_path
     supervisor.repo_path = tmp_path / "missing-repo"
     supervisor._setup_opencode_auth = MagicMock()
