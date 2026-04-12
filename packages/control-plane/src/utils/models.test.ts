@@ -320,6 +320,15 @@ describe("model utilities", () => {
       expect(supportsReasoning("openai/gpt-5.3-codex-spark")).toBe(true);
     });
 
+    it("returns true for Copilot GPT models with reasoning config", () => {
+      expect(supportsReasoning("github-copilot/gpt-5.1")).toBe(true);
+      expect(supportsReasoning("github-copilot/gpt-5.1-codex")).toBe(true);
+      expect(supportsReasoning("github-copilot/gpt-5.2")).toBe(true);
+      expect(supportsReasoning("github-copilot/gpt-5.2-codex")).toBe(true);
+      expect(supportsReasoning("github-copilot/gpt-5.3-codex")).toBe(true);
+      expect(supportsReasoning("github-copilot/gpt-5.4")).toBe(true);
+    });
+
     it("returns true for OpenCode Zen models with reasoning config", () => {
       expect(supportsReasoning("opencode/kimi-k2.5")).toBe(true);
       expect(supportsReasoning("opencode/minimax-m2.5")).toBe(true);
@@ -332,7 +341,6 @@ describe("model utilities", () => {
 
     it("returns false for invalid models", () => {
       expect(supportsReasoning("gpt-4")).toBe(false);
-      expect(supportsReasoning("github-copilot/gpt-5.1")).toBe(false);
       expect(supportsReasoning("invalid")).toBe(false);
       expect(supportsReasoning("")).toBe(false);
     });
@@ -411,6 +419,18 @@ describe("model utilities", () => {
       });
     });
 
+    it("returns config for Copilot GPT models", () => {
+      expect(getReasoningConfig("github-copilot/gpt-5.4")).toEqual({
+        efforts: ["none", "low", "medium", "high", "xhigh"],
+        default: undefined,
+      });
+
+      expect(getReasoningConfig("github-copilot/gpt-5.3-codex")).toEqual({
+        efforts: ["low", "medium", "high", "xhigh"],
+        default: "high",
+      });
+    });
+
     it("returns config for GPT 5.2 with none effort", () => {
       const config = getReasoningConfig("openai/gpt-5.2");
       expect(config).toEqual({
@@ -472,6 +492,14 @@ describe("model utilities", () => {
       expect(isValidReasoningEffort("openai/gpt-5.2-codex", "medium")).toBe(true);
       expect(isValidReasoningEffort("openai/gpt-5.2-codex", "high")).toBe(true);
       expect(isValidReasoningEffort("openai/gpt-5.2-codex", "xhigh")).toBe(true);
+    });
+
+    it("returns true for valid effort on Copilot GPT models", () => {
+      expect(isValidReasoningEffort("github-copilot/gpt-5.4", "none")).toBe(true);
+      expect(isValidReasoningEffort("github-copilot/gpt-5.4", "xhigh")).toBe(true);
+      expect(isValidReasoningEffort("github-copilot/gpt-5.3-codex", "low")).toBe(true);
+      expect(isValidReasoningEffort("github-copilot/gpt-5.3-codex", "xhigh")).toBe(true);
+      expect(isValidReasoningEffort("github-copilot/gpt-5.3-codex", "none")).toBe(false);
     });
 
     it("returns false for max on OpenAI models (Anthropic-only)", () => {
