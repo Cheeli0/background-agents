@@ -190,6 +190,33 @@ describe("Integration settings API", () => {
       const body = await response.json<{ error: string }>();
       expect(body.error).toContain("Invalid model ID");
     });
+
+    it("accepts reasoning effort for Copilot GPT models", async () => {
+      const headers = await authHeaders();
+
+      const putRes = await SELF.fetch(
+        "https://test.local/integration-settings/github/repos/acme/widgets",
+        {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            settings: { model: "github-copilot/gpt-5.4", reasoningEffort: "xhigh" },
+          }),
+        }
+      );
+      expect(putRes.status).toBe(200);
+
+      const getRes = await SELF.fetch(
+        "https://test.local/integration-settings/github/repos/acme/widgets",
+        { headers }
+      );
+      expect(getRes.status).toBe(200);
+      const getBody = await getRes.json<{
+        settings: { model: string; reasoningEffort: string };
+      }>();
+      expect(getBody.settings.model).toBe("github-copilot/gpt-5.4");
+      expect(getBody.settings.reasoningEffort).toBe("xhigh");
+    });
   });
 
   describe("GET resolved config", () => {

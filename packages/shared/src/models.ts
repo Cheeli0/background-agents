@@ -110,6 +110,46 @@ export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningCo
   "openai/gpt-5.2-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
   "openai/gpt-5.3-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
   "openai/gpt-5.3-codex-spark": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+  "github-copilot/gpt-5-mini": {
+    efforts: ["none", "low", "medium", "high", "xhigh"],
+    default: undefined,
+  },
+  "github-copilot/gpt-5.1": {
+    efforts: ["none", "low", "medium", "high", "xhigh"],
+    default: undefined,
+  },
+  "github-copilot/gpt-5.1-codex": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
+  "github-copilot/gpt-5.1-codex-mini": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
+  "github-copilot/gpt-5.1-codex-max": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
+  "github-copilot/gpt-5.2": {
+    efforts: ["none", "low", "medium", "high", "xhigh"],
+    default: undefined,
+  },
+  "github-copilot/gpt-5.2-codex": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
+  "github-copilot/gpt-5.3-codex": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
+  "github-copilot/gpt-5.4": {
+    efforts: ["none", "low", "medium", "high", "xhigh"],
+    default: undefined,
+  },
+  "github-copilot/gpt-5.4-mini": {
+    efforts: ["none", "low", "medium", "high", "xhigh"],
+    default: undefined,
+  },
   "opencode/kimi-k2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
   "opencode/minimax-m2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
   "minimax-coding-plan/MiniMax-M2.7": {
