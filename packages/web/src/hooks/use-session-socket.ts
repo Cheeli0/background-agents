@@ -225,7 +225,9 @@ function toUiArtifact(artifact: RawArtifact | SessionArtifact): Artifact {
     objectKey,
     mimeType: mimeType && isScreenshotMimeType(mimeType) ? mimeType : undefined,
     sizeBytes:
-      sizeBytes !== undefined && Number.isFinite(sizeBytes) && sizeBytes >= 0 ? sizeBytes : undefined,
+      sizeBytes !== undefined && Number.isFinite(sizeBytes) && sizeBytes >= 0
+        ? sizeBytes
+        : undefined,
     viewport,
     sourceUrl,
     fullPage,
@@ -277,7 +279,8 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
   const subscribedRef = useRef(false);
   const wsTokenRef = useRef<string | null>(null);
   // Accumulates text during streaming, displayed only on completion to avoid duplicate display.
-  // Stores only the latest token since token events contain the full accumulated text (not incremental).
+  // Stores only the latest token since token events contain the full accumulated
+  // text (not incremental).
   const pendingTextRef = useRef<{
     content: string;
     messageId: string;
