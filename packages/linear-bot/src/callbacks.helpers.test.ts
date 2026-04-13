@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatToolAction, isValidToolCallPayload } from "./callbacks";
+import { buildToolProgressActivity, formatToolAction, isValidToolCallPayload } from "./callbacks";
 
 // ─── formatToolAction ────────────────────────────────────────────────────────
 
@@ -120,5 +120,14 @@ describe("isValidToolCallPayload", () => {
 
   it("rejects sessionId of wrong type", () => {
     expect(isValidToolCallPayload({ ...valid, sessionId: 123 })).toBe(false);
+  });
+});
+
+describe("buildToolProgressActivity", () => {
+  it("uses a supported thought activity for tool progress", () => {
+    expect(buildToolProgressActivity("bash", { command: "npm test" })).toEqual({
+      type: "thought",
+      body: "Running `npm test`",
+    });
   });
 });

@@ -111,6 +111,17 @@ export function formatToolAction(tool: string, args: Record<string, unknown>): s
   }
 }
 
+export function buildToolProgressActivity(
+  tool: string,
+  args: Record<string, unknown>
+): { type: "thought"; body: string } {
+  return {
+    // Linear rejected the previous "action" content shape here. Use a supported text activity.
+    type: "thought",
+    body: formatToolAction(tool, args),
+  };
+}
+
 export function isValidToolCallPayload(payload: unknown): payload is ToolCallCallback {
   if (!payload || typeof payload !== "object") return false;
   const p = payload as Record<string, unknown>;
@@ -214,11 +225,10 @@ callbacksRouter.post("/tool_call", async (c) => {
       }
 
       try {
-        const description = formatToolAction(payload.tool, payload.args);
         await emitAgentActivity(
           client,
           context.agentSessionId,
-          { type: "action", body: description },
+          buildToolProgressActivity(payload.tool, payload.args),
           true
         );
         log.info("callback.tool_call", {
