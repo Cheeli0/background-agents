@@ -7,7 +7,9 @@ import type { Artifact, SandboxEvent } from "@/types/session";
 import type {
   ParticipantPresence,
   SandboxEvent as SharedSandboxEvent,
+  ScreenshotArtifactMetadata,
   ServerMessage,
+  SessionArtifact,
   SessionState as SharedSessionState,
 } from "@open-inspect/shared";
 
@@ -125,6 +127,11 @@ interface SessionArtifactsResponse {
 type ArtifactMetadata = NonNullable<Artifact["metadata"]>;
 type ArtifactPrState = NonNullable<ArtifactMetadata["prState"]>;
 type ArtifactPreviewStatus = NonNullable<ArtifactMetadata["previewStatus"]>;
+const SCREENSHOT_MIME_TYPES = new Set<ScreenshotArtifactMetadata["mimeType"]>([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+]);
 
 function toRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -141,6 +148,10 @@ function toNumberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
+function toBooleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function toPrStateOrUndefined(value: unknown): ArtifactPrState | undefined {
   if (value === "open" || value === "merged" || value === "closed" || value === "draft") {
     return value;
@@ -155,10 +166,33 @@ function toPreviewStatusOrUndefined(value: unknown): ArtifactPreviewStatus | und
   return undefined;
 }
 
-function toUiArtifact(artifact: RawArtifact): Artifact {
+function isScreenshotMimeType(value: string): value is ScreenshotArtifactMetadata["mimeType"] {
+  return SCREENSHOT_MIME_TYPES.has(value as ScreenshotArtifactMetadata["mimeType"]);
+}
+
+function toViewportOrUndefined(value: unknown): ArtifactMetadata["viewport"] | undefined {
+  const viewport = toRecord(value);
+  const width = viewport ? toNumberOrUndefined(viewport.width) : undefined;
+  const height = viewport ? toNumberOrUndefined(viewport.height) : undefined;
+  if (
+    width !== undefined &&
+    Number.isFinite(width) &&
+    width > 0 &&
+    height !== undefined &&
+    Number.isFinite(height) &&
+    height > 0
+  ) {
+    return { width, height };
+  }
+  return undefined;
+}
+
+function toUiArtifact(artifact: RawArtifact | SessionArtifact): Artifact {
   const rawMetadata = toRecord(artifact.metadata) ?? {};
+  const topLevelPrNumber =
+    "prNumber" in artifact ? toNumberOrUndefined(artifact.prNumber) : undefined;
   const prNumber =
-    toNumberOrUndefined(artifact.prNumber) ??
+    topLevelPrNumber ??
     toNumberOrUndefined(rawMetadata.prNumber) ??
     toNumberOrUndefined(rawMetadata.number);
   const prState =
@@ -169,26 +203,46 @@ function toUiArtifact(artifact: RawArtifact): Artifact {
   const base = toStringOrUndefined(rawMetadata.base);
   const provider = toStringOrUndefined(rawMetadata.provider);
   const filename = toStringOrUndefined(rawMetadata.filename);
+  const objectKey = toStringOrUndefined(rawMetadata.objectKey);
+  const mimeType = toStringOrUndefined(rawMetadata.mimeType);
+  const sizeBytes = toNumberOrUndefined(rawMetadata.sizeBytes);
+  const viewport = toViewportOrUndefined(rawMetadata.viewport);
+  const sourceUrl = toStringOrUndefined(rawMetadata.sourceUrl);
+  const fullPage = toBooleanOrUndefined(rawMetadata.fullPage);
+  const annotated = toBooleanOrUndefined(rawMetadata.annotated);
+  const caption = toStringOrUndefined(rawMetadata.caption);
   const previewStatus = toPreviewStatusOrUndefined(rawMetadata.previewStatus);
 
   const metadata: Artifact["metadata"] = {
-    ...(prNumber !== undefined ? { prNumber } : {}),
-    ...(prState ? { prState } : {}),
-    ...(mode ? { mode } : {}),
-    ...(createPrUrl ? { createPrUrl } : {}),
-    ...(head ? { head } : {}),
-    ...(base ? { base } : {}),
-    ...(provider ? { provider } : {}),
-    ...(filename ? { filename } : {}),
-    ...(previewStatus ? { previewStatus } : {}),
+    prNumber,
+    prState,
+    mode,
+    createPrUrl,
+    head,
+    base,
+    provider,
+    filename,
+    objectKey,
+    mimeType: mimeType && isScreenshotMimeType(mimeType) ? mimeType : undefined,
+    sizeBytes:
+      sizeBytes !== undefined && Number.isFinite(sizeBytes) && sizeBytes >= 0
+        ? sizeBytes
+        : undefined,
+    viewport,
+    sourceUrl,
+    fullPage,
+    annotated,
+    caption,
+    previewStatus,
   };
+  const hasMetadata = Object.values(metadata).some((value) => value !== undefined);
 
   return {
     id: artifact.id,
     type: artifact.type as Artifact["type"],
     url: artifact.url ?? null,
     createdAt: typeof artifact.createdAt === "number" ? artifact.createdAt : Date.now(),
-    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    metadata: hasMetadata ? metadata : undefined,
   };
 }
 
@@ -225,7 +279,8 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
   const subscribedRef = useRef(false);
   const wsTokenRef = useRef<string | null>(null);
   // Accumulates text during streaming, displayed only on completion to avoid duplicate display.
-  // Stores only the latest token since token events contain the full accumulated text (not incremental).
+  // Stores only the latest token since token events contain the full accumulated
+  // text (not incremental).
   const pendingTextRef = useRef<{
     content: string;
     messageId: string;
@@ -320,6 +375,23 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
       // Other events (tool_call, user_message, git_sync, etc.) - add normally
       setEvents((prev) => [...prev, event]);
     }
+
+    if (
+      event.type === "step_finish" &&
+      typeof event.cost === "number" &&
+      Number.isFinite(event.cost) &&
+      event.cost > 0
+    ) {
+      const stepCost = event.cost;
+      setSessionState((prev) =>
+        prev
+          ? {
+              ...prev,
+              totalCost: (prev.totalCost ?? 0) + stepCost,
+            }
+          : prev
+      );
+    }
   }, []);
 
   const fetchArtifacts = useCallback(async () => {
@@ -351,20 +423,17 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
         case "subscribed": {
           console.log("WebSocket subscribed to session");
           subscribedRef.current = true;
-          // Clear existing state since we're about to receive fresh history
-          setArtifacts([]);
+          // Replace local artifacts with the subscribed snapshot so reconnects
+          // still clear stale state instead of merging stale client data.
+          setArtifacts(data.artifacts.map(toUiArtifact));
           pendingTextRef.current = null;
           if (data.state) {
             setSessionState({
               ...data.state,
               // Backward-compatible default for older sessions that may omit this.
               isProcessing: data.state.isProcessing ?? false,
+              totalCost: data.state.totalCost ?? 0,
             });
-            patchSidebarSession((session) => ({
-              ...session,
-              status: data.state.status,
-              isProcessing: data.state.isProcessing ?? false,
-            }));
           }
           // Store the current user's participant ID and info for author attribution
           if (data.participantId) {
@@ -500,13 +569,21 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
 
         case "artifact_created":
           setArtifacts((prev) => {
-            // Avoid duplicates
-            const existing = prev.find((a) => a.id === data.artifact.id);
-            if (existing) {
-              return prev.map((a) => (a.id === data.artifact.id ? toUiArtifact(data.artifact) : a));
+            const nextArtifact = toUiArtifact(data.artifact);
+            const existingIndex = prev.findIndex((artifact) => artifact.id === nextArtifact.id);
+            if (existingIndex === -1) {
+              return [nextArtifact, ...prev];
             }
-            return [...prev, toUiArtifact(data.artifact)];
+
+            return prev.map((artifact, index) =>
+              index === existingIndex ? nextArtifact : artifact
+            );
           });
+          break;
+
+        case "session_branch":
+          // Branch updates apply only to the active session detail view.
+          setSessionState((prev) => (prev ? { ...prev, branchName: data.branchName } : null));
           break;
 
         case "session_title":

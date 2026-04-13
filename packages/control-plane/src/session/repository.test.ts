@@ -152,6 +152,17 @@ describe("SessionRepository", () => {
     });
   });
 
+  describe("addSessionCost", () => {
+    it("increments total_cost and updates updated_at for the current session", () => {
+      repo.addSessionCost(0.0123, 5000);
+
+      expect(mock.calls.length).toBe(1);
+      expect(mock.calls[0].query).toContain("SET total_cost = total_cost + ?");
+      expect(mock.calls[0].query).toContain("updated_at = ?");
+      expect(mock.calls[0].params).toEqual([0.0123, 5000]);
+    });
+  });
+
   // === SANDBOX ===
 
   describe("getSandbox", () => {
@@ -809,6 +820,18 @@ describe("SessionRepository", () => {
     it("returns empty array when none", () => {
       mock.setData(`SELECT * FROM artifacts ORDER BY created_at DESC`, []);
       expect(repo.listArtifacts()).toEqual([]);
+    });
+  });
+
+  describe("getArtifactById", () => {
+    it("queries by artifact id", () => {
+      repo.getArtifactById("art-1");
+      expect(mock.calls[0].query).toContain("SELECT * FROM artifacts WHERE id = ?");
+      expect(mock.calls[0].params).toEqual(["art-1"]);
+    });
+
+    it("returns null when the artifact is missing", () => {
+      expect(repo.getArtifactById("missing")).toBeNull();
     });
   });
 

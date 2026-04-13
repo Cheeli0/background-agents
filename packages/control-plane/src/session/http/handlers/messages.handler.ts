@@ -17,6 +17,7 @@ const VALID_EVENT_TYPES = [
   "heartbeat",
   "push_complete",
   "push_error",
+  "artifact",
   "user_message",
 ] as const;
 
@@ -34,7 +35,7 @@ export interface MessagesHandler {
   enqueuePrompt: (request: Request) => Promise<Response>;
   stop: () => Promise<Response>;
   listEvents: (url: URL) => Response;
-  listArtifacts: () => Response;
+  listArtifacts: (url: URL) => Response;
   listMessages: (url: URL) => Response;
 }
 
@@ -81,7 +82,12 @@ export function createMessagesHandler(deps: MessagesHandlerDeps): MessagesHandle
       });
     },
 
-    listArtifacts(): Response {
+    listArtifacts(url: URL): Response {
+      const artifactId = url.searchParams.get("artifactId");
+      if (artifactId) {
+        return Response.json(deps.messageService.getArtifact(artifactId));
+      }
+
       return Response.json(deps.messageService.listArtifacts());
     },
 

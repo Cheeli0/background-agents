@@ -309,7 +309,7 @@ class SandboxSupervisor:
         if legacy_tool.exists():
             shutil.copy(legacy_tool, tool_dest / "create-pull-request.js")
 
-        # Copy all .js files from tools/ (including _-prefixed internal modules)
+        # Copy all .js files from tools/ — these must export tool() for OpenCode
         if tools_dir.exists():
             for tool_file in tools_dir.iterdir():
                 if tool_file.is_file() and tool_file.suffix == ".js":
@@ -328,6 +328,46 @@ class SandboxSupervisor:
         package_json = opencode_dir / "package.json"
         if not package_json.exists():
             package_json.write_text('{"name": "opencode-tools", "type": "module"}')
+
+    def _install_bin_scripts(self) -> None:
+        """Install standalone CLI scripts into /usr/local/bin.
+
+        Scripts in bin/ are standalone CLIs (not OpenCode tool plugins) and must
+        NOT be placed in .opencode/tool/ - OpenCode would import() them during
+        tool discovery, executing module-level code with the parent process argv.
+        """
+        bin_dir = Path("/app/sandbox_runtime/bin")
+        if not bin_dir.is_dir():
+            return
+
+        for script in bin_dir.iterdir():
+            if script.is_file() and script.suffix == ".js":
+                dest = Path("/usr/local/bin") / script.stem
+                shutil.copy(script, dest)
+                dest.chmod(0o755)
+                self.log.info("bin.installed", script=script.stem)
+
+    def _install_skills(self, workdir: Path) -> None:
+        """Copy bundled Skills into the .opencode/skills directory."""
+        skills_dir = Path("/app/sandbox_runtime/skills")
+        if not skills_dir.is_dir():
+            return
+
+        skills_dest = workdir / ".opencode" / "skills"
+        installed_any = False
+
+        for skill_dir in skills_dir.iterdir():
+            skill_file = skill_dir / "SKILL.md"
+            if not skill_dir.is_dir() or not skill_file.exists():
+                continue
+
+            dest_dir = skills_dest / skill_dir.name
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy(skill_file, dest_dir / "SKILL.md")
+            installed_any = True
+
+        if installed_any:
+            self.log.info("opencode.skills_installed", skills_path=str(skills_dest))
 
     def _build_openai_auth_entry(self) -> dict[str, object] | None:
         """Build the managed OpenAI auth entry for direct ChatGPT/Codex sessions."""
@@ -687,6 +727,8 @@ class SandboxSupervisor:
             workdir = self.repo_path
 
         self._install_tools(workdir)
+        self._install_skills(workdir)
+        self._install_bin_scripts()
 
         # Deploy provider auth plugins when credentials are available.
         opencode_dir = workdir / ".opencode"

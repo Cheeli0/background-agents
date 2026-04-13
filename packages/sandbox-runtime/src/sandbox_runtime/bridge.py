@@ -201,9 +201,6 @@ class AgentBridge:
         # Keyed by ackId, re-sent on reconnect until the DO confirms receipt.
         self._pending_acks: dict[str, dict[str, Any]] = {}
 
-        # Tracks the message ID of the currently executing prompt
-        self._inflight_message_id: str | None = None
-
     @property
     def ws_url(self) -> str:
         """WebSocket URL for control plane connection."""
@@ -593,7 +590,6 @@ class AgentBridge:
     async def _handle_prompt(self, cmd: dict[str, Any]) -> None:
         """Handle prompt command - send to OpenCode and stream response."""
         message_id = cmd.get("messageId") or cmd.get("message_id", "unknown")
-        self._inflight_message_id = message_id
         content = cmd.get("content", "")
         model = cmd.get("model")
         reasoning_effort = cmd.get("reasoningEffort")
@@ -688,13 +684,14 @@ class AgentBridge:
         await self._save_session_id()
 
     @staticmethod
-    def _extract_error_message(error: Any) -> str | None:
+    def _extract_error_message(error: object) -> str | None:
         """Extract message from OpenCode NamedError: { "name": "...", "data": { "message": "..." } }."""
         if isinstance(error, dict):
             data = error.get("data")
             if isinstance(data, dict) and "message" in data:
-                return data["message"]
-            return error.get("message") or error.get("name")
+                return str(data["message"])
+            message = error.get("message") or error.get("name")
+            return str(message) if message else None
         return str(error) if error else None
 
     def _transform_part_to_event(
@@ -1722,7 +1719,7 @@ class AgentBridge:
         return value
 
 
-async def main():
+async def main() -> None:
     """Entry point for bridge process."""
     parser = argparse.ArgumentParser(description="Open-Inspect Agent Bridge")
     parser.add_argument("--sandbox-id", required=True, help="Sandbox ID")

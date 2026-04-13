@@ -118,6 +118,7 @@ function createCreatedWebhook(): AgentSessionWebhook {
     type: "AgentSessionEvent",
     action: "created",
     organizationId: "org-1",
+    webhookId: "webhook-created-1",
     appUserId: "app-user-1",
     agentSession: {
       id: "agent-session-1",
@@ -307,6 +308,7 @@ describe("handleAgentSessionEvent started-state behavior", () => {
         type: "AgentSessionEvent",
         action: "prompted",
         organizationId: "org-1",
+        webhookId: "webhook-prompted-1",
         appUserId: "app-user-1",
         agentSession: {
           id: "agent-session-1",
@@ -320,7 +322,11 @@ describe("handleAgentSessionEvent started-state behavior", () => {
             team: { id: "team-1", key: "ENG", name: "Engineering" },
           },
         },
-        agentActivity: { body: "Please also update tests." },
+        agentActivity: {
+          content: {
+            body: "Please also update tests.",
+          },
+        },
       },
       env,
       "trace-2"

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { formatModelName, formatProviderName, truncateBranch, copyToClipboard } from "@/lib/format";
+import { formatSessionCost } from "@/lib/session-cost";
 import { formatRelativeTime } from "@/lib/time";
 import { getSafeExternalUrl } from "@/lib/urls";
 import { getScmBranchUrl, getScmRepoUrl } from "@/lib/scm";
@@ -40,6 +41,7 @@ interface MetadataSectionProps {
   parentSessionId?: string | null;
   artifactPr?: SessionArtifactPr | null;
   associatedPr?: SessionAssociatedPr | null;
+  totalCost?: number;
 }
 
 function getChecksLabel(checks: SessionPullRequestChecks): string {
@@ -90,6 +92,7 @@ export function MetadataSection({
   parentSessionId,
   artifactPr,
   associatedPr,
+  totalCost,
 }: MetadataSectionProps) {
   const [copied, setCopied] = useState(false);
   const providerName = model ? formatProviderName(model) : null;
@@ -135,13 +138,11 @@ export function MetadataSection({
 
   return (
     <div className="space-y-3">
-      {/* Timestamp */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <ClockIcon className="w-4 h-4" />
         <span>{formatRelativeTime(createdAt)}</span>
       </div>
 
-      {/* Parent session */}
       {parentSessionId && (
         <div className="flex items-center gap-2 text-sm">
           <LinkIcon className="w-4 h-4 text-muted-foreground" />
@@ -151,7 +152,6 @@ export function MetadataSection({
         </div>
       )}
 
-      {/* Model */}
       {model && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <SparkleIcon className="w-4 h-4" />
@@ -165,7 +165,12 @@ export function MetadataSection({
         </div>
       )}
 
-      {/* PR Badge */}
+      {typeof totalCost === "number" && totalCost > 0 && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>Session cost: {formatSessionCost(totalCost)}</span>
+        </div>
+      )}
+
       {(prNumber || prUrl) && (
         <div className="flex items-center gap-2 text-sm">
           <PullRequestStatusIcon
@@ -207,7 +212,6 @@ export function MetadataSection({
         </div>
       )}
 
-      {/* Base Branch */}
       {baseBranch && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <BranchIcon className="w-4 h-4" />
@@ -229,7 +233,6 @@ export function MetadataSection({
         </div>
       )}
 
-      {/* Working Branch */}
       {branchName && (
         <div className="flex items-center gap-2 text-sm">
           <GitBranchWorkIcon className="w-4 h-4 text-muted-foreground" />
@@ -262,7 +265,6 @@ export function MetadataSection({
         </div>
       )}
 
-      {/* Repository tag */}
       {repoOwner && repoName && (
         <div className="flex items-center gap-2 text-sm">
           <RepoIcon className="w-4 h-4 text-muted-foreground" />

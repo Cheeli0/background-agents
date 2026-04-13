@@ -7,7 +7,9 @@ function createProcessor() {
     updateSandboxHeartbeat: vi.fn(),
     getProcessingMessage: vi.fn(() => null as { id: string } | null),
     upsertTokenEvent: vi.fn(),
+    createArtifact: vi.fn(),
     createEvent: vi.fn(),
+    addSessionCost: vi.fn(),
     upsertExecutionCompleteEvent: vi.fn(),
     updateMessageCompletion: vi.fn(),
     getMessageTimestamps: vi.fn(
@@ -101,6 +103,135 @@ describe("SessionSandboxEventProcessor", () => {
     await h.processor.processSandboxEvent(event);
 
     expect(h.repository.upsertTokenEvent).toHaveBeenCalledWith("msg-1", event, expect.any(Number));
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_event", event });
+  });
+
+  it("persists artifact events into artifacts and broadcasts both channels", async () => {
+    const h = createProcessor();
+    const event: SandboxEvent = {
+      type: "artifact",
+      artifactType: "screenshot",
+      url: "sessions/session-1/media/artifact-1.png",
+      metadata: {
+        objectKey: "sessions/session-1/media/artifact-1.png",
+        mimeType: "image/png",
+        sizeBytes: 512,
+      },
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.createArtifact).toHaveBeenCalledWith({
+      id: expect.any(String),
+      type: "screenshot",
+      url: "sessions/session-1/media/artifact-1.png",
+      metadata: JSON.stringify({
+        objectKey: "sessions/session-1/media/artifact-1.png",
+        mimeType: "image/png",
+        sizeBytes: 512,
+      }),
+      createdAt: expect.any(Number),
+    });
+    expect(h.repository.createEvent).toHaveBeenCalledWith({
+      id: expect.any(String),
+      type: "artifact",
+      data: expect.any(String),
+      messageId: "msg-1",
+      createdAt: expect.any(Number),
+    });
+    expect(h.broadcast).toHaveBeenNthCalledWith(1, {
+      type: "artifact_created",
+      artifact: {
+        id: expect.any(String),
+        type: "screenshot",
+        url: "sessions/session-1/media/artifact-1.png",
+        metadata: {
+          objectKey: "sessions/session-1/media/artifact-1.png",
+          mimeType: "image/png",
+          sizeBytes: 512,
+        },
+        createdAt: expect.any(Number),
+      },
+    });
+    expect(h.broadcast).toHaveBeenNthCalledWith(2, {
+      type: "sandbox_event",
+      event: expect.objectContaining({
+        type: "artifact",
+        artifactType: "screenshot",
+        messageId: "msg-1",
+        sandboxId: "sb-1",
+        url: "sessions/session-1/media/artifact-1.png",
+      }),
+    });
+  });
+
+  it("adds step_finish cost to session aggregate and broadcasts event", async () => {
+    const h = createProcessor();
+    const event: SandboxEvent = {
+      type: "step_finish",
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      cost: 0.0123,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.addSessionCost).toHaveBeenCalledWith(0.0123, expect.any(Number));
+    expect(h.repository.createEvent).not.toHaveBeenCalled();
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_event", event });
+  });
+
+  it("does not add session cost for step_finish with NaN cost", async () => {
+    const h = createProcessor();
+    const event: SandboxEvent = {
+      type: "step_finish",
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      cost: Number.NaN,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.addSessionCost).not.toHaveBeenCalled();
+    expect(h.repository.createEvent).not.toHaveBeenCalled();
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_event", event });
+  });
+
+  it("does not add session cost for step_finish with negative cost", async () => {
+    const h = createProcessor();
+    const event: SandboxEvent = {
+      type: "step_finish",
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      cost: -0.05,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.addSessionCost).not.toHaveBeenCalled();
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_event", event });
+  });
+
+  it("does not add session cost for step_finish with Infinity cost", async () => {
+    const h = createProcessor();
+    const event: SandboxEvent = {
+      type: "step_finish",
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      cost: Number.POSITIVE_INFINITY,
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.repository.addSessionCost).not.toHaveBeenCalled();
+    expect(h.repository.createEvent).not.toHaveBeenCalled();
     expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_event", event });
   });
 
