@@ -19,6 +19,22 @@ APPLIED=$($WRANGLER d1 execute "$DATABASE_NAME" --remote \
   --command "SELECT version FROM _schema_migrations ORDER BY version" \
   --json | jq -r '.[0].results[].version // empty' 2>/dev/null || echo "")
 
+# Guard against ambiguous migration state. The runner keys migrations by their
+# numeric prefix, so duplicate prefixes would cause one file to mask another.
+DUPLICATE_VERSIONS=$(
+  for file in "$MIGRATIONS_DIR"/*.sql; do
+    [ -f "$file" ] || continue
+    basename "$file" | grep -oE '^[0-9]+'
+  done | sort | uniq -d
+)
+
+if [ -n "$DUPLICATE_VERSIONS" ]; then
+  echo "Error: duplicate migration version prefixes found in $MIGRATIONS_DIR:" >&2
+  echo "$DUPLICATE_VERSIONS" | sed 's/^/  - /' >&2
+  echo "Rename the conflicting migration files so each numeric prefix is unique." >&2
+  exit 1
+fi
+
 # 3. Apply pending migrations in order
 COUNT=0
 for file in "$MIGRATIONS_DIR"/*.sql; do
