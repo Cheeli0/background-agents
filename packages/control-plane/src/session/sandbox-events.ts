@@ -1,13 +1,16 @@
+import type { SessionArtifact } from "@open-inspect/shared";
 import { generateId } from "../auth/crypto";
 import type { Logger } from "../logger";
 import type { GitPushSpec } from "../source-control";
 import type { SandboxEvent, ServerMessage } from "../types";
 import { shouldPersistToolCallEvent } from "./event-persistence";
+import { assertArtifactType } from "./artifacts";
 import type { SessionRepository } from "./repository";
 import type { CallbackNotificationService } from "./callback-notification-service";
 import type { SessionWebSocketManager } from "./websocket-manager";
 
 type PushResolver = { resolve: () => void; reject: (err: Error) => void };
+type SandboxEventWithAck = SandboxEvent & { ackId?: string };
 
 interface SessionSandboxEventProcessorDeps {
   ctx: DurableObjectState;
@@ -38,7 +41,7 @@ export class SessionSandboxEventProcessor {
 
   constructor(private readonly deps: SessionSandboxEventProcessorDeps) {}
 
-  async processSandboxEvent(event: SandboxEvent): Promise<void> {
+  async processSandboxEvent(event: SandboxEventWithAck): Promise<void> {
     if (event.type === "heartbeat" || event.type === "token") {
       this.deps.log.debug("Sandbox event", { event_type: event.type });
     } else if (event.type !== "execution_complete") {
@@ -47,7 +50,7 @@ export class SessionSandboxEventProcessor {
     const now = Date.now();
 
     // Extract ackId from the raw event (attached by bridge for critical events)
-    const ackId = (event as Record<string, unknown>).ackId as string | undefined;
+    const ackId = event.ackId;
 
     if (event.type === "heartbeat") {
       this.deps.repository.updateSandboxHeartbeat(now);
@@ -57,6 +60,48 @@ export class SessionSandboxEventProcessor {
     const eventMessageId = "messageId" in event ? event.messageId : null;
     const processingMessage = this.deps.repository.getProcessingMessage();
     const messageId = eventMessageId ?? processingMessage?.id ?? null;
+
+    if (event.type === "artifact") {
+      this.deps.updateLastActivity(now);
+
+      const artifactType = assertArtifactType(event.artifactType);
+      const artifactId =
+        typeof event.artifactId === "string" && event.artifactId.length > 0
+          ? event.artifactId
+          : generateId();
+      const augmentedEvent: Extract<SandboxEvent, { type: "artifact" }> = {
+        ...event,
+        artifactType,
+        artifactId,
+        messageId: messageId ?? undefined,
+      };
+      const artifact: SessionArtifact = {
+        id: artifactId,
+        type: artifactType,
+        url: event.url,
+        metadata: event.metadata ?? null,
+        createdAt: now,
+      };
+
+      this.deps.repository.createArtifact({
+        id: artifact.id,
+        type: artifact.type,
+        url: artifact.url,
+        metadata: artifact.metadata ? JSON.stringify(artifact.metadata) : null,
+        createdAt: now,
+      });
+      this.deps.repository.createEvent({
+        id: generateId(),
+        type: event.type,
+        data: JSON.stringify(augmentedEvent),
+        messageId,
+        createdAt: now,
+      });
+
+      this.deps.broadcast({ type: "artifact_created", artifact });
+      this.deps.broadcast({ type: "sandbox_event", event: augmentedEvent });
+      return;
+    }
 
     if (event.type === "token") {
       if (messageId) {
@@ -68,6 +113,14 @@ export class SessionSandboxEventProcessor {
 
     if (event.type === "step_start" || event.type === "step_finish") {
       this.deps.updateLastActivity(now);
+      if (
+        event.type === "step_finish" &&
+        typeof event.cost === "number" &&
+        Number.isFinite(event.cost) &&
+        event.cost > 0
+      ) {
+        this.deps.repository.addSessionCost(event.cost, now);
+      }
       this.deps.broadcast({ type: "sandbox_event", event });
       return;
     }

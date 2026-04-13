@@ -1,4 +1,4 @@
-"""Tests for _install_tools() method in SandboxSupervisor."""
+"""Tests for _install_tools() and _install_bin_scripts() in SandboxSupervisor."""
 
 from contextlib import contextmanager
 from pathlib import Path
@@ -23,14 +23,24 @@ def _make_supervisor() -> SandboxSupervisor:
 
 
 @contextmanager
-def _patch_paths(legacy: Path | str, tools: Path | str, modules: Path | str = "/nonexistent"):
-    """Patch Path() calls inside _install_tools to redirect to test paths."""
+def _patch_paths(
+    legacy: Path | str,
+    tools: Path | str,
+    modules: Path | str = "/nonexistent",
+    skills: Path | str = "/nonexistent",
+    bin_src: Path | str = "/nonexistent",
+    bin_dest: Path | str = "/nonexistent",
+):
+    """Patch entrypoint Path() calls to redirect legacy, tools, modules, skills, and bin paths."""
     with patch("sandbox_runtime.entrypoint.Path") as MockPath:
         MockPath.side_effect = lambda p: Path(
             str(p)
             .replace("/app/sandbox_runtime/plugins/inspect-plugin.js", str(legacy))
             .replace("/app/sandbox_runtime/tools", str(tools))
+            .replace("/app/sandbox_runtime/skills", str(skills))
+            .replace("/app/sandbox_runtime/bin", str(bin_src))
             .replace("/usr/lib/node_modules", str(modules))
+            .replace("/usr/local/bin", str(bin_dest))
         )
         yield
 
@@ -176,3 +186,110 @@ class TestInstallTools:
         assert (tool_dest / "_bridge-client.js").exists()
         js_files = list(tool_dest.glob("*.js"))
         assert len(js_files) == 3
+
+
+class TestInstallBinScripts:
+    """Cases for _install_bin_scripts() standalone CLI installation."""
+
+    def test_scripts_installed_to_bin(self, tmp_path):
+        """JS scripts in bin/ should be copied to /usr/local/bin/ without .js extension."""
+        sup = _make_supervisor()
+
+        src = tmp_path / "app" / "sandbox_runtime" / "bin"
+        src.mkdir(parents=True)
+        (src / "upload-media.js").write_text("#!/usr/bin/env node\n// upload cli")
+
+        dest = tmp_path / "usr-local-bin"
+        dest.mkdir()
+
+        with _patch_paths(
+            legacy=tmp_path / "no-legacy", tools=tmp_path / "no-tools", bin_src=src, bin_dest=dest
+        ):
+            sup._install_bin_scripts()
+
+        installed = dest / "upload-media"
+        assert installed.exists()
+        assert installed.read_text() == "#!/usr/bin/env node\n// upload cli"
+        assert installed.stat().st_mode & 0o755
+
+    def test_non_js_files_skipped(self, tmp_path):
+        """Non-.js files in bin/ should not be installed."""
+        sup = _make_supervisor()
+
+        src = tmp_path / "app" / "sandbox_runtime" / "bin"
+        src.mkdir(parents=True)
+        (src / "upload-media.js").write_text("// cli")
+        (src / "README.md").write_text("# docs")
+
+        dest = tmp_path / "usr-local-bin"
+        dest.mkdir()
+
+        with _patch_paths(
+            legacy=tmp_path / "no-legacy", tools=tmp_path / "no-tools", bin_src=src, bin_dest=dest
+        ):
+            sup._install_bin_scripts()
+
+        assert (dest / "upload-media").exists()
+        assert not (dest / "README").exists()
+
+    def test_noop_when_bin_dir_missing(self, tmp_path):
+        """Should be a no-op when bin/ directory doesn't exist."""
+        sup = _make_supervisor()
+
+        dest = tmp_path / "usr-local-bin"
+        dest.mkdir()
+
+        with _patch_paths(
+            legacy=tmp_path / "no-legacy",
+            tools=tmp_path / "no-tools",
+            bin_src=tmp_path / "no-bin",
+            bin_dest=dest,
+        ):
+            sup._install_bin_scripts()
+
+        assert list(dest.iterdir()) == []
+
+
+class TestInstallSkills:
+    """Cases for _install_skills() bundled Skill installation."""
+
+    def test_skills_dir_files_copied(self, tmp_path):
+        """Bundled Skills should be copied into .opencode/skills."""
+        sup = _make_supervisor()
+        workdir = tmp_path / "workspace"
+        workdir.mkdir()
+
+        skills_dir = tmp_path / "app" / "sandbox" / "skills"
+        agent_browser_dir = skills_dir / "agent-browser"
+        agent_browser_dir.mkdir(parents=True)
+        (agent_browser_dir / "SKILL.md").write_text("# agent-browser")
+
+        with _patch_paths(
+            legacy=tmp_path / "no-legacy",
+            tools=tmp_path / "no-tools",
+            skills=skills_dir,
+        ):
+            sup._install_skills(workdir)
+
+        skill_dest = workdir / ".opencode" / "skills" / "agent-browser" / "SKILL.md"
+        assert skill_dest.exists()
+        assert skill_dest.read_text() == "# agent-browser"
+
+    def test_skills_dir_non_directory_is_ignored(self, tmp_path):
+        """A non-directory skills path should not raise or copy files."""
+        sup = _make_supervisor()
+        workdir = tmp_path / "workspace"
+        workdir.mkdir()
+
+        skills_file = tmp_path / "app" / "sandbox" / "skills"
+        skills_file.parent.mkdir(parents=True)
+        skills_file.write_text("not a directory")
+
+        with _patch_paths(
+            legacy=tmp_path / "no-legacy",
+            tools=tmp_path / "no-tools",
+            skills=skills_file,
+        ):
+            sup._install_skills(workdir)
+
+        assert not (workdir / ".opencode" / "skills").exists()

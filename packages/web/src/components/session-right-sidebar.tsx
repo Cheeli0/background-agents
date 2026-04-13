@@ -7,6 +7,7 @@ import {
   MetadataSection,
   TasksSection,
   FilesChangedSection,
+  MediaSection,
   CodeServerSection,
   TunnelUrlsSection,
 } from "./sidebar";
@@ -20,27 +21,35 @@ import type { Artifact, SandboxEvent } from "@/types/session";
 import type { ParticipantPresence, SessionState } from "@open-inspect/shared";
 
 interface SessionRightSidebarProps {
+  sessionId: string;
   sessionState: SessionState | null;
   participants: ParticipantPresence[];
   events: SandboxEvent[];
   artifacts: Artifact[];
   terminalOpen?: boolean;
   onToggleTerminal?: () => void;
+  onOpenMedia: (artifactId: string) => void;
 }
 
 export type SessionRightSidebarContentProps = SessionRightSidebarProps;
 
 export function SessionRightSidebarContent({
+  sessionId,
   sessionState,
   participants,
   events,
   artifacts,
   terminalOpen,
   onToggleTerminal,
+  onOpenMedia,
 }: SessionRightSidebarContentProps) {
   const tasks = useMemo(() => extractLatestTasks(events), [events]);
   const filesChanged = useMemo(() => extractChangedFiles(events), [events]);
   const { artifactPr, associatedPr } = useSessionAssociatedPr(sessionState?.id ?? null);
+  const screenshots = useMemo(
+    () => artifacts.filter((artifact) => artifact.type === "screenshot"),
+    [artifacts]
+  );
   const terminalUrl = useMemo(
     () => buildAuthenticatedUrl(sessionState?.ttydUrl, sessionState?.ttydToken),
     [sessionState?.ttydUrl, sessionState?.ttydToken]
@@ -80,6 +89,7 @@ export function SessionRightSidebarContent({
           parentSessionId={sessionState.parentSessionId}
           artifactPr={artifactPr}
           associatedPr={associatedPr}
+          totalCost={sessionState.totalCost}
         />
       </div>
 
@@ -149,6 +159,13 @@ export function SessionRightSidebarContent({
         </CollapsibleSection>
       )}
 
+      {/* Media */}
+      {screenshots.length > 0 && (
+        <CollapsibleSection title={`Media (${screenshots.length})`} defaultOpen={true}>
+          <MediaSection sessionId={sessionId} screenshots={screenshots} onOpenMedia={onOpenMedia} />
+        </CollapsibleSection>
+      )}
+
       {/* Artifacts info when no specific sections are populated */}
       {tasks.length === 0 && filesChanged.length === 0 && artifacts.length === 0 && (
         <div className="px-4 py-4">
@@ -162,22 +179,26 @@ export function SessionRightSidebarContent({
 }
 
 export function SessionRightSidebar({
+  sessionId,
   sessionState,
   participants,
   events,
   artifacts,
   terminalOpen,
   onToggleTerminal,
+  onOpenMedia,
 }: SessionRightSidebarProps) {
   return (
     <aside className="w-80 border-l border-border-muted overflow-y-auto hidden lg:block">
       <SessionRightSidebarContent
+        sessionId={sessionId}
         sessionState={sessionState}
         participants={participants}
         events={events}
         artifacts={artifacts}
         terminalOpen={terminalOpen}
         onToggleTerminal={onToggleTerminal}
+        onOpenMedia={onOpenMedia}
       />
     </aside>
   );

@@ -1,4 +1,5 @@
 import type { ArtifactRow, EventRow, MessageRow } from "../types";
+import type { ArtifactResponse } from "../../types";
 import type { SessionRepository } from "../repository";
 import type { SessionMessageQueue } from "../message-queue";
 
@@ -85,6 +86,23 @@ export class MessageService {
         metadata: this.deps.parseArtifactMetadata(artifact),
         createdAt: artifact.created_at,
       })),
+    };
+  }
+
+  getArtifact(artifactId: string): { artifact: ArtifactResponse | null } {
+    const artifact = this.deps.repository.getArtifactById(artifactId);
+    if (!artifact) {
+      return { artifact: null };
+    }
+
+    return {
+      artifact: {
+        id: artifact.id,
+        type: artifact.type,
+        url: artifact.url,
+        metadata: this.deps.parseArtifactMetadata(artifact),
+        createdAt: artifact.created_at,
+      },
     };
   }
 

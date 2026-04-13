@@ -62,6 +62,29 @@ describe("MetadataSection", () => {
     expect(screen.getByLabelText("2/3 checks pending")).toBeInTheDocument();
   });
 
+  it("renders PR badge data from artifact metadata keys", () => {
+    render(
+      <MetadataSection
+        createdAt={Date.now()}
+        baseBranch="main"
+        artifacts={[
+          {
+            id: "artifact-pr-1",
+            type: "pr",
+            url: "https://github.com/acme/web-app/pull/42",
+            metadata: {
+              prNumber: 42,
+              prState: "open",
+            },
+            createdAt: 1234,
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "#42" })).toBeInTheDocument();
+  });
+
   it("shows merged PR status icon beside the session PR link", () => {
     render(
       <MetadataSection

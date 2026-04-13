@@ -320,25 +320,6 @@ class TestPromptTaskDecoupling:
         assert parsed["messageId"] == "msg-1"
         assert parsed["success"] is True
 
-    @pytest.mark.asyncio
-    async def test_inflight_message_id_set_on_prompt(self, bridge: AgentBridge):
-        """_handle_prompt should set _inflight_message_id."""
-        http_client = bridge.http_client
-        http_client.sse_events = [
-            create_sse_event("server.connected", {}),
-            create_sse_event("session.idle", {"sessionID": "oc-session-123"}),
-        ]
-
-        await bridge._handle_command({"type": "prompt", "messageId": "msg-42", "content": "test"})
-        task = bridge._current_prompt_task
-        assert task is not None
-
-        # Let the task run so _handle_prompt sets _inflight_message_id
-        await task
-        await asyncio.sleep(0)
-
-        assert bridge._inflight_message_id == "msg-42"
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

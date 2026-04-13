@@ -2,9 +2,20 @@
  * API router for Open-Inspect Control Plane.
  */
 
-import type { Env, CreateSessionRequest, CreateSessionResponse } from "./types";
+import type { ArtifactResponse, Env, CreateSessionRequest, CreateSessionResponse } from "./types";
 import { generateId, encryptToken } from "./auth/crypto";
 import { verifyInternalToken } from "./auth/internal";
+import {
+  buildMediaObjectKey,
+  detectScreenshotFileType,
+  isMultipartFile,
+  isSupportedScreenshotMimeType,
+  type MultipartFieldValue,
+  parseOptionalBoolean,
+  parseOptionalViewport,
+  SCREENSHOT_MAX_BYTES,
+  SCREENSHOT_UPLOAD_LIMIT_PER_SESSION,
+} from "./media";
 import {
   resolveScmProviderFromEnv,
   SourceControlProviderError,
@@ -22,6 +33,7 @@ import {
   VALID_MODELS,
   type CodeServerSettings,
   type SandboxSettings,
+  type ScreenshotArtifactMetadata,
   type SessionStatus,
   type CallbackContext,
   type SpawnChildSessionRequest,
@@ -171,6 +183,7 @@ const PUBLIC_ROUTES: RegExp[] = [
 const SANDBOX_AUTH_ROUTES: RegExp[] = [
   /^\/sessions\/[^/]+\/pr$/, // PR creation from sandbox
   /^\/sessions\/[^/]+\/openai-token-refresh$/, // OpenAI token refresh from sandbox
+  /^\/sessions\/[^/]+\/media$/, // Media upload from sandbox
   /^\/sessions\/[^/]+\/children$/, // POST spawn, GET list
   /^\/sessions\/[^/]+\/children\/[^/]+$/, // GET child detail
   /^\/sessions\/[^/]+\/children\/[^/]+\/cancel$/, // POST cancel child
@@ -447,6 +460,16 @@ const routes: Route[] = [
     method: "POST",
     pattern: parsePattern("/sessions/:id/pr"),
     handler: handleCreatePR,
+  },
+  {
+    method: "POST",
+    pattern: parsePattern("/sessions/:id/media"),
+    handler: handleMediaUpload,
+  },
+  {
+    method: "GET",
+    pattern: parsePattern("/sessions/:id/media/:artifactId"),
+    handler: handleMediaGet,
   },
   {
     method: "POST",
@@ -851,6 +874,7 @@ async function handleCreateSession(
     branchName: null,
     status: "created",
     creationSource: body.creationSource ?? "web",
+    scmLogin: scmLogin || null,
     createdAt: now,
     updatedAt: now,
   });
@@ -1026,6 +1050,309 @@ async function handleSessionArtifacts(
   return stub.fetch(
     internalRequest(buildSessionInternalUrl(SessionInternalPaths.artifacts), undefined, ctx)
   );
+}
+
+function getRequiredFormString(value: MultipartFieldValue | null, name: string): string | Response {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return error(`${name} is required`, 400);
+  }
+
+  return value.trim();
+}
+
+function getOptionalFormString(value: MultipartFieldValue | null): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+async function listSessionArtifactsFromDo(
+  stub: DurableObjectStub,
+  ctx: RequestContext
+): Promise<ArtifactResponse[] | Response> {
+  const response = await stub.fetch(
+    internalRequest(buildSessionInternalUrl(SessionInternalPaths.artifacts), undefined, ctx)
+  );
+  if (!response.ok) {
+    return response.status === 404
+      ? error("Session not found", 404)
+      : error("Failed to list session artifacts", 500);
+  }
+
+  const data = (await response.json()) as { artifacts: ArtifactResponse[] };
+  return data.artifacts;
+}
+
+async function getSessionArtifactFromDo(
+  stub: DurableObjectStub,
+  artifactId: string,
+  ctx: RequestContext
+): Promise<ArtifactResponse | null | Response> {
+  const response = await stub.fetch(
+    internalRequest(
+      buildSessionInternalUrl(
+        SessionInternalPaths.artifacts,
+        `?artifactId=${encodeURIComponent(artifactId)}`
+      ),
+      undefined,
+      ctx
+    )
+  );
+  if (!response.ok) {
+    return response.status === 404
+      ? error("Session not found", 404)
+      : error("Failed to fetch session artifact", 500);
+  }
+
+  const data = (await response.json()) as { artifact: ArtifactResponse | null };
+  return data.artifact;
+}
+
+function getScreenshotMimeType(
+  artifact: Pick<ArtifactResponse, "metadata">
+): "image/png" | "image/jpeg" | "image/webp" | null {
+  const mimeType = artifact.metadata?.mimeType;
+  return typeof mimeType === "string" && isSupportedScreenshotMimeType(mimeType) ? mimeType : null;
+}
+
+function getContentTypeFromHeaders(
+  headers: Headers
+): "image/png" | "image/jpeg" | "image/webp" | null {
+  const contentType = headers.get("Content-Type");
+  return contentType && isSupportedScreenshotMimeType(contentType) ? contentType : null;
+}
+
+async function handleMediaUpload(
+  request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  const sessionId = match.groups?.id;
+  if (!sessionId) return error("Session ID required");
+
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return error("Invalid multipart form data", 400);
+  }
+
+  const fileEntry = formData.get("file");
+  if (!isMultipartFile(fileEntry)) {
+    return error("file is required", 400);
+  }
+
+  const artifactTypeField = getRequiredFormString(formData.get("artifactType"), "artifactType");
+  if (artifactTypeField instanceof Response) return artifactTypeField;
+  if (artifactTypeField !== "screenshot") {
+    return error("Only screenshot uploads are supported", 400);
+  }
+
+  if (fileEntry.size <= 0) {
+    return error("Uploaded file is empty", 400);
+  }
+
+  if (fileEntry.size > SCREENSHOT_MAX_BYTES) {
+    return error(`Screenshot uploads must be ${SCREENSHOT_MAX_BYTES} bytes or smaller`, 400);
+  }
+
+  if (
+    fileEntry.type &&
+    fileEntry.type !== "image/png" &&
+    fileEntry.type !== "image/jpeg" &&
+    fileEntry.type !== "image/webp"
+  ) {
+    return error("Unsupported screenshot MIME type", 400);
+  }
+
+  let fullPage: boolean | undefined;
+  let annotated: boolean | undefined;
+  let viewport: { width: number; height: number } | undefined;
+  try {
+    fullPage = parseOptionalBoolean(formData.get("fullPage"));
+    annotated = parseOptionalBoolean(formData.get("annotated"));
+    viewport = parseOptionalViewport(formData.get("viewport"));
+  } catch (fieldError) {
+    return error(
+      fieldError instanceof Error ? fieldError.message : "Invalid screenshot metadata",
+      400
+    );
+  }
+
+  const caption = getOptionalFormString(formData.get("caption"));
+  const sourceUrl = getOptionalFormString(formData.get("sourceUrl"));
+  if (sourceUrl) {
+    try {
+      new URL(sourceUrl);
+    } catch {
+      return error("sourceUrl must be a valid URL", 400);
+    }
+  }
+
+  const bytes = new Uint8Array(await fileEntry.arrayBuffer());
+  const detectedFileType = detectScreenshotFileType(bytes);
+  if (!detectedFileType) {
+    return error("Uploaded file is not a supported screenshot format", 400);
+  }
+
+  if (fileEntry.type && fileEntry.type !== detectedFileType.mimeType) {
+    return error("Uploaded file MIME type does not match file contents", 400);
+  }
+
+  const doId = env.SESSION.idFromName(sessionId);
+  const stub = env.SESSION.get(doId);
+  const artifactsResult = await listSessionArtifactsFromDo(stub, ctx);
+  if (artifactsResult instanceof Response) return artifactsResult;
+
+  const screenshotCount = artifactsResult.filter(
+    (artifact) => artifact.type === "screenshot"
+  ).length;
+  if (screenshotCount >= SCREENSHOT_UPLOAD_LIMIT_PER_SESSION) {
+    return error(
+      `Session screenshot limit of ${SCREENSHOT_UPLOAD_LIMIT_PER_SESSION} uploads exceeded`,
+      429
+    );
+  }
+
+  const artifactId = generateId();
+  const objectKey = buildMediaObjectKey(sessionId, artifactId, detectedFileType.extension);
+  const metadata: ScreenshotArtifactMetadata = {
+    objectKey,
+    mimeType: detectedFileType.mimeType,
+    sizeBytes: bytes.byteLength,
+    ...(viewport ? { viewport } : {}),
+    ...(sourceUrl ? { sourceUrl } : {}),
+    ...(fullPage !== undefined ? { fullPage } : {}),
+    ...(annotated !== undefined ? { annotated } : {}),
+    ...(caption ? { caption } : {}),
+  };
+
+  await env.MEDIA_BUCKET.put(objectKey, bytes, {
+    httpMetadata: { contentType: detectedFileType.mimeType },
+  });
+
+  const createArtifactResponse = await stub.fetch(
+    internalRequest(
+      buildSessionInternalUrl(SessionInternalPaths.createMediaArtifact),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifactId,
+          artifactType: "screenshot",
+          objectKey,
+          metadata,
+        }),
+      },
+      ctx
+    )
+  );
+
+  if (!createArtifactResponse.ok) {
+    try {
+      await env.MEDIA_BUCKET.delete(objectKey);
+    } catch (cleanupError) {
+      logger.error("media.upload.cleanup_failed", {
+        session_id: sessionId,
+        artifact_id: artifactId,
+        object_key: objectKey,
+        request_id: ctx.request_id,
+        trace_id: ctx.trace_id,
+        error: cleanupError instanceof Error ? cleanupError : String(cleanupError),
+      });
+    }
+
+    const doErrorText = await createArtifactResponse.text();
+    let doErrorMessage = "Failed to persist media artifact";
+    if (doErrorText) {
+      try {
+        const parsedError = JSON.parse(doErrorText) as { error?: unknown };
+        if (typeof parsedError.error === "string" && parsedError.error.trim()) {
+          doErrorMessage = parsedError.error;
+        } else {
+          doErrorMessage = doErrorText;
+        }
+      } catch {
+        doErrorMessage = doErrorText;
+      }
+    }
+
+    const logData = {
+      session_id: sessionId,
+      artifact_id: artifactId,
+      request_id: ctx.request_id,
+      trace_id: ctx.trace_id,
+      error: doErrorMessage,
+      http_status: createArtifactResponse.status,
+    };
+
+    if (createArtifactResponse.status >= 500) {
+      logger.error("media.upload.create_artifact_failed", logData);
+      return error("Failed to persist media artifact", 500);
+    }
+
+    logger.warn("media.upload.create_artifact_failed", logData);
+    return error(doErrorMessage, createArtifactResponse.status);
+  }
+
+  return json({ artifactId, objectKey }, 201);
+}
+
+async function handleMediaGet(
+  _request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  const sessionId = match.groups?.id;
+  const artifactId = match.groups?.artifactId;
+  if (!sessionId || !artifactId) {
+    return error("Session ID and artifact ID are required", 400);
+  }
+  if (!/^[A-Za-z0-9-]+$/.test(artifactId)) {
+    return error("Invalid artifact ID", 400);
+  }
+
+  const doId = env.SESSION.idFromName(sessionId);
+  const stub = env.SESSION.get(doId);
+  const artifact = await getSessionArtifactFromDo(stub, artifactId, ctx);
+  if (artifact instanceof Response) return artifact;
+  if (!artifact || artifact.type !== "screenshot" || !artifact.url) {
+    return error("Media artifact not found", 404);
+  }
+
+  const object = await env.MEDIA_BUCKET.get(artifact.url);
+  if (!object) {
+    logger.warn("media.stream.object_missing", {
+      session_id: sessionId,
+      artifact_id: artifactId,
+      object_key: artifact.url,
+      request_id: ctx.request_id,
+      trace_id: ctx.trace_id,
+    });
+    return error("Media artifact not found", 404);
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  const contentType = getContentTypeFromHeaders(headers) ?? getScreenshotMimeType(artifact);
+  if (!contentType) {
+    logger.error("media.stream.invalid_metadata", {
+      session_id: sessionId,
+      artifact_id: artifactId,
+      object_key: artifact.url,
+      request_id: ctx.request_id,
+      trace_id: ctx.trace_id,
+    });
+    return error("Media artifact is invalid", 500);
+  }
+
+  headers.set("Content-Type", contentType);
+  headers.set("ETag", object.httpEtag);
+  headers.set("Content-Length", String(object.size));
+
+  return new Response(object.body, { headers });
 }
 
 async function handleSessionParticipants(
@@ -1582,6 +1909,7 @@ async function handleSpawnChild(
     spawnSource: "agent",
     creationSource: "agent",
     spawnDepth: childDepth,
+    scmLogin: spawnContext.owner.scmLogin || null,
     createdAt: now,
     updatedAt: now,
   });

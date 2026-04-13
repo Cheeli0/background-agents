@@ -12,9 +12,9 @@ import { initSchema } from "./schema";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
 import { timingSafeEqual } from "@open-inspect/shared";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
-import { getGitHubAppConfig } from "../auth/github-app";
+import { getGitHubAppConfig, getCachedInstallationToken } from "../auth/github-app";
 import { createModalClient } from "../sandbox/client";
-import { createDaytonaServiceClient } from "../sandbox/daytona-service-client";
+import { createDaytonaRestClient } from "../sandbox/daytona-rest-client";
 import { createModalProvider } from "../sandbox/providers/modal-provider";
 import { createDaytonaProvider } from "../sandbox/providers/daytona-provider";
 import { resolveSandboxBackendName } from "../sandbox/provider-name";
@@ -103,6 +103,9 @@ const WS_AUTH_TIMEOUT_MS = 30000; // 30 seconds
  */
 const WS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/** Statuses that indicate a session is finished — metrics are synced to D1 on these transitions. */
+const TERMINAL_STATUSES: SessionStatus[] = ["completed", "failed", "cancelled"];
+
 export class SessionDO extends DurableObject<Env> {
   private sql: SqlStorage;
   private repository: SessionRepository;
@@ -151,10 +154,11 @@ export class SessionDO extends DurableObject<Env> {
     prompt: (request) => this.messagesHandler.enqueuePrompt(request),
     stop: () => this.messagesHandler.stop(),
     sandboxEvent: (request) => this.sandboxHandler.sandboxEvent(request),
+    createMediaArtifact: (request) => this.sandboxHandler.createMediaArtifact(request),
     listParticipants: () => this.participantsHandler.listParticipants(),
     addParticipant: (request) => this.sandboxHandler.addParticipant(request),
     listEvents: (_request, url) => this.messagesHandler.listEvents(url),
-    listArtifacts: () => this.messagesHandler.listArtifacts(),
+    listArtifacts: (_request, url) => this.messagesHandler.listArtifacts(url),
     listMessages: (_request, url) => this.messagesHandler.listMessages(url),
     createPr: (request) => this.pullRequestHandler.createPr(request),
     wsToken: (request) => this.wsTokenHandler.generateWsToken(request),
@@ -374,6 +378,7 @@ export class SessionDO extends DurableObject<Env> {
         },
         isOpenAISecretsConfigured: () =>
           Boolean(this.env.DB && this.env.REPO_SECRETS_ENCRYPTION_KEY),
+        broadcast: (message) => this.broadcast(message),
         generateId: () => generateId(),
         now: () => Date.now(),
         getLog: () => this.log,
@@ -453,6 +458,12 @@ export class SessionDO extends DurableObject<Env> {
               this.pushBranchToRemote(headBranch, pushSpec),
             syncSessionIndexBranchName: (sessionId, branchName) =>
               this.syncSessionIndexBranchName(sessionId, branchName),
+            broadcastSessionBranch: (branchName) => {
+              this.broadcast({
+                type: "session_branch",
+                branchName,
+              });
+            },
             broadcastArtifactCreated: (artifact) => {
               this.broadcast({
                 type: "artifact_created",
@@ -542,17 +553,52 @@ export class SessionDO extends DurableObject<Env> {
     const provider =
       sandboxBackend === "daytona"
         ? (() => {
-            if (!this.env.DAYTONA_SERVICE_URL || !this.env.DAYTONA_SERVICE_SECRET) {
+            if (
+              !this.env.DAYTONA_API_URL ||
+              !this.env.DAYTONA_API_KEY ||
+              !this.env.DAYTONA_BASE_SNAPSHOT
+            ) {
               throw new Error(
-                "DAYTONA_SERVICE_URL and DAYTONA_SERVICE_SECRET are required when SANDBOX_PROVIDER=daytona"
+                "DAYTONA_API_URL, DAYTONA_API_KEY, and DAYTONA_BASE_SNAPSHOT are required when SANDBOX_PROVIDER=daytona"
               );
             }
 
-            const daytonaClient = createDaytonaServiceClient(
-              this.env.DAYTONA_SERVICE_URL,
-              this.env.DAYTONA_SERVICE_SECRET
+            const daytonaClient = createDaytonaRestClient({
+              apiUrl: this.env.DAYTONA_API_URL,
+              apiKey: this.env.DAYTONA_API_KEY,
+              target: this.env.DAYTONA_TARGET,
+              baseSnapshot: this.env.DAYTONA_BASE_SNAPSHOT,
+              autoStopIntervalMinutes: parseInt(
+                this.env.DAYTONA_AUTO_STOP_INTERVAL_MINUTES || "120",
+                10
+              ),
+              autoArchiveIntervalMinutes: parseInt(
+                this.env.DAYTONA_AUTO_ARCHIVE_INTERVAL_MINUTES || "10080",
+                10
+              ),
+            });
+
+            const scmProvider = resolveScmProviderFromEnv(this.env.SCM_PROVIDER);
+            const appConfig = getGitHubAppConfig(this.env);
+
+            const getCloneToken: () => Promise<string | null> =
+              scmProvider === "gitlab"
+                ? () => Promise.resolve(this.env.GITLAB_ACCESS_TOKEN ?? null)
+                : appConfig
+                  ? () => getCachedInstallationToken(appConfig, this.env)
+                  : () => Promise.resolve(null);
+
+            return createDaytonaProvider(
+              daytonaClient,
+              {
+                scmProvider,
+                gitlabAccessToken: this.env.GITLAB_ACCESS_TOKEN,
+                // Reuses API key as HMAC secret for code-server password derivation
+                // (distinct message prefix prevents collision with auth use)
+                codeServerPasswordSecret: this.env.DAYTONA_API_KEY,
+              },
+              getCloneToken
             );
-            return createDaytonaProvider(daytonaClient);
           })()
         : (() => {
             if (!this.env.MODAL_API_SECRET || !this.env.MODAL_WORKSPACE) {
@@ -1141,12 +1187,14 @@ export class SessionDO extends DurableObject<Env> {
     // Fetch sandbox once and thread it through to avoid a redundant SQLite read.
     const sandbox = this.getSandbox();
     const state = await this.getSessionState(sandbox);
+    const artifacts = this.messageService.listArtifacts();
     const replay = this.getReplayData();
 
     this.safeSend(ws, {
       type: "subscribed",
       sessionId: state.id,
       state,
+      artifacts: artifacts.artifacts,
       participantId: participant.id,
       participant: {
         participantId: participant.id,
@@ -1410,6 +1458,35 @@ export class SessionDO extends DurableObject<Env> {
     );
   }
 
+  private syncSessionMetrics(sessionId: string): void {
+    if (!this.env.DB) return;
+
+    const session = this.repository.getSession();
+    if (!session) return;
+
+    const messageCount = this.repository.getMessageCount();
+    const activeDurationMs = this.repository.getActiveDurationMs();
+    const artifacts = this.repository.listArtifacts();
+    const prCount = artifacts.filter((a) => a.type === "pr").length;
+
+    const sessionStore = new SessionIndexStore(this.env.DB);
+    this.ctx.waitUntil(
+      sessionStore
+        .updateMetrics(sessionId, {
+          totalCost: session.total_cost ?? 0,
+          activeDurationMs,
+          messageCount,
+          prCount,
+        })
+        .catch((error) => {
+          this.log.error("session_index.update_metrics.background_error", {
+            session_id: sessionId,
+            error,
+          });
+        })
+    );
+  }
+
   private syncSessionIndexBranchName(sessionId: string, branchName: string | null): void {
     if (!this.env.DB) return;
     const sessionStore = new SessionIndexStore(this.env.DB);
@@ -1431,6 +1508,9 @@ export class SessionDO extends DurableObject<Env> {
     const publicSessionId = this.getPublicSessionId(session);
     if (session.status === status) {
       this.syncSessionIndexStatus(publicSessionId, status, session.updated_at);
+      if (TERMINAL_STATUSES.includes(status)) {
+        this.syncSessionMetrics(publicSessionId);
+      }
       return false;
     }
 
@@ -1439,6 +1519,10 @@ export class SessionDO extends DurableObject<Env> {
     this.syncSessionIndexStatus(publicSessionId, status, updatedAt);
 
     this.broadcast({ type: "session_status", status });
+
+    if (TERMINAL_STATUSES.includes(status)) {
+      this.syncSessionMetrics(publicSessionId);
+    }
 
     // Notify parent session (if this is a child) so its UI can refresh
     this.notifyParentOfStatusChange(session, publicSessionId, status);
@@ -1541,6 +1625,7 @@ export class SessionDO extends DurableObject<Env> {
       reasoningEffort: session?.reasoning_effort ?? undefined,
       isProcessing,
       parentSessionId: session?.parent_session_id ?? null,
+      totalCost: session?.total_cost ?? 0,
       codeServerUrl: sandbox?.code_server_url ?? null,
       codeServerPassword,
       tunnelUrls: sandbox?.tunnel_urls ? this.safeParseTunnelUrls(sandbox.tunnel_urls) : null,

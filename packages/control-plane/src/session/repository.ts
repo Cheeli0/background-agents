@@ -292,6 +292,16 @@ export class SessionRepository {
     );
   }
 
+  addSessionCost(cost: number, updatedAt: number): void {
+    this.sql.exec(
+      `UPDATE session
+       SET total_cost = total_cost + ?, updated_at = ?
+       WHERE id = (SELECT id FROM session LIMIT 1)`,
+      cost,
+      updatedAt
+    );
+  }
+
   // === SANDBOX ===
   // Note: Each session DO has exactly one sandbox row, so update methods use
   // a subquery `WHERE id = (SELECT id FROM sandbox LIMIT 1)` to find it.
@@ -556,6 +566,15 @@ export class SessionRepository {
 
   // === MESSAGES ===
 
+  getActiveDurationMs(): number {
+    const result = this.sql.exec(
+      `SELECT COALESCE(SUM(completed_at - started_at), 0) as duration_ms
+       FROM messages
+       WHERE started_at IS NOT NULL AND completed_at IS NOT NULL`
+    );
+    return (result.one() as { duration_ms: number }).duration_ms;
+  }
+
   getMessageCount(): number {
     const result = this.sql.exec(`SELECT COUNT(*) as count FROM messages`);
     return (result.one() as { count: number }).count;
@@ -813,6 +832,12 @@ export class SessionRepository {
   listArtifacts(): ArtifactRow[] {
     const result = this.sql.exec(`SELECT * FROM artifacts ORDER BY created_at DESC`);
     return this.rows<ArtifactRow>(result);
+  }
+
+  getArtifactById(artifactId: string): ArtifactRow | null {
+    const result = this.sql.exec(`SELECT * FROM artifacts WHERE id = ?`, artifactId);
+    const rows = this.rows<ArtifactRow>(result);
+    return rows[0] ?? null;
   }
 
   // === WS CLIENT MAPPING ===

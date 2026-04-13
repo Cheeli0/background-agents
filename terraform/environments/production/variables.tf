@@ -25,14 +25,14 @@ variable "cloudflare_worker_subdomain" {
 }
 
 variable "vercel_api_token" {
-  description = "Vercel API token (required only when web_platform = 'vercel')"
+  description = "Vercel API token (required only when web_platform = 'vercel'). Do NOT set to empty string — the Vercel provider validates this on init even when no Vercel resources are created. Leave unset to use the dummy default."
   type        = string
   sensitive   = true
   default     = "unused"
 }
 
 variable "vercel_team_id" {
-  description = "Vercel team ID (required only when web_platform = 'vercel')"
+  description = "Vercel team ID (required only when web_platform = 'vercel'). Leave unset when using Cloudflare."
   type        = string
   default     = "unused"
 }
@@ -254,27 +254,44 @@ variable "modal_api_secret" {
   }
 }
 
-variable "daytona_service_url" {
-  description = "Base URL for the externally deployed Daytona shim service"
+variable "daytona_api_url" {
+  description = "Base URL for the Daytona REST API (e.g. https://app.daytona.io/api)"
   type        = string
   default     = ""
 
   validation {
-    condition     = var.sandbox_provider != "daytona" || length(var.daytona_service_url) > 0
-    error_message = "daytona_service_url must be set when sandbox_provider = 'daytona'."
+    condition     = var.sandbox_provider != "daytona" || length(var.daytona_api_url) > 0
+    error_message = "daytona_api_url must be set when sandbox_provider = 'daytona'."
   }
 }
 
-variable "daytona_service_secret" {
-  description = "Shared secret for authenticating control plane requests to the Daytona shim service"
+variable "daytona_api_key" {
+  description = "API key for Daytona REST API (Bearer auth)"
   type        = string
   sensitive   = true
   default     = ""
 
   validation {
-    condition     = var.sandbox_provider != "daytona" || length(var.daytona_service_secret) > 0
-    error_message = "daytona_service_secret must be set when sandbox_provider = 'daytona'."
+    condition     = var.sandbox_provider != "daytona" || length(var.daytona_api_key) > 0
+    error_message = "daytona_api_key must be set when sandbox_provider = 'daytona'."
   }
+}
+
+variable "daytona_base_snapshot" {
+  description = "Named Daytona snapshot used for fresh sandbox creation"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.sandbox_provider != "daytona" || length(var.daytona_base_snapshot) > 0
+    error_message = "daytona_base_snapshot must be set when sandbox_provider = 'daytona'."
+  }
+}
+
+variable "daytona_target" {
+  description = "Optional Daytona target name"
+  type        = string
+  default     = ""
 }
 
 variable "nextauth_secret" {
@@ -348,6 +365,16 @@ variable "project_root" {
   description = "Root path to the project repository"
   type        = string
   default     = "../../../"
+}
+
+# =============================================================================
+# R2 Storage
+# =============================================================================
+
+variable "r2_media_location" {
+  description = "Cloudflare R2 location hint for the media bucket (e.g. ENAM, WNAM, APAC, WEUR, EEUR)"
+  type        = string
+  default     = "ENAM"
 }
 
 # =============================================================================
