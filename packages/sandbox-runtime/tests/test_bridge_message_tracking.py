@@ -193,6 +193,27 @@ class TestBuildPromptRequestBody:
             "modelID": "gpt-4",
         }
 
+    def test_prefixes_unprefixed_fireworks_router_model(self, bridge: AgentBridge):
+        """Fireworks prompt requests should use the router-prefixed model path."""
+        body = bridge._build_prompt_request_body("Hello", "fireworks-ai/kimi-k2p5-turbo")
+
+        assert body["model"] == {
+            "providerID": "fireworks-ai",
+            "modelID": "accounts/fireworks/routers/kimi-k2p5-turbo",
+        }
+
+    def test_keeps_prefixed_fireworks_router_model(self, bridge: AgentBridge):
+        """Already-prefixed Fireworks model paths should stay unchanged."""
+        body = bridge._build_prompt_request_body(
+            "Hello",
+            "fireworks-ai/accounts/fireworks/routers/kimi-k2p5-turbo",
+        )
+
+        assert body["model"] == {
+            "providerID": "fireworks-ai",
+            "modelID": "accounts/fireworks/routers/kimi-k2p5-turbo",
+        }
+
     def test_with_all_options(self, bridge: AgentBridge):
         """Should include all options when provided."""
         opencode_id = "msg_0123456789abcdefABCDEF"

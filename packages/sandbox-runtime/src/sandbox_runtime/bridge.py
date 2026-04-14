@@ -761,6 +761,7 @@ class AgentBridge:
         "claude-sonnet-4-6",
     }
     ANTHROPIC_ADAPTIVE_EFFORTS: ClassVar[set[str]] = {"low", "medium", "high", "max"}
+    FIREWORKS_MODEL_ROUTER_PREFIX: ClassVar[str] = "accounts/fireworks/routers/"
 
     def _build_prompt_request_body(
         self,
@@ -789,6 +790,12 @@ class AgentBridge:
                 provider_id, model_id = model.split("/", 1)
             else:
                 provider_id, model_id = "anthropic", model
+
+            if provider_id == "fireworks-ai" and not model_id.startswith(
+                self.FIREWORKS_MODEL_ROUTER_PREFIX
+            ):
+                model_id = f"{self.FIREWORKS_MODEL_ROUTER_PREFIX}{model_id}"
+
             model_spec: dict[str, Any] = {
                 "providerID": provider_id,
                 "modelID": model_id,
