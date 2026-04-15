@@ -57,7 +57,9 @@ function createExecutionContext(): ExecutionContext {
   } as unknown as ExecutionContext;
 }
 
-function createAgentSessionPayload(overrides: Partial<AgentSessionWebhook> = {}): AgentSessionWebhook {
+function createAgentSessionPayload(
+  overrides: Partial<AgentSessionWebhook> = {}
+): AgentSessionWebhook {
   return {
     type: "AgentSessionEvent",
     action: "created",
