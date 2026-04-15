@@ -18,6 +18,7 @@ def _clear_managed_auth_env(monkeypatch):
         "ZAI_API_KEY",
         "FIREWORKS_API_KEY",
         "MINIMAX_API_KEY",
+        "OPENCODE_GO_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -135,6 +136,9 @@ class TestOpenCodeAuthSetup:
         assert not _auth_file(tmp_path).exists()
 
     def test_sets_secure_permissions(self, tmp_path):
+        if os.name == "nt":
+            pytest.skip("POSIX file mode bits are not reliable on Windows")
+
         sup = _make_supervisor()
 
         with (
@@ -411,3 +415,47 @@ class TestOpenCodeAuthSetup:
         data = json.loads(_auth_file(tmp_path).read_text())
         assert data["fireworks"] == {"type": "api", "key": "fireworks-api-key"}
         assert data["fireworks-ai"] == {"type": "api", "key": "fireworks-api-key"}
+
+    def test_fails_fast_for_opencode_go_without_credentials(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="OpenCode Go credentials are not configured"),
+        ):
+            sup._setup_opencode_auth("opencode-go")
+
+    def test_rejects_opencode_auth_json_for_opencode_go(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENCODE_AUTH_JSON": json.dumps(
+                        {
+                            "opencode-go": {
+                                "type": "api",
+                                "key": "opencode-go-api-key",
+                            }
+                        }
+                    )
+                },
+                clear=False,
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="Add OPENCODE_GO_API_KEY"),
+        ):
+            sup._setup_opencode_auth("opencode-go")
+
+    def test_writes_opencode_go_auth_json_when_api_key_present(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict("os.environ", {"OPENCODE_GO_API_KEY": "opencode-go-api-key"}, clear=False),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            sup._setup_opencode_auth("opencode-go")
+
+        data = json.loads(_auth_file(tmp_path).read_text())
+        assert data["opencode-go"] == {"type": "api", "key": "opencode-go-api-key"}

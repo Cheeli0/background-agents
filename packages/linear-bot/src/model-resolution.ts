@@ -49,6 +49,9 @@ const MODEL_LABEL_MAP: Record<string, string> = {
   "glm-4.5-air": "zai-coding-plan/glm-4.5-air",
   "minimax-m2.7": "minimax-coding-plan/MiniMax-M2.7",
   "kimi-k2p5-turbo": "fireworks-ai/kimi-k2p5-turbo",
+  "qwen3.6-plus": "opencode-go/qwen3.6-plus",
+  "mimo-v2-pro": "opencode-go/mimo-v2-pro",
+  "mimo-v2-omni": "opencode-go/mimo-v2-omni",
 };
 
 const PROVIDER_LABEL_DEFAULT_MODEL: Record<string, ValidModel> = {
@@ -60,11 +63,14 @@ const PROVIDER_LABEL_DEFAULT_MODEL: Record<string, ValidModel> = {
   "minimax-coding-plan": "minimax-coding-plan/MiniMax-M2.7",
   minimax: "minimax-coding-plan/MiniMax-M2.7",
   opencode: "opencode/kimi-k2.5",
+  "opencode-go": "opencode-go/glm-5.1",
   "fireworks-ai": "fireworks-ai/kimi-k2p5-turbo",
 };
 
 const PROVIDER_LABEL_ALIASES: Record<string, string> = {
   "z.ai": "zai-coding-plan",
+  "opencode go": "opencode-go",
+  opencode_go: "opencode-go",
 };
 
 function extractLabelValue(labels: Array<{ name: string }>, prefix: string): string | null {
@@ -93,6 +99,13 @@ function resolveProviderQualifiedModel(provider: string, model: string): string 
 }
 
 function resolveModelLabel(modelLabel: string, providerLabel: string | null): string | null {
+  if (providerLabel) {
+    const providerQualifiedModel = resolveProviderQualifiedModel(providerLabel, modelLabel);
+    if (providerQualifiedModel) {
+      return providerQualifiedModel;
+    }
+  }
+
   const mappedModel = MODEL_LABEL_MAP[modelLabel];
   if (mappedModel) {
     if (providerLabel) {

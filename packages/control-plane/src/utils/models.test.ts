@@ -66,6 +66,15 @@ describe("model utilities", () => {
       expect(isValidModel("opencode/glm-5")).toBe(true);
     });
 
+    it("returns true for OpenCode Go models", () => {
+      expect(isValidModel("opencode-go/glm-5.1")).toBe(true);
+      expect(isValidModel("opencode-go/kimi-k2.5")).toBe(true);
+      expect(isValidModel("opencode-go/qwen3.6-plus")).toBe(true);
+      expect(isValidModel("opencode-go/minimax-m2.7")).toBe(true);
+      expect(isValidModel("opencode-go/mimo-v2-pro")).toBe(true);
+      expect(isValidModel("opencode-go/mimo-v2-omni")).toBe(true);
+    });
+
     it("returns true for MiniMax Coding Plan-backed models", () => {
       expect(isValidModel("minimax-coding-plan/MiniMax-M2.7")).toBe(true);
     });
@@ -186,6 +195,18 @@ describe("model utilities", () => {
       expect(extractProviderAndModel("fireworks-ai/kimi-k2p5-turbo")).toEqual({
         provider: "fireworks-ai",
         model: "kimi-k2p5-turbo",
+      });
+    });
+
+    it("extracts OpenCode Go provider from Go models", () => {
+      expect(extractProviderAndModel("opencode-go/glm-5.1")).toEqual({
+        provider: "opencode-go",
+        model: "glm-5.1",
+      });
+
+      expect(extractProviderAndModel("opencode-go/mimo-v2-omni")).toEqual({
+        provider: "opencode-go",
+        model: "mimo-v2-omni",
       });
     });
 
@@ -335,6 +356,15 @@ describe("model utilities", () => {
       expect(supportsReasoning("opencode/glm-5")).toBe(true);
     });
 
+    it("returns true for OpenCode Go models with reasoning config", () => {
+      expect(supportsReasoning("opencode-go/glm-5.1")).toBe(true);
+      expect(supportsReasoning("opencode-go/kimi-k2.5")).toBe(true);
+      expect(supportsReasoning("opencode-go/qwen3.6-plus")).toBe(true);
+      expect(supportsReasoning("opencode-go/minimax-m2.7")).toBe(true);
+      expect(supportsReasoning("opencode-go/mimo-v2-pro")).toBe(true);
+      expect(supportsReasoning("opencode-go/mimo-v2-omni")).toBe(true);
+    });
+
     it("returns true for MiniMax Coding Plan models with reasoning config", () => {
       expect(supportsReasoning("minimax-coding-plan/MiniMax-M2.7")).toBe(true);
     });
@@ -381,6 +411,15 @@ describe("model utilities", () => {
       expect(getDefaultReasoningEffort("opencode/kimi-k2.5")).toBe("high");
       expect(getDefaultReasoningEffort("opencode/minimax-m2.5")).toBe("high");
       expect(getDefaultReasoningEffort("opencode/glm-5")).toBe("high");
+    });
+
+    it("returns high for OpenCode Go models", () => {
+      expect(getDefaultReasoningEffort("opencode-go/glm-5.1")).toBe("high");
+      expect(getDefaultReasoningEffort("opencode-go/kimi-k2.5")).toBe("high");
+      expect(getDefaultReasoningEffort("opencode-go/qwen3.6-plus")).toBe("high");
+      expect(getDefaultReasoningEffort("opencode-go/minimax-m2.7")).toBe("high");
+      expect(getDefaultReasoningEffort("opencode-go/mimo-v2-pro")).toBe("high");
+      expect(getDefaultReasoningEffort("opencode-go/mimo-v2-omni")).toBe("high");
     });
 
     it("returns high for MiniMax Coding Plan models", () => {
@@ -455,6 +494,14 @@ describe("model utilities", () => {
       });
     });
 
+    it("returns config for OpenCode Go models", () => {
+      const config = getReasoningConfig("opencode-go/qwen3.6-plus");
+      expect(config).toEqual({
+        efforts: ["low", "medium", "high", "xhigh"],
+        default: "high",
+      });
+    });
+
     it("returns undefined for invalid models", () => {
       expect(getReasoningConfig("invalid")).toBeUndefined();
     });
@@ -522,6 +569,14 @@ describe("model utilities", () => {
       expect(isValidReasoningEffort("minimax-coding-plan/MiniMax-M2.7", "high")).toBe(true);
       expect(isValidReasoningEffort("minimax-coding-plan/MiniMax-M2.7", "xhigh")).toBe(true);
       expect(isValidReasoningEffort("minimax-coding-plan/MiniMax-M2.7", "max")).toBe(false);
+    });
+
+    it("returns true for OpenCode Go effort levels", () => {
+      expect(isValidReasoningEffort("opencode-go/mimo-v2-omni", "low")).toBe(true);
+      expect(isValidReasoningEffort("opencode-go/mimo-v2-omni", "medium")).toBe(true);
+      expect(isValidReasoningEffort("opencode-go/mimo-v2-omni", "high")).toBe(true);
+      expect(isValidReasoningEffort("opencode-go/mimo-v2-omni", "xhigh")).toBe(true);
+      expect(isValidReasoningEffort("opencode-go/mimo-v2-omni", "max")).toBe(false);
     });
 
     it("returns false for invalid models", () => {

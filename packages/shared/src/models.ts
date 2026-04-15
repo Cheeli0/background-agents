@@ -43,6 +43,15 @@ const MINIMAX_CODING_PLAN_MODELS = ["minimax-coding-plan/MiniMax-M2.7"] as const
 
 const FIREWORKS_AI_MODELS = ["fireworks-ai/kimi-k2p5-turbo"] as const;
 
+const OPENCODE_GO_MODELS = [
+  "opencode-go/glm-5.1",
+  "opencode-go/kimi-k2.5",
+  "opencode-go/qwen3.6-plus",
+  "opencode-go/minimax-m2.7",
+  "opencode-go/mimo-v2-pro",
+  "opencode-go/mimo-v2-omni",
+] as const;
+
 /**
  * Valid model names supported by the system.
  * All models use "provider/model" format.
@@ -65,6 +74,7 @@ export const VALID_MODELS = [
   ...ZAI_CODING_PLAN_MODELS,
   ...MINIMAX_CODING_PLAN_MODELS,
   ...FIREWORKS_AI_MODELS,
+  ...OPENCODE_GO_MODELS,
 ] as const;
 
 export type ValidModel = (typeof VALID_MODELS)[number];
@@ -157,6 +167,24 @@ export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningCo
     default: "high",
   },
   "opencode/glm-5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+  "opencode-go/glm-5.1": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+  "opencode-go/kimi-k2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+  "opencode-go/qwen3.6-plus": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
+  "opencode-go/minimax-m2.7": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
+  "opencode-go/mimo-v2-pro": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
+  "opencode-go/mimo-v2-omni": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
 };
 
 export interface ModelDisplayInfo {
@@ -420,6 +448,41 @@ export const MODEL_OPTIONS: ModelCategory[] = [
       { id: "opencode/glm-5", name: "GLM 5", description: "Z.ai via OpenCode Zen" },
     ],
   },
+  {
+    category: "OpenCode Go",
+    models: [
+      {
+        id: "opencode-go/glm-5.1",
+        name: "GLM 5.1",
+        description: "OpenCode Go flagship coding model",
+      },
+      {
+        id: "opencode-go/kimi-k2.5",
+        name: "Kimi K2.5",
+        description: "Moonshot AI via OpenCode Go",
+      },
+      {
+        id: "opencode-go/qwen3.6-plus",
+        name: "Qwen3.6 Plus",
+        description: "Qwen coding model via OpenCode Go",
+      },
+      {
+        id: "opencode-go/minimax-m2.7",
+        name: "MiniMax M2.7",
+        description: "MiniMax via OpenCode Go",
+      },
+      {
+        id: "opencode-go/mimo-v2-pro",
+        name: "MiMo-V2-Pro",
+        description: "MiMo coding model via OpenCode Go",
+      },
+      {
+        id: "opencode-go/mimo-v2-omni",
+        name: "MiMo-V2-Omni",
+        description: "MiMo multimodal model via OpenCode Go",
+      },
+    ],
+  },
 ];
 
 /**
@@ -453,6 +516,7 @@ export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
   "zai-coding-plan/glm-4.5-air",
   "minimax-coding-plan/MiniMax-M2.7",
   "fireworks-ai/kimi-k2p5-turbo",
+  ...OPENCODE_GO_MODELS,
 ];
 
 // === Normalization ===

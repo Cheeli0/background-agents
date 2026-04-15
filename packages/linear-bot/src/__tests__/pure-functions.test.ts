@@ -46,6 +46,18 @@ describe("extractModelFromLabels", () => {
     );
   });
 
+  it("returns OpenCode Go-only models from model labels", () => {
+    expect(extractModelFromLabels([{ name: "model:qwen3.6-plus" }])).toBe(
+      "opencode-go/qwen3.6-plus"
+    );
+    expect(extractModelFromLabels([{ name: "model:mimo-v2-pro" }])).toBe(
+      "opencode-go/mimo-v2-pro"
+    );
+    expect(extractModelFromLabels([{ name: "model:mimo-v2-omni" }])).toBe(
+      "opencode-go/mimo-v2-omni"
+    );
+  });
+
   it("resolves provider-only labels using the matching base model when available", () => {
     expect(
       extractModelFromLabels([{ name: "provider:github-copilot" }], "anthropic/claude-sonnet-4-6")
@@ -82,10 +94,34 @@ describe("extractModelFromLabels", () => {
     ).toBe("minimax-coding-plan/MiniMax-M2.7");
   });
 
+  it("uses GLM 5.1 when only provider:opencode-go is present", () => {
+    expect(
+      extractModelFromLabels([{ name: "provider:opencode-go" }], "anthropic/claude-opus-4-6")
+    ).toBe("opencode-go/glm-5.1");
+  });
+
+  it("accepts provider:opencode go as an OpenCode Go alias", () => {
+    expect(extractModelFromLabels([{ name: "provider:opencode go" }])).toBe(
+      "opencode-go/glm-5.1"
+    );
+  });
+
   it("combines provider and model labels when both are present", () => {
     expect(
       extractModelFromLabels([{ name: "provider:github-copilot" }, { name: "model:gpt-5.4" }])
     ).toBe("github-copilot/gpt-5.4");
+  });
+
+  it("combines OpenCode Go provider labels with shared model names", () => {
+    expect(
+      extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:glm-5.1" }])
+    ).toBe("opencode-go/glm-5.1");
+    expect(
+      extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:kimi-k2.5" }])
+    ).toBe("opencode-go/kimi-k2.5");
+    expect(
+      extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:minimax-m2.7" }])
+    ).toBe("opencode-go/minimax-m2.7");
   });
 
   it("returns null for unknown model label", () => {

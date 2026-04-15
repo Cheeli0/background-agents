@@ -421,6 +421,17 @@ class SandboxSupervisor:
             "key": api_key,
         }
 
+    def _build_opencode_go_auth_entry(self) -> dict[str, object] | None:
+        """Build the managed OpenCode Go auth entry for direct API-key sessions."""
+        api_key = os.environ.get("OPENCODE_GO_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        return {
+            "type": "api",
+            "key": api_key,
+        }
+
     def _write_opencode_auth(self, auth_data: dict[str, object]) -> None:
         """Write OpenCode auth.json atomically with secure permissions."""
         auth_dir = Path.home() / ".local" / "share" / "opencode"
@@ -467,6 +478,7 @@ class SandboxSupervisor:
             "zai-coding-plan",
             "fireworks-ai",
             "minimax-coding-plan",
+            "opencode-go",
         ):
             try:
                 parsed = json.loads(auth_json)
@@ -499,6 +511,10 @@ class SandboxSupervisor:
             if minimax_entry:
                 auth_data["minimax"] = minimax_entry
                 auth_data["minimax-coding-plan"] = minimax_entry
+
+            opencode_go_entry = self._build_opencode_go_auth_entry()
+            if opencode_go_entry:
+                auth_data["opencode-go"] = opencode_go_entry
 
             if selected_provider == "github-copilot":
                 copilot_entry = auth_data.get("github-copilot") or auth_data.get("copilot")
@@ -552,6 +568,21 @@ class SandboxSupervisor:
                 key = minimax_entry.get("key")
                 if not isinstance(key, str) or not key.strip():
                     raise RuntimeError("MiniMax credentials must include a non-empty key.")
+
+            if selected_provider == "opencode-go":
+                opencode_go_entry = auth_data.get("opencode-go")
+                if not isinstance(opencode_go_entry, dict):
+                    raise RuntimeError(
+                        "OpenCode Go credentials are not configured. "
+                        "Add OPENCODE_GO_API_KEY in repository Settings."
+                    )
+
+                if opencode_go_entry.get("type") != "api":
+                    raise RuntimeError("OpenCode Go credentials must use type 'api'.")
+
+                key = opencode_go_entry.get("key")
+                if not isinstance(key, str) or not key.strip():
+                    raise RuntimeError("OpenCode Go credentials must include a non-empty key.")
 
             if not auth_data:
                 return

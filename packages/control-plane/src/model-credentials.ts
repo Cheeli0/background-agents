@@ -8,6 +8,7 @@ export const OPENCODE_AUTH_JSON_SECRET = "OPENCODE_AUTH_JSON";
 export const ZAI_API_KEY_SECRET = "ZAI_API_KEY";
 export const FIREWORKS_API_KEY_SECRET = "FIREWORKS_API_KEY";
 export const MINIMAX_API_KEY_SECRET = "MINIMAX_API_KEY";
+export const OPENCODE_GO_API_KEY_SECRET = "OPENCODE_GO_API_KEY";
 const COPILOT_ACCESS_TOKEN_EXPIRY_BUFFER_MS = 60 * 1000;
 
 interface RepoSecretContext {
@@ -30,6 +31,10 @@ export function isFireworksAiModel(model: string): boolean {
 
 export function isMiniMaxCodingPlanModel(model: string): boolean {
   return extractProviderAndModel(model).provider === "minimax-coding-plan";
+}
+
+export function isOpenCodeGoModel(model: string): boolean {
+  return extractProviderAndModel(model).provider === "opencode-go";
 }
 
 export function isOpenCodeMiniMaxModel(model: string): boolean {
@@ -137,12 +142,14 @@ export async function validateModelCredentialsForRepo(
   const requiresFireworksCredentials = isFireworksAiModel(model);
   const requiresMiniMaxCredentials =
     isMiniMaxCodingPlanModel(model) || isOpenCodeMiniMaxModel(model);
+  const requiresOpenCodeGoCredentials = isOpenCodeGoModel(model);
 
   if (
     !requiresCopilotCredentials &&
     !requiresZaiCredentials &&
     !requiresFireworksCredentials &&
-    !requiresMiniMaxCredentials
+    !requiresMiniMaxCredentials &&
+    !requiresOpenCodeGoCredentials
   ) {
     return null;
   }
@@ -156,6 +163,9 @@ export async function validateModelCredentialsForRepo(
     }
     if (requiresMiniMaxCredentials) {
       return "MiniMax models require secrets storage to be configured.";
+    }
+    if (requiresOpenCodeGoCredentials) {
+      return "OpenCode Go models require secrets storage to be configured.";
     }
     return "Fireworks AI models require secrets storage to be configured.";
   }
@@ -174,6 +184,7 @@ export async function validateModelCredentialsForRepo(
   const zaiApiKey = mergedSecrets[ZAI_API_KEY_SECRET];
   const fireworksApiKey = mergedSecrets[FIREWORKS_API_KEY_SECRET];
   const minimaxApiKey = mergedSecrets[MINIMAX_API_KEY_SECRET];
+  const opencodeGoApiKey = mergedSecrets[OPENCODE_GO_API_KEY_SECRET];
 
   if (requiresZaiCredentials && !zaiApiKey?.trim()) {
     return (
@@ -193,6 +204,13 @@ export async function validateModelCredentialsForRepo(
     return (
       "MiniMax credentials are not configured. " +
       `Add ${MINIMAX_API_KEY_SECRET} as a repo or global secret.`
+    );
+  }
+
+  if (requiresOpenCodeGoCredentials && !opencodeGoApiKey?.trim()) {
+    return (
+      "OpenCode Go credentials are not configured. " +
+      `Add ${OPENCODE_GO_API_KEY_SECRET} as a repo or global secret.`
     );
   }
 
