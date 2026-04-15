@@ -50,9 +50,7 @@ describe("extractModelFromLabels", () => {
     expect(extractModelFromLabels([{ name: "model:qwen3.6-plus" }])).toBe(
       "opencode-go/qwen3.6-plus"
     );
-    expect(extractModelFromLabels([{ name: "model:mimo-v2-pro" }])).toBe(
-      "opencode-go/mimo-v2-pro"
-    );
+    expect(extractModelFromLabels([{ name: "model:mimo-v2-pro" }])).toBe("opencode-go/mimo-v2-pro");
     expect(extractModelFromLabels([{ name: "model:mimo-v2-omni" }])).toBe(
       "opencode-go/mimo-v2-omni"
     );
@@ -101,9 +99,7 @@ describe("extractModelFromLabels", () => {
   });
 
   it("accepts provider:opencode go as an OpenCode Go alias", () => {
-    expect(extractModelFromLabels([{ name: "provider:opencode go" }])).toBe(
-      "opencode-go/glm-5.1"
-    );
+    expect(extractModelFromLabels([{ name: "provider:opencode go" }])).toBe("opencode-go/glm-5.1");
   });
 
   it("combines provider and model labels when both are present", () => {
