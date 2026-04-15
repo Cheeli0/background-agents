@@ -18,6 +18,7 @@ def _clear_managed_auth_env(monkeypatch):
         "ZAI_API_KEY",
         "FIREWORKS_API_KEY",
         "MINIMAX_API_KEY",
+        "OPENCODE_GO_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -59,7 +60,7 @@ async def test_deploys_codex_plugin_for_openai_provider(tmp_path):
     original_exists = Path.exists
 
     def fake_exists(path_obj):
-        if str(path_obj) == "/app/sandbox_runtime/plugins/codex-auth-plugin.ts":
+        if str(path_obj).replace("\\", "/") == "/app/sandbox_runtime/plugins/codex-auth-plugin.ts":
             return True
         return original_exists(path_obj)
 
@@ -90,7 +91,10 @@ async def test_deploys_minimax_plugin_for_opencode_provider(tmp_path):
     original_exists = Path.exists
 
     def fake_exists(path_obj):
-        if str(path_obj) == "/app/sandbox_runtime/plugins/minimax-auth-plugin.ts":
+        if (
+            str(path_obj).replace("\\", "/")
+            == "/app/sandbox_runtime/plugins/minimax-auth-plugin.ts"
+        ):
             return True
         return original_exists(path_obj)
 
@@ -123,7 +127,7 @@ async def test_skips_codex_plugin_for_github_copilot_provider(tmp_path):
     original_exists = Path.exists
 
     def fake_exists(path_obj):
-        if str(path_obj) == "/app/sandbox_runtime/plugins/codex-auth-plugin.ts":
+        if str(path_obj).replace("\\", "/") == "/app/sandbox_runtime/plugins/codex-auth-plugin.ts":
             return True
         return original_exists(path_obj)
 
@@ -156,7 +160,10 @@ async def test_skips_minimax_plugin_without_api_key(tmp_path):
     original_exists = Path.exists
 
     def fake_exists(path_obj):
-        if str(path_obj) == "/app/sandbox_runtime/plugins/minimax-auth-plugin.ts":
+        if (
+            str(path_obj).replace("\\", "/")
+            == "/app/sandbox_runtime/plugins/minimax-auth-plugin.ts"
+        ):
             return True
         return original_exists(path_obj)
 
@@ -263,3 +270,24 @@ async def test_keeps_prefixed_fireworks_router_model_in_config(tmp_path):
     env = exec_mock.await_args.kwargs["env"]
     config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
     assert config["model"] == "fireworks-ai/accounts/fireworks/routers/kimi-k2p5-turbo"
+
+
+@pytest.mark.asyncio
+async def test_uses_opencode_go_provider_name_in_config(tmp_path):
+    supervisor = _make_supervisor({"provider": "opencode-go", "model": "glm-5.1"})
+    supervisor.workspace_path = tmp_path
+    supervisor.repo_path = tmp_path / "missing-repo"
+    supervisor._setup_opencode_auth = MagicMock()
+    supervisor._install_tools = MagicMock()
+    supervisor._wait_for_health = AsyncMock()
+
+    with patch(
+        "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+        new=AsyncMock(return_value=_fake_process()),
+    ) as exec_mock:
+        await supervisor.start_opencode()
+
+    assert exec_mock.await_args is not None
+    env = exec_mock.await_args.kwargs["env"]
+    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    assert config["model"] == "opencode-go/glm-5.1"

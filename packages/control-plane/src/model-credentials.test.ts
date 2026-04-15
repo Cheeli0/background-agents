@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   FIREWORKS_API_KEY_SECRET,
   MINIMAX_API_KEY_SECRET,
+  OPENCODE_GO_API_KEY_SECRET,
   OPENCODE_AUTH_JSON_SECRET,
   ZAI_API_KEY_SECRET,
   extractCopilotAccessTokenFromAuthJson,
   isFireworksAiModel,
   isGitHubCopilotModel,
   isMiniMaxCodingPlanModel,
+  isOpenCodeGoModel,
   isOpenCodeMiniMaxModel,
   isZaiCodingPlanModel,
   validateModelCredentialsForRepo,
@@ -75,6 +77,15 @@ describe("model-credentials", () => {
     it("detects MiniMax Coding Plan-backed models", () => {
       expect(isMiniMaxCodingPlanModel("minimax-coding-plan/MiniMax-M2.7")).toBe(true);
       expect(isMiniMaxCodingPlanModel("opencode/minimax-m2.5")).toBe(false);
+    });
+  });
+
+  describe("isOpenCodeGoModel", () => {
+    it("detects OpenCode Go-backed models", () => {
+      expect(isOpenCodeGoModel("opencode-go/glm-5.1")).toBe(true);
+      expect(isOpenCodeGoModel("opencode-go/qwen3.6-plus")).toBe(true);
+      expect(isOpenCodeGoModel("opencode/kimi-k2.5")).toBe(false);
+      expect(isOpenCodeGoModel("zai-coding-plan/glm-5.1")).toBe(false);
     });
   });
 
@@ -379,6 +390,46 @@ describe("model-credentials", () => {
           repoName: "widgets",
         }
       );
+
+      expect(result).toBeNull();
+    });
+
+    it("returns an error when OpenCode Go credentials are missing", async () => {
+      const result = await validateModelCredentialsForRepo(env, "opencode-go/glm-5.1", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toContain(OPENCODE_GO_API_KEY_SECRET);
+      expect(result).toContain("OpenCode Go credentials");
+    });
+
+    it("accepts a direct OPENCODE_GO_API_KEY secret", async () => {
+      mockGetRepoSecrets.mockResolvedValue({
+        [OPENCODE_GO_API_KEY_SECRET]: "opencode-go-key",
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "opencode-go/qwen3.6-plus", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("accepts OPENCODE_GO_API_KEY even when OPENCODE_AUTH_JSON is invalid", async () => {
+      mockGetGlobalSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: "{invalid",
+        [OPENCODE_GO_API_KEY_SECRET]: "opencode-go-key",
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "opencode-go/mimo-v2-pro", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
 
       expect(result).toBeNull();
     });

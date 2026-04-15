@@ -61,6 +61,10 @@ describe("formatProviderName", () => {
   it("formats MiniMax Coding Plan provider names", () => {
     expect(formatProviderName("minimax-coding-plan/MiniMax-M2.7")).toBe("MiniMax");
   });
+
+  it("formats OpenCode Go provider names", () => {
+    expect(formatProviderName("opencode-go/glm-5.1")).toBe("OpenCode Go");
+  });
 });
 
 describe("truncateBranchStart", () => {

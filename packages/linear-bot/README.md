@@ -126,9 +126,53 @@ On any Linear issue:
 - Type `@OpenInspect` in a comment → agent picks up the issue
 - Assign the issue to `OpenInspect` → agent picks it up
 - Agent status is visible directly in Linear (thinking, working, done)
-- Add a `model:<name>` label to override the model (e.g., `model:opus`, `model:sonnet`,
-  `model:haiku`, `model:gpt-5.4`, `model:gpt-5.2-codex`, `model:glm-5.1`, `model:glm-5`,
-  `model:glm-4.7`, `model:kimi-k2p5-turbo`)
+- Add a `model:<name>` label to override the model
+- Add a `provider:<name>` label to select a provider default or combine with `model:<name>`
+
+Supported model label shortcuts:
+
+| Label                   | Model                              |
+| ----------------------- | ---------------------------------- |
+| `model:haiku`           | `anthropic/claude-haiku-4-5`       |
+| `model:sonnet`          | `anthropic/claude-sonnet-4-5`      |
+| `model:opus`            | `anthropic/claude-opus-4-5`        |
+| `model:opus-4-6`        | `anthropic/claude-opus-4-6`        |
+| `model:gpt-5.4`         | `openai/gpt-5.4`                   |
+| `model:gpt-5.2`         | `openai/gpt-5.2`                   |
+| `model:gpt-5.3-codex`   | `openai/gpt-5.3-codex`             |
+| `model:gpt-5.2-codex`   | `openai/gpt-5.2-codex`             |
+| `model:glm-5.1`         | `zai-coding-plan/glm-5.1`          |
+| `model:glm-5`           | `zai-coding-plan/glm-5`            |
+| `model:glm-5-turbo`     | `zai-coding-plan/glm-5-turbo`      |
+| `model:glm-4.7`         | `zai-coding-plan/glm-4.7`          |
+| `model:glm-4.5-air`     | `zai-coding-plan/glm-4.5-air`      |
+| `model:kimi-k2p5-turbo` | `fireworks-ai/kimi-k2p5-turbo`     |
+| `model:minimax-m2.7`    | `minimax-coding-plan/MiniMax-M2.7` |
+| `model:qwen3.6-plus`    | `opencode-go/qwen3.6-plus`         |
+| `model:mimo-v2-pro`     | `opencode-go/mimo-v2-pro`          |
+| `model:mimo-v2-omni`    | `opencode-go/mimo-v2-omni`         |
+
+Supported provider labels:
+
+| Label                          | Default model                      |
+| ------------------------------ | ---------------------------------- |
+| `provider:anthropic`           | `anthropic/claude-sonnet-4-6`      |
+| `provider:openai`              | `openai/gpt-5.4`                   |
+| `provider:github-copilot`      | `github-copilot/claude-sonnet-4-6` |
+| `provider:zai`                 | `zai-coding-plan/glm-5.1`          |
+| `provider:zai-coding-plan`     | `zai-coding-plan/glm-5.1`          |
+| `provider:z.ai`                | `zai-coding-plan/glm-5.1`          |
+| `provider:minimax`             | `minimax-coding-plan/MiniMax-M2.7` |
+| `provider:minimax-coding-plan` | `minimax-coding-plan/MiniMax-M2.7` |
+| `provider:opencode`            | `opencode/kimi-k2.5`               |
+| `provider:opencode-go`         | `opencode-go/glm-5.1`              |
+| `provider:opencode go`         | `opencode-go/glm-5.1`              |
+| `provider:opencode_go`         | `opencode-go/glm-5.1`              |
+| `provider:fireworks-ai`        | `fireworks-ai/kimi-k2p5-turbo`     |
+
+When both labels are present, the provider label is applied to the model name when that model exists
+for the provider. For example, `provider:opencode-go` plus `model:minimax-m2.7` resolves to
+`opencode-go/minimax-m2.7`.
 
 ## Repo Resolution
 
