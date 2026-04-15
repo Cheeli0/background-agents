@@ -131,20 +131,13 @@ app.post("/webhook", async (c) => {
   const action = readStringField(payload, "action") ?? "unknown";
 
   if (eventType === "AgentSessionEvent") {
-    // Deduplicate by Linear webhook delivery ID.
-    const webhookId = readStringField(payload, "webhookId");
-    if (!webhookId) {
+    const deliveryId = c.req.header("linear-delivery");
+    if (!deliveryId) {
       log.warn("webhook.invalid_payload", {
         trace_id: traceId,
-        reason: "missing_webhook_id",
+        reason: "missing_linear_delivery",
       });
       return c.json({ error: "Invalid payload" }, 400);
-    }
-
-    const isDuplicate = await isDuplicateEvent(c.env, webhookId);
-    if (isDuplicate) {
-      log.info("webhook.deduplicated", { trace_id: traceId, event_key: webhookId });
-      return c.json({ ok: true, skipped: true, reason: "duplicate" });
     }
 
     if (!isAgentSessionWebhookPayload(payload)) {
@@ -153,6 +146,12 @@ app.post("/webhook", async (c) => {
         reason: "invalid_agent_session_event_shape",
       });
       return c.json({ error: "Invalid payload" }, 400);
+    }
+
+    const isDuplicate = await isDuplicateEvent(c.env, deliveryId);
+    if (isDuplicate) {
+      log.info("webhook.deduplicated", { trace_id: traceId, event_key: deliveryId });
+      return c.json({ ok: true, skipped: true, reason: "duplicate" });
     }
 
     c.executionCtx.waitUntil(handleAgentSessionEvent(payload, c.env, traceId));
