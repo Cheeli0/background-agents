@@ -17,6 +17,7 @@ const ZAI_API_KEY_SECRET = "ZAI_API_KEY";
 const FIREWORKS_API_KEY_SECRET = "FIREWORKS_API_KEY";
 const MINIMAX_API_KEY_SECRET = "MINIMAX_API_KEY";
 const OPENCODE_GO_API_KEY_SECRET = "OPENCODE_GO_API_KEY";
+const OLLAMA_CLOUD_API_KEY_SECRET = "OLLAMA_CLOUD_API_KEY";
 
 const RESERVED_KEYS = new Set([
   "PYTHONUNBUFFERED",
@@ -347,6 +348,7 @@ export function SecretsEditor({
   const fireworksHint = "For Fireworks AI models, add FIREWORKS_API_KEY only.";
   const minimaxHint = "For MiniMax Coding Plan models, add MINIMAX_API_KEY only.";
   const opencodeGoHint = "For OpenCode Go models, add OPENCODE_GO_API_KEY only.";
+  const ollamaCloudHint = "For Ollama Cloud models, add OLLAMA_CLOUD_API_KEY only.";
 
   return (
     <div className="mt-4 border border-border bg-background p-4">
@@ -494,8 +496,9 @@ export function SecretsEditor({
             Tip: <span className="font-mono">{ZAI_API_KEY_SECRET}</span>,{" "}
             <span className="font-mono">{FIREWORKS_API_KEY_SECRET}</span>,{" "}
             <span className="font-mono">{MINIMAX_API_KEY_SECRET}</span>,{" "}
-            <span className="font-mono">{OPENCODE_GO_API_KEY_SECRET}</span>. {zaiHint}{" "}
-            {fireworksHint} {minimaxHint} {opencodeGoHint}
+            <span className="font-mono">{OPENCODE_GO_API_KEY_SECRET}</span>,{" "}
+            <span className="font-mono">{OLLAMA_CLOUD_API_KEY_SECRET}</span>. {zaiHint}{" "}
+            {fireworksHint} {minimaxHint} {opencodeGoHint} {ollamaCloudHint}
           </p>
         </>
       )}

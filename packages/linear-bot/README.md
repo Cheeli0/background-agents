@@ -168,11 +168,15 @@ Supported provider labels:
 | `provider:opencode-go`         | `opencode-go/glm-5.1`              |
 | `provider:opencode go`         | `opencode-go/glm-5.1`              |
 | `provider:opencode_go`         | `opencode-go/glm-5.1`              |
+| `provider:ollama-cloud`        | `ollama-cloud/glm-5.1`             |
+| `provider:ollama cloud`        | `ollama-cloud/glm-5.1`             |
+| `provider:ollama_cloud`        | `ollama-cloud/glm-5.1`             |
 | `provider:fireworks-ai`        | `fireworks-ai/kimi-k2p5-turbo`     |
 
 When both labels are present, the provider label is applied to the model name when that model exists
 for the provider. For example, `provider:opencode-go` plus `model:minimax-m2.7` resolves to
-`opencode-go/minimax-m2.7`.
+`opencode-go/minimax-m2.7`, and `provider:ollama-cloud` plus `model:kimi-k2.5` resolves to
+`ollama-cloud/kimi-k2.5`.
 
 ## Repo Resolution
 

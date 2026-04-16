@@ -75,6 +75,12 @@ describe("model utilities", () => {
       expect(isValidModel("opencode-go/mimo-v2-omni")).toBe(true);
     });
 
+    it("returns true for Ollama Cloud models", () => {
+      expect(isValidModel("ollama-cloud/glm-5.1")).toBe(true);
+      expect(isValidModel("ollama-cloud/kimi-k2.5")).toBe(true);
+      expect(isValidModel("ollama-cloud/minimax-m2.7")).toBe(true);
+    });
+
     it("returns true for MiniMax Coding Plan-backed models", () => {
       expect(isValidModel("minimax-coding-plan/MiniMax-M2.7")).toBe(true);
     });
@@ -207,6 +213,18 @@ describe("model utilities", () => {
       expect(extractProviderAndModel("opencode-go/mimo-v2-omni")).toEqual({
         provider: "opencode-go",
         model: "mimo-v2-omni",
+      });
+    });
+
+    it("extracts Ollama Cloud provider from Ollama-backed models", () => {
+      expect(extractProviderAndModel("ollama-cloud/glm-5.1")).toEqual({
+        provider: "ollama-cloud",
+        model: "glm-5.1",
+      });
+
+      expect(extractProviderAndModel("ollama-cloud/minimax-m2.7")).toEqual({
+        provider: "ollama-cloud",
+        model: "minimax-m2.7",
       });
     });
 
@@ -365,6 +383,12 @@ describe("model utilities", () => {
       expect(supportsReasoning("opencode-go/mimo-v2-omni")).toBe(true);
     });
 
+    it("returns true for Ollama Cloud models with reasoning config", () => {
+      expect(supportsReasoning("ollama-cloud/glm-5.1")).toBe(true);
+      expect(supportsReasoning("ollama-cloud/kimi-k2.5")).toBe(true);
+      expect(supportsReasoning("ollama-cloud/minimax-m2.7")).toBe(true);
+    });
+
     it("returns true for MiniMax Coding Plan models with reasoning config", () => {
       expect(supportsReasoning("minimax-coding-plan/MiniMax-M2.7")).toBe(true);
     });
@@ -420,6 +444,12 @@ describe("model utilities", () => {
       expect(getDefaultReasoningEffort("opencode-go/minimax-m2.7")).toBe("high");
       expect(getDefaultReasoningEffort("opencode-go/mimo-v2-pro")).toBe("high");
       expect(getDefaultReasoningEffort("opencode-go/mimo-v2-omni")).toBe("high");
+    });
+
+    it("returns high for Ollama Cloud models", () => {
+      expect(getDefaultReasoningEffort("ollama-cloud/glm-5.1")).toBe("high");
+      expect(getDefaultReasoningEffort("ollama-cloud/kimi-k2.5")).toBe("high");
+      expect(getDefaultReasoningEffort("ollama-cloud/minimax-m2.7")).toBe("high");
     });
 
     it("returns high for MiniMax Coding Plan models", () => {
@@ -502,6 +532,14 @@ describe("model utilities", () => {
       });
     });
 
+    it("returns config for Ollama Cloud models", () => {
+      const config = getReasoningConfig("ollama-cloud/glm-5.1");
+      expect(config).toEqual({
+        efforts: ["low", "medium", "high", "xhigh"],
+        default: "high",
+      });
+    });
+
     it("returns undefined for invalid models", () => {
       expect(getReasoningConfig("invalid")).toBeUndefined();
     });
@@ -577,6 +615,14 @@ describe("model utilities", () => {
       expect(isValidReasoningEffort("opencode-go/mimo-v2-omni", "high")).toBe(true);
       expect(isValidReasoningEffort("opencode-go/mimo-v2-omni", "xhigh")).toBe(true);
       expect(isValidReasoningEffort("opencode-go/mimo-v2-omni", "max")).toBe(false);
+    });
+
+    it("returns true for Ollama Cloud effort levels", () => {
+      expect(isValidReasoningEffort("ollama-cloud/minimax-m2.7", "low")).toBe(true);
+      expect(isValidReasoningEffort("ollama-cloud/minimax-m2.7", "medium")).toBe(true);
+      expect(isValidReasoningEffort("ollama-cloud/minimax-m2.7", "high")).toBe(true);
+      expect(isValidReasoningEffort("ollama-cloud/minimax-m2.7", "xhigh")).toBe(true);
+      expect(isValidReasoningEffort("ollama-cloud/minimax-m2.7", "max")).toBe(false);
     });
 
     it("returns false for invalid models", () => {

@@ -19,6 +19,7 @@ def _clear_managed_auth_env(monkeypatch):
         "FIREWORKS_API_KEY",
         "MINIMAX_API_KEY",
         "OPENCODE_GO_API_KEY",
+        "OLLAMA_CLOUD_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -291,3 +292,45 @@ async def test_uses_opencode_go_provider_name_in_config(tmp_path):
     env = exec_mock.await_args.kwargs["env"]
     config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
     assert config["model"] == "opencode-go/glm-5.1"
+
+
+@pytest.mark.asyncio
+async def test_appends_cloud_suffix_for_ollama_cloud_models(tmp_path):
+    supervisor = _make_supervisor({"provider": "ollama-cloud", "model": "glm-5.1"})
+    supervisor.workspace_path = tmp_path
+    supervisor.repo_path = tmp_path / "missing-repo"
+    supervisor._setup_opencode_auth = MagicMock()
+    supervisor._install_tools = MagicMock()
+    supervisor._wait_for_health = AsyncMock()
+
+    with patch(
+        "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+        new=AsyncMock(return_value=_fake_process()),
+    ) as exec_mock:
+        await supervisor.start_opencode()
+
+    assert exec_mock.await_args is not None
+    env = exec_mock.await_args.kwargs["env"]
+    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    assert config["model"] == "ollama-cloud/glm-5.1:cloud"
+
+
+@pytest.mark.asyncio
+async def test_keeps_cloud_suffix_for_prefixed_ollama_cloud_models(tmp_path):
+    supervisor = _make_supervisor({"provider": "ollama-cloud", "model": "kimi-k2.5:cloud"})
+    supervisor.workspace_path = tmp_path
+    supervisor.repo_path = tmp_path / "missing-repo"
+    supervisor._setup_opencode_auth = MagicMock()
+    supervisor._install_tools = MagicMock()
+    supervisor._wait_for_health = AsyncMock()
+
+    with patch(
+        "sandbox_runtime.entrypoint.asyncio.create_subprocess_exec",
+        new=AsyncMock(return_value=_fake_process()),
+    ) as exec_mock:
+        await supervisor.start_opencode()
+
+    assert exec_mock.await_args is not None
+    env = exec_mock.await_args.kwargs["env"]
+    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    assert config["model"] == "ollama-cloud/kimi-k2.5:cloud"

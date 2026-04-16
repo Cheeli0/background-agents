@@ -51,6 +51,7 @@ class SandboxSupervisor:
     DEFAULT_START_TIMEOUT_SECONDS = 120
     CLONE_DEPTH_COMMITS = 100
     FIREWORKS_MODEL_ROUTER_PREFIX = "accounts/fireworks/routers/"
+    OLLAMA_CLOUD_MODEL_SUFFIX = ":cloud"
     SIDECAR_TIMEOUT_SECONDS = 5
 
     @staticmethod
@@ -432,6 +433,17 @@ class SandboxSupervisor:
             "key": api_key,
         }
 
+    def _build_ollama_cloud_auth_entry(self) -> dict[str, object] | None:
+        """Build the managed Ollama Cloud auth entry for direct API-key sessions."""
+        api_key = os.environ.get("OLLAMA_CLOUD_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        return {
+            "type": "api",
+            "key": api_key,
+        }
+
     def _write_opencode_auth(self, auth_data: dict[str, object]) -> None:
         """Write OpenCode auth.json atomically with secure permissions."""
         auth_dir = Path.home() / ".local" / "share" / "opencode"
@@ -479,6 +491,7 @@ class SandboxSupervisor:
             "fireworks-ai",
             "minimax-coding-plan",
             "opencode-go",
+            "ollama-cloud",
         ):
             try:
                 parsed = json.loads(auth_json)
@@ -515,6 +528,10 @@ class SandboxSupervisor:
             opencode_go_entry = self._build_opencode_go_auth_entry()
             if opencode_go_entry:
                 auth_data["opencode-go"] = opencode_go_entry
+
+            ollama_cloud_entry = self._build_ollama_cloud_auth_entry()
+            if ollama_cloud_entry:
+                auth_data["ollama-cloud"] = ollama_cloud_entry
 
             if selected_provider == "github-copilot":
                 copilot_entry = auth_data.get("github-copilot") or auth_data.get("copilot")
@@ -583,6 +600,21 @@ class SandboxSupervisor:
                 key = opencode_go_entry.get("key")
                 if not isinstance(key, str) or not key.strip():
                     raise RuntimeError("OpenCode Go credentials must include a non-empty key.")
+
+            if selected_provider == "ollama-cloud":
+                ollama_cloud_entry = auth_data.get("ollama-cloud")
+                if not isinstance(ollama_cloud_entry, dict):
+                    raise RuntimeError(
+                        "Ollama Cloud credentials are not configured. "
+                        "Add OLLAMA_CLOUD_API_KEY in repository Settings."
+                    )
+
+                if ollama_cloud_entry.get("type") != "api":
+                    raise RuntimeError("Ollama Cloud credentials must use type 'api'.")
+
+                key = ollama_cloud_entry.get("key")
+                if not isinstance(key, str) or not key.strip():
+                    raise RuntimeError("Ollama Cloud credentials must include a non-empty key.")
 
             if not auth_data:
                 return
@@ -742,6 +774,12 @@ class SandboxSupervisor:
             and not model.startswith(self.FIREWORKS_MODEL_ROUTER_PREFIX)
         ):
             model = f"{self.FIREWORKS_MODEL_ROUTER_PREFIX}{model}"
+        if (
+            provider == "ollama-cloud"
+            and isinstance(model, str)
+            and not model.endswith(self.OLLAMA_CLOUD_MODEL_SUFFIX)
+        ):
+            model = f"{model}{self.OLLAMA_CLOUD_MODEL_SUFFIX}"
         opencode_provider = "copilot" if provider == "github-copilot" else provider
         opencode_config = {
             "model": f"{opencode_provider}/{model}",
