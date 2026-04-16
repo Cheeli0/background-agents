@@ -52,6 +52,12 @@ const OPENCODE_GO_MODELS = [
   "opencode-go/mimo-v2-omni",
 ] as const;
 
+const OLLAMA_CLOUD_MODELS = [
+  "ollama-cloud/glm-5.1",
+  "ollama-cloud/kimi-k2.5",
+  "ollama-cloud/minimax-m2.7",
+] as const;
+
 /**
  * Valid model names supported by the system.
  * All models use "provider/model" format.
@@ -75,6 +81,7 @@ export const VALID_MODELS = [
   ...MINIMAX_CODING_PLAN_MODELS,
   ...FIREWORKS_AI_MODELS,
   ...OPENCODE_GO_MODELS,
+  ...OLLAMA_CLOUD_MODELS,
 ] as const;
 
 export type ValidModel = (typeof VALID_MODELS)[number];
@@ -182,6 +189,12 @@ export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningCo
     default: "high",
   },
   "opencode-go/mimo-v2-omni": {
+    efforts: ["low", "medium", "high", "xhigh"],
+    default: "high",
+  },
+  "ollama-cloud/glm-5.1": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+  "ollama-cloud/kimi-k2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+  "ollama-cloud/minimax-m2.7": {
     efforts: ["low", "medium", "high", "xhigh"],
     default: "high",
   },
@@ -483,6 +496,26 @@ export const MODEL_OPTIONS: ModelCategory[] = [
       },
     ],
   },
+  {
+    category: "Ollama Cloud",
+    models: [
+      {
+        id: "ollama-cloud/glm-5.1",
+        name: "GLM 5.1",
+        description: "Zhipu AI model via Ollama Cloud",
+      },
+      {
+        id: "ollama-cloud/kimi-k2.5",
+        name: "Kimi K2.5",
+        description: "Moonshot AI model via Ollama Cloud",
+      },
+      {
+        id: "ollama-cloud/minimax-m2.7",
+        name: "MiniMax M2.7",
+        description: "MiniMax model via Ollama Cloud",
+      },
+    ],
+  },
 ];
 
 /**
@@ -517,6 +550,7 @@ export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
   "minimax-coding-plan/MiniMax-M2.7",
   "fireworks-ai/kimi-k2p5-turbo",
   ...OPENCODE_GO_MODELS,
+  ...OLLAMA_CLOUD_MODELS,
 ];
 
 // === Normalization ===

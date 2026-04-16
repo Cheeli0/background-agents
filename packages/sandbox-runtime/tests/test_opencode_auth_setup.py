@@ -19,6 +19,7 @@ def _clear_managed_auth_env(monkeypatch):
         "FIREWORKS_API_KEY",
         "MINIMAX_API_KEY",
         "OPENCODE_GO_API_KEY",
+        "OLLAMA_CLOUD_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -459,3 +460,47 @@ class TestOpenCodeAuthSetup:
 
         data = json.loads(_auth_file(tmp_path).read_text())
         assert data["opencode-go"] == {"type": "api", "key": "opencode-go-api-key"}
+
+    def test_fails_fast_for_ollama_cloud_without_credentials(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="Ollama Cloud credentials are not configured"),
+        ):
+            sup._setup_opencode_auth("ollama-cloud")
+
+    def test_rejects_opencode_auth_json_for_ollama_cloud(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "OPENCODE_AUTH_JSON": json.dumps(
+                        {
+                            "ollama-cloud": {
+                                "type": "api",
+                                "key": "ollama-cloud-api-key",
+                            }
+                        }
+                    )
+                },
+                clear=False,
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="Add OLLAMA_CLOUD_API_KEY"),
+        ):
+            sup._setup_opencode_auth("ollama-cloud")
+
+    def test_writes_ollama_cloud_auth_json_when_api_key_present(self, tmp_path):
+        sup = _make_supervisor()
+
+        with (
+            patch.dict("os.environ", {"OLLAMA_CLOUD_API_KEY": "ollama-cloud-api-key"}, clear=False),
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ):
+            sup._setup_opencode_auth("ollama-cloud")
+
+        data = json.loads(_auth_file(tmp_path).read_text())
+        assert data["ollama-cloud"] == {"type": "api", "key": "ollama-cloud-api-key"}

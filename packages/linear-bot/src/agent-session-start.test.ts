@@ -503,4 +503,27 @@ describe("handleAgentSessionEvent started-state behavior", () => {
 
     expect(requestBody.model).toBe("opencode-go/minimax-m2.7");
   });
+
+  it("uses Ollama Cloud provider and model labels for session model selection", async () => {
+    const { env, controlPlaneFetch } = createEnv({
+      projectMapping: { "project-1": { owner: "acme", name: "platform" } },
+    });
+    const linearFetch = createLinearFetch({
+      currentStateType: "backlog",
+      labels: [
+        { id: "label-1", name: "provider:ollama-cloud" },
+        { id: "label-2", name: "model:kimi-k2.5" },
+      ],
+    });
+    globalThis.fetch = linearFetch as typeof globalThis.fetch;
+
+    await handleAgentSessionEvent(createCreatedWebhook(), env, "trace-10");
+
+    const createSessionCall = controlPlaneFetch.mock.calls.find(
+      ([url]) => url === "https://internal/sessions"
+    );
+    const requestBody = JSON.parse(String(createSessionCall?.[1]?.body)) as { model: string };
+
+    expect(requestBody.model).toBe("ollama-cloud/kimi-k2.5");
+  });
 });

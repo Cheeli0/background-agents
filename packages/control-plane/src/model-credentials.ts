@@ -9,6 +9,7 @@ export const ZAI_API_KEY_SECRET = "ZAI_API_KEY";
 export const FIREWORKS_API_KEY_SECRET = "FIREWORKS_API_KEY";
 export const MINIMAX_API_KEY_SECRET = "MINIMAX_API_KEY";
 export const OPENCODE_GO_API_KEY_SECRET = "OPENCODE_GO_API_KEY";
+export const OLLAMA_CLOUD_API_KEY_SECRET = "OLLAMA_CLOUD_API_KEY";
 const COPILOT_ACCESS_TOKEN_EXPIRY_BUFFER_MS = 60 * 1000;
 
 interface RepoSecretContext {
@@ -35,6 +36,10 @@ export function isMiniMaxCodingPlanModel(model: string): boolean {
 
 export function isOpenCodeGoModel(model: string): boolean {
   return extractProviderAndModel(model).provider === "opencode-go";
+}
+
+export function isOllamaCloudModel(model: string): boolean {
+  return extractProviderAndModel(model).provider === "ollama-cloud";
 }
 
 export function isOpenCodeMiniMaxModel(model: string): boolean {
@@ -143,13 +148,15 @@ export async function validateModelCredentialsForRepo(
   const requiresMiniMaxCredentials =
     isMiniMaxCodingPlanModel(model) || isOpenCodeMiniMaxModel(model);
   const requiresOpenCodeGoCredentials = isOpenCodeGoModel(model);
+  const requiresOllamaCloudCredentials = isOllamaCloudModel(model);
 
   if (
     !requiresCopilotCredentials &&
     !requiresZaiCredentials &&
     !requiresFireworksCredentials &&
     !requiresMiniMaxCredentials &&
-    !requiresOpenCodeGoCredentials
+    !requiresOpenCodeGoCredentials &&
+    !requiresOllamaCloudCredentials
   ) {
     return null;
   }
@@ -166,6 +173,9 @@ export async function validateModelCredentialsForRepo(
     }
     if (requiresOpenCodeGoCredentials) {
       return "OpenCode Go models require secrets storage to be configured.";
+    }
+    if (requiresOllamaCloudCredentials) {
+      return "Ollama Cloud models require secrets storage to be configured.";
     }
     return "Fireworks AI models require secrets storage to be configured.";
   }
@@ -185,6 +195,7 @@ export async function validateModelCredentialsForRepo(
   const fireworksApiKey = mergedSecrets[FIREWORKS_API_KEY_SECRET];
   const minimaxApiKey = mergedSecrets[MINIMAX_API_KEY_SECRET];
   const opencodeGoApiKey = mergedSecrets[OPENCODE_GO_API_KEY_SECRET];
+  const ollamaCloudApiKey = mergedSecrets[OLLAMA_CLOUD_API_KEY_SECRET];
 
   if (requiresZaiCredentials && !zaiApiKey?.trim()) {
     return (
@@ -211,6 +222,13 @@ export async function validateModelCredentialsForRepo(
     return (
       "OpenCode Go credentials are not configured. " +
       `Add ${OPENCODE_GO_API_KEY_SECRET} as a repo or global secret.`
+    );
+  }
+
+  if (requiresOllamaCloudCredentials && !ollamaCloudApiKey?.trim()) {
+    return (
+      "Ollama Cloud credentials are not configured. " +
+      `Add ${OLLAMA_CLOUD_API_KEY_SECRET} as a repo or global secret.`
     );
   }
 

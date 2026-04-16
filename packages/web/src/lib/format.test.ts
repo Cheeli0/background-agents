@@ -65,6 +65,10 @@ describe("formatProviderName", () => {
   it("formats OpenCode Go provider names", () => {
     expect(formatProviderName("opencode-go/glm-5.1")).toBe("OpenCode Go");
   });
+
+  it("formats Ollama Cloud provider names", () => {
+    expect(formatProviderName("ollama-cloud/glm-5.1")).toBe("Ollama Cloud");
+  });
 });
 
 describe("truncateBranchStart", () => {

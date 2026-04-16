@@ -64,6 +64,7 @@ const PROVIDER_LABEL_DEFAULT_MODEL: Record<string, ValidModel> = {
   minimax: "minimax-coding-plan/MiniMax-M2.7",
   opencode: "opencode/kimi-k2.5",
   "opencode-go": "opencode-go/glm-5.1",
+  "ollama-cloud": "ollama-cloud/glm-5.1",
   "fireworks-ai": "fireworks-ai/kimi-k2p5-turbo",
 };
 
@@ -71,6 +72,8 @@ const PROVIDER_LABEL_ALIASES: Record<string, string> = {
   "z.ai": "zai-coding-plan",
   "opencode go": "opencode-go",
   opencode_go: "opencode-go",
+  "ollama cloud": "ollama-cloud",
+  ollama_cloud: "ollama-cloud",
 };
 
 function extractLabelValue(labels: Array<{ name: string }>, prefix: string): string | null {

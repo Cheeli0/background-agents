@@ -98,8 +98,20 @@ describe("extractModelFromLabels", () => {
     ).toBe("opencode-go/glm-5.1");
   });
 
+  it("uses GLM 5.1 when only provider:ollama-cloud is present", () => {
+    expect(
+      extractModelFromLabels([{ name: "provider:ollama-cloud" }], "anthropic/claude-opus-4-6")
+    ).toBe("ollama-cloud/glm-5.1");
+  });
+
   it("accepts provider:opencode go as an OpenCode Go alias", () => {
     expect(extractModelFromLabels([{ name: "provider:opencode go" }])).toBe("opencode-go/glm-5.1");
+  });
+
+  it("accepts provider:ollama cloud as an Ollama Cloud alias", () => {
+    expect(extractModelFromLabels([{ name: "provider:ollama cloud" }])).toBe(
+      "ollama-cloud/glm-5.1"
+    );
   });
 
   it("combines provider and model labels when both are present", () => {
@@ -118,6 +130,18 @@ describe("extractModelFromLabels", () => {
     expect(
       extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:minimax-m2.7" }])
     ).toBe("opencode-go/minimax-m2.7");
+  });
+
+  it("combines Ollama Cloud provider labels with shared model names", () => {
+    expect(
+      extractModelFromLabels([{ name: "provider:ollama-cloud" }, { name: "model:glm-5.1" }])
+    ).toBe("ollama-cloud/glm-5.1");
+    expect(
+      extractModelFromLabels([{ name: "provider:ollama-cloud" }, { name: "model:kimi-k2.5" }])
+    ).toBe("ollama-cloud/kimi-k2.5");
+    expect(
+      extractModelFromLabels([{ name: "provider:ollama-cloud" }, { name: "model:minimax-m2.7" }])
+    ).toBe("ollama-cloud/minimax-m2.7");
   });
 
   it("returns null for unknown model label", () => {

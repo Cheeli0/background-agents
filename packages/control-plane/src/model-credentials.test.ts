@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   FIREWORKS_API_KEY_SECRET,
   MINIMAX_API_KEY_SECRET,
+  OLLAMA_CLOUD_API_KEY_SECRET,
   OPENCODE_GO_API_KEY_SECRET,
   OPENCODE_AUTH_JSON_SECRET,
   ZAI_API_KEY_SECRET,
@@ -9,6 +10,7 @@ import {
   isFireworksAiModel,
   isGitHubCopilotModel,
   isMiniMaxCodingPlanModel,
+  isOllamaCloudModel,
   isOpenCodeGoModel,
   isOpenCodeMiniMaxModel,
   isZaiCodingPlanModel,
@@ -86,6 +88,15 @@ describe("model-credentials", () => {
       expect(isOpenCodeGoModel("opencode-go/qwen3.6-plus")).toBe(true);
       expect(isOpenCodeGoModel("opencode/kimi-k2.5")).toBe(false);
       expect(isOpenCodeGoModel("zai-coding-plan/glm-5.1")).toBe(false);
+    });
+  });
+
+  describe("isOllamaCloudModel", () => {
+    it("detects Ollama Cloud-backed models", () => {
+      expect(isOllamaCloudModel("ollama-cloud/glm-5.1")).toBe(true);
+      expect(isOllamaCloudModel("ollama-cloud/kimi-k2.5")).toBe(true);
+      expect(isOllamaCloudModel("opencode-go/glm-5.1")).toBe(false);
+      expect(isOllamaCloudModel("minimax-coding-plan/MiniMax-M2.7")).toBe(false);
     });
   });
 
@@ -426,6 +437,46 @@ describe("model-credentials", () => {
       });
 
       const result = await validateModelCredentialsForRepo(env, "opencode-go/mimo-v2-pro", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("returns an error when Ollama Cloud credentials are missing", async () => {
+      const result = await validateModelCredentialsForRepo(env, "ollama-cloud/glm-5.1", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toContain(OLLAMA_CLOUD_API_KEY_SECRET);
+      expect(result).toContain("Ollama Cloud credentials");
+    });
+
+    it("accepts a direct OLLAMA_CLOUD_API_KEY secret", async () => {
+      mockGetRepoSecrets.mockResolvedValue({
+        [OLLAMA_CLOUD_API_KEY_SECRET]: "ollama-cloud-key",
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "ollama-cloud/kimi-k2.5", {
+        repoId: 1,
+        repoOwner: "acme",
+        repoName: "widgets",
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("accepts OLLAMA_CLOUD_API_KEY even when OPENCODE_AUTH_JSON is invalid", async () => {
+      mockGetGlobalSecrets.mockResolvedValue({
+        [OPENCODE_AUTH_JSON_SECRET]: "{invalid",
+        [OLLAMA_CLOUD_API_KEY_SECRET]: "ollama-cloud-key",
+      });
+
+      const result = await validateModelCredentialsForRepo(env, "ollama-cloud/minimax-m2.7", {
         repoId: 1,
         repoOwner: "acme",
         repoName: "widgets",
