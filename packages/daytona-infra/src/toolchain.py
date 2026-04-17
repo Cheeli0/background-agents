@@ -47,6 +47,11 @@ def build_base_image(repo_root: Path) -> Image:
         .run_commands(
             f"npm install -g opencode-ai@{OPENCODE_VERSION}",
             "npm install -g @opencode-ai/plugin@latest zod",
+            "mkdir -p /app/opencode-deps",
+            'echo \'{"name":"opencode-tools","type":"module",'
+            '"dependencies":{"@opencode-ai/plugin":"*","zod":"*"}}\''
+            " > /app/opencode-deps/package.json",
+            "cd /app/opencode-deps && npm install --ignore-scripts --no-audit --no-fund",
             f"curl -fsSL -o /tmp/code-server.deb "
             f"https://github.com/coder/code-server/releases/download/v{CODE_SERVER_VERSION}/"
             f"code-server_{CODE_SERVER_VERSION}_amd64.deb",

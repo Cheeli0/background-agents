@@ -149,7 +149,10 @@ Create an R2 API Token:
 
 > Only required when `sandbox_provider = "daytona"`.
 
-1. Create a [Daytona](https://app.daytona.io) account and generate an **API key**
+1. Create a [Daytona](https://app.daytona.io) account and generate an **API key** with the following
+   permissions:
+   - **Sandboxes**: Read, Write (runtime sandbox management and preview URLs)
+   - **Snapshots**: Read, Write, Delete (automated snapshot builds via Terraform)
 2. Note the **API URL** (e.g., `https://app.daytona.io/api`) and optional **target**
 3. Seed the named base snapshot before pointing traffic at Daytona:
    ```bash
@@ -157,6 +160,7 @@ Create an R2 API Token:
    pip install daytona   # or: uv pip install daytona
    python -m src.bootstrap --force
    ```
+   After initial setup, Terraform automatically rebuilds the snapshot when source files change.
 4. Set `sandbox_provider = "daytona"` in `terraform.tfvars`
 5. Set `daytona_api_url`, `daytona_api_key`, and `daytona_base_snapshot` in `terraform.tfvars`
 
