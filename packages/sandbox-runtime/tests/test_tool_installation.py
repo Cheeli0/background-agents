@@ -154,13 +154,16 @@ class TestInstallTools:
         pkg_content = {
             "name": "opencode-tools",
             "type": "module",
-            "dependencies": {"@opencode-ai/plugin": "*"},
+            "dependencies": {"@opencode-ai/plugin": "*", "zod": "*"},
         }
         (deps_cache / "package.json").write_text(json.dumps(pkg_content))
         (deps_cache / "package-lock.json").write_text('{"lockfileVersion": 3}')
         nm = deps_cache / "node_modules" / "@opencode-ai" / "plugin"
         nm.mkdir(parents=True)
         (nm / "index.js").write_text("module.exports = {}")
+        zod = deps_cache / "node_modules" / "zod"
+        zod.mkdir(parents=True)
+        (zod / "index.js").write_text("module.exports = {}")
 
         with _patch_paths(legacy=legacy_tool, tools=tmp_path / "no-tools", deps_cache=deps_cache):
             sup._install_tools(workdir)
@@ -173,6 +176,38 @@ class TestInstallTools:
 
         pkg = json.loads((opencode_dir / "package.json").read_text())
         assert "@opencode-ai/plugin" in pkg["dependencies"]
+        assert "zod" in pkg["dependencies"]
+
+    def test_falls_back_to_global_modules_without_prebuilt_cache(self, tmp_path):
+        """Should create local package scope and symlink global modules when cache is absent."""
+        sup = _make_supervisor()
+        workdir = tmp_path / "workspace"
+        workdir.mkdir()
+
+        legacy_tool = tmp_path / "app" / "sandbox" / "inspect-plugin.js"
+        legacy_tool.parent.mkdir(parents=True)
+        legacy_tool.write_text("// tool")
+
+        global_modules = tmp_path / "usr" / "lib" / "node_modules"
+        global_modules.mkdir(parents=True)
+
+        with patch("sandbox_runtime.entrypoint.Path") as MockPath:
+            MockPath.side_effect = lambda p: Path(
+                str(p)
+                .replace("/app/sandbox_runtime/plugins/inspect-plugin.js", str(legacy_tool))
+                .replace("/app/sandbox_runtime/tools", str(tmp_path / "no-tools"))
+                .replace("/app/sandbox_runtime/skills", str(tmp_path / "no-skills"))
+                .replace("/app/sandbox_runtime/bin", str(tmp_path / "no-bin"))
+                .replace("/app/opencode-deps", str(tmp_path / "no-cache"))
+                .replace("/usr/local/bin", str(tmp_path / "usr-local-bin"))
+                .replace("/usr/lib/node_modules", str(global_modules))
+            )
+            sup._install_tools(workdir)
+
+        opencode_dir = workdir / ".opencode"
+        package_json = json.loads((opencode_dir / "package.json").read_text())
+        assert package_json["type"] == "module"
+        assert (opencode_dir / "node_modules").is_symlink()
 
     def test_does_not_overwrite_existing_files(self, tmp_path):
         """Pre-existing package.json or node_modules in .opencode/ should not be overwritten."""

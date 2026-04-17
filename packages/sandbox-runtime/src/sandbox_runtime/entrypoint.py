@@ -331,6 +331,20 @@ class SandboxSupervisor:
         if cached_modules.is_dir() and not local_modules.exists():
             shutil.copytree(cached_modules, local_modules, symlinks=True)
 
+        # Fallback for providers that only have the plugin installed globally.
+        # ESM bare imports such as `import { z } from "zod"` require a local
+        # package scope; NODE_PATH alone is not enough for tool discovery.
+        package_json = opencode_dir / "package.json"
+        if not package_json.exists():
+            package_json.write_text('{"name": "opencode-tools", "type": "module"}')
+
+        global_modules = Path("/usr/lib/node_modules")
+        if not local_modules.exists() and global_modules.exists():
+            try:
+                local_modules.symlink_to(global_modules)
+            except Exception as e:
+                self.log.warn("opencode.symlink_error", exc=e)
+
     def _install_bin_scripts(self) -> None:
         """Install standalone CLI scripts into /usr/local/bin.
 

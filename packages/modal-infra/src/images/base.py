@@ -121,7 +121,7 @@ base_image = (
     .run_commands(
         "mkdir -p /app/opencode-deps",
         'echo \'{"name":"opencode-tools","type":"module",'
-        '"dependencies":{"@opencode-ai/plugin":"*"}}\''
+        '"dependencies":{"@opencode-ai/plugin":"*","zod":"*"}}\''
         " > /app/opencode-deps/package.json",
         "cd /app/opencode-deps && npm install --ignore-scripts --no-audit --no-fund",
     )
