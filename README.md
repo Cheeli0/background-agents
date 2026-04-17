@@ -14,8 +14,8 @@ Open-Inspect provides a hosted background coding agent that can:
 - Create PRs with proper commit attribution to the prompting user
 - Run on a schedule — cron jobs, Sentry alerts, and webhook-triggered automations
 - Spawn parallel sub-tasks that work in separate sandboxes simultaneously
-- Use your choice of AI model — Anthropic Claude, OpenAI Codex (via ChatGPT subscription),
-  GitHub Copilot-backed GPT/Claude models, or OpenCode Zen
+- Use your choice of AI model — Anthropic Claude, OpenAI Codex (via ChatGPT subscription), GitHub
+  Copilot-backed GPT/Claude models, or OpenCode Zen
 
 ## Security Model (Single-Tenant Only)
 
