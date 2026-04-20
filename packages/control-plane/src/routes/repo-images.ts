@@ -200,14 +200,38 @@ async function handleTriggerBuild(
   const store = new RepoImageStore(env.DB);
   const now = Date.now();
   const buildId = `img-${owner}-${name}-${now}`;
+  let resolvedRepo: Awaited<ReturnType<typeof resolveInstalledRepo>> = null;
+  let defaultBranch = "main";
 
   try {
+    // Resolve installed repo once so we can use the real default branch.
+    try {
+      const provider = createRouteSourceControlProvider(env);
+      resolvedRepo = await resolveInstalledRepo(provider, owner, name);
+      if (resolvedRepo?.defaultBranch) {
+        defaultBranch = resolvedRepo.defaultBranch;
+      } else {
+        logger.warn("repo_image.default_branch_fallback", {
+          repo_owner: owner,
+          repo_name: name,
+          fallback_branch: "main",
+        });
+      }
+    } catch (e) {
+      logger.warn("repo_image.default_branch_lookup_failed", {
+        error: e instanceof Error ? e.message : String(e),
+        repo_owner: owner,
+        repo_name: name,
+        fallback_branch: "main",
+      });
+    }
+
     // Register the build in D1
     await store.registerBuild({
       id: buildId,
       repoOwner: owner,
       repoName: name,
-      baseBranch: "main",
+      baseBranch: defaultBranch,
     });
 
     // Construct callback URL
@@ -230,11 +254,9 @@ async function handleTriggerBuild(
 
       let repoSecrets: Record<string, string> = {};
       try {
-        const provider = createRouteSourceControlProvider(env);
-        const resolved = await resolveInstalledRepo(provider, owner, name);
-        if (resolved) {
+        if (resolvedRepo) {
           const repoStore = new RepoSecretsStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
-          repoSecrets = await repoStore.getDecryptedSecrets(resolved.repoId);
+          repoSecrets = await repoStore.getDecryptedSecrets(resolvedRepo.repoId);
         }
       } catch (e) {
         logger.warn("repo_image.repo_secrets_failed", {
@@ -266,7 +288,7 @@ async function handleTriggerBuild(
       {
         repoOwner: owner,
         repoName: name,
-        defaultBranch: "main",
+        defaultBranch,
         buildId,
         callbackUrl,
         userEnvVars,
@@ -278,6 +300,7 @@ async function handleTriggerBuild(
       build_id: buildId,
       repo_owner: owner,
       repo_name: name,
+      default_branch: defaultBranch,
       request_id: ctx.request_id,
       trace_id: ctx.trace_id,
     });
@@ -512,7 +535,35 @@ async function handleGetEnabledRepos(
 
   try {
     const repos = await metadataStore.getImageBuildEnabledRepos();
-    return json({ repos });
+    const defaultBranchByRepo = new Map<string, string>();
+
+    // Best-effort: enrich with source-control default branches so scheduler doesn't assume "main".
+    try {
+      const provider = createRouteSourceControlProvider(env);
+      const installedRepos = await provider.listRepositories();
+      for (const repo of installedRepos) {
+        defaultBranchByRepo.set(
+          `${repo.owner.toLowerCase()}/${repo.name.toLowerCase()}`,
+          repo.defaultBranch
+        );
+      }
+    } catch (e) {
+      logger.warn("repo_image.enabled_repos_branch_lookup_failed", {
+        error: e instanceof Error ? e.message : String(e),
+        request_id: ctx.request_id,
+        trace_id: ctx.trace_id,
+      });
+    }
+
+    return json({
+      repos: repos.map((repo) => {
+        const key = `${repo.repoOwner.toLowerCase()}/${repo.repoName.toLowerCase()}`;
+        return {
+          ...repo,
+          defaultBranch: defaultBranchByRepo.get(key) ?? "main",
+        };
+      }),
+    });
   } catch (e) {
     logger.error("repo_image.enabled_repos_error", {
       error: e instanceof Error ? e.message : String(e),

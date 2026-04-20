@@ -152,11 +152,15 @@ async def api_create_sandbox(
     try:
         # Import types and manager directly
         from .sandbox import SessionConfig
-        from .sandbox.manager import SandboxConfig, SandboxManager
+        from .sandbox.manager import DEFAULT_SANDBOX_TIMEOUT_SECONDS, SandboxConfig, SandboxManager
 
         manager = SandboxManager()
 
         clone_token = _resolve_clone_token()
+        timeout_raw = request.get("timeout_seconds")
+        timeout_seconds = (
+            int(timeout_raw) if timeout_raw is not None else DEFAULT_SANDBOX_TIMEOUT_SECONDS
+        )
 
         session_config = SessionConfig(
             session_id=request.get("session_id"),
@@ -178,6 +182,7 @@ async def api_create_sandbox(
             control_plane_url=control_plane_url,
             sandbox_auth_token=request.get("sandbox_auth_token"),
             clone_token=clone_token,
+            timeout_seconds=timeout_seconds,
             user_env_vars=request.get("user_env_vars") or None,
             repo_image_id=request.get("repo_image_id") or None,
             repo_image_sha=request.get("repo_image_sha") or None,
@@ -523,7 +528,10 @@ async def api_restore_sandbox(
         sandbox_id = request.get("sandbox_id")
         sandbox_auth_token = request.get("sandbox_auth_token", "")
         user_env_vars = request.get("user_env_vars") or None
-        timeout_seconds = int(request.get("timeout_seconds", DEFAULT_SANDBOX_TIMEOUT_SECONDS))
+        timeout_raw = request.get("timeout_seconds")
+        timeout_seconds = (
+            int(timeout_raw) if timeout_raw is not None else DEFAULT_SANDBOX_TIMEOUT_SECONDS
+        )
 
         manager = SandboxManager()
         clone_token = _resolve_clone_token()
