@@ -517,6 +517,7 @@ async function handleNewSession(
       model,
       reasoningEffort,
       creationSource: "linear",
+      spawnSource: "linear-bot",
     }),
   });
 

@@ -2,7 +2,13 @@
  * API router for Open-Inspect Control Plane.
  */
 
-import type { ArtifactResponse, Env, CreateSessionRequest, CreateSessionResponse } from "./types";
+import type {
+  ArtifactResponse,
+  Env,
+  CreateSessionRequest,
+  CreateSessionResponse,
+  SpawnSource,
+} from "./types";
 import { generateId, encryptToken } from "./auth/crypto";
 import { verifyInternalToken } from "./auth/internal";
 import {
@@ -57,6 +63,7 @@ import { reposRoutes } from "./routes/repos";
 import { repoImageRoutes } from "./routes/repo-images";
 import { secretsRoutes } from "./routes/secrets";
 import { automationRoutes } from "./routes/automations";
+import { mcpServerRoutes } from "./routes/mcp-servers";
 import { analyticsRoutes } from "./routes/analytics";
 import { webhookRoutes } from "./webhooks";
 
@@ -545,6 +552,9 @@ const routes: Route[] = [
   // Automations
   ...automationRoutes,
 
+  // MCP servers
+  ...mcpServerRoutes,
+
   // Analytics
   ...analyticsRoutes,
 
@@ -720,7 +730,7 @@ async function handleCreateSession(
     scmLogin?: string;
     scmName?: string;
     scmEmail?: string;
-    creationSource?: "web" | "slack" | "linear" | "extension" | "github" | "automation" | "agent";
+    spawnSource?: SpawnSource;
   };
 
   if (!body.repoOwner || !body.repoName) {
@@ -840,6 +850,7 @@ async function handleCreateSession(
           scmUserId,
           codeServerEnabled,
           sandboxSettings,
+          spawnSource: body.spawnSource,
         }),
       },
       ctx
@@ -882,6 +893,7 @@ async function handleCreateSession(
     branchName: null,
     status: "created",
     creationSource: body.creationSource ?? "web",
+    spawnSource: body.spawnSource,
     scmLogin: scmLogin || null,
     createdAt: now,
     updatedAt: now,
