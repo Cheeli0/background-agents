@@ -49,6 +49,7 @@ const MODEL_LABEL_MAP: Record<string, string> = {
   "glm-4.5-air": "zai-coding-plan/glm-4.5-air",
   "minimax-m2.7": "minimax-coding-plan/MiniMax-M2.7",
   "kimi-k2p5-turbo": "fireworks-ai/kimi-k2p5-turbo",
+  "kimi-k2.6": "opencode-go/kimi-k2.6",
   "qwen3.6-plus": "opencode-go/qwen3.6-plus",
   "mimo-v2-pro": "opencode-go/mimo-v2-pro",
   "mimo-v2-omni": "opencode-go/mimo-v2-omni",

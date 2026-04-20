@@ -148,6 +148,7 @@ Supported model label shortcuts:
 | `model:glm-4.5-air`     | `zai-coding-plan/glm-4.5-air`      |
 | `model:kimi-k2p5-turbo` | `fireworks-ai/kimi-k2p5-turbo`     |
 | `model:minimax-m2.7`    | `minimax-coding-plan/MiniMax-M2.7` |
+| `model:kimi-k2.6`       | `opencode-go/kimi-k2.6`            |
 | `model:qwen3.6-plus`    | `opencode-go/qwen3.6-plus`         |
 | `model:mimo-v2-pro`     | `opencode-go/mimo-v2-pro`          |
 | `model:mimo-v2-omni`    | `opencode-go/mimo-v2-omni`         |
