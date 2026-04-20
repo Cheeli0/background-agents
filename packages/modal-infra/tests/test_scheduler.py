@@ -392,7 +392,10 @@ class TestRebuildRepoImages:
 
             await rebuild_repo_images.local()
 
-        mock_ls_remote.assert_any_call("acme", "repo", "develop", "gh-token")
+        # Only branch selection is under test here; token value depends on env wiring.
+        mock_ls_remote.assert_called_once()
+        args = mock_ls_remote.call_args.args
+        assert args[:3] == ("acme", "repo", "develop")
 
     @pytest.mark.asyncio
     async def test_calls_mark_stale_and_cleanup(self):

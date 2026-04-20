@@ -17,6 +17,7 @@ def _make_supervisor() -> SandboxSupervisor:
             "SANDBOX_AUTH_TOKEN": "tok",
             "REPO_OWNER": "acme",
             "REPO_NAME": "app",
+            "SESSION_CONFIG": json.dumps({"provider": "openai", "model": "gpt-5.4"}),
         },
     ):
         return SandboxSupervisor()
@@ -105,7 +106,7 @@ class TestCodexAuthPluginSetup:
                 if p == "/app/sandbox_runtime/plugins/codex-auth-plugin.js"
                 else original_path(p)
             )
-            sup._setup_openai_oauth = MagicMock()
+            sup._setup_opencode_auth = MagicMock()
             sup._install_tools = MagicMock()
             sup._install_skills = MagicMock()
             sup._install_bin_scripts = MagicMock()
