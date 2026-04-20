@@ -69,6 +69,7 @@ describe("model utilities", () => {
     it("returns true for OpenCode Go models", () => {
       expect(isValidModel("opencode-go/glm-5.1")).toBe(true);
       expect(isValidModel("opencode-go/kimi-k2.5")).toBe(true);
+      expect(isValidModel("opencode-go/kimi-k2.6")).toBe(true);
       expect(isValidModel("opencode-go/qwen3.6-plus")).toBe(true);
       expect(isValidModel("opencode-go/minimax-m2.7")).toBe(true);
       expect(isValidModel("opencode-go/mimo-v2-pro")).toBe(true);
@@ -377,6 +378,7 @@ describe("model utilities", () => {
     it("returns true for OpenCode Go models with reasoning config", () => {
       expect(supportsReasoning("opencode-go/glm-5.1")).toBe(true);
       expect(supportsReasoning("opencode-go/kimi-k2.5")).toBe(true);
+      expect(supportsReasoning("opencode-go/kimi-k2.6")).toBe(true);
       expect(supportsReasoning("opencode-go/qwen3.6-plus")).toBe(true);
       expect(supportsReasoning("opencode-go/minimax-m2.7")).toBe(true);
       expect(supportsReasoning("opencode-go/mimo-v2-pro")).toBe(true);
@@ -440,6 +442,7 @@ describe("model utilities", () => {
     it("returns high for OpenCode Go models", () => {
       expect(getDefaultReasoningEffort("opencode-go/glm-5.1")).toBe("high");
       expect(getDefaultReasoningEffort("opencode-go/kimi-k2.5")).toBe("high");
+      expect(getDefaultReasoningEffort("opencode-go/kimi-k2.6")).toBe("high");
       expect(getDefaultReasoningEffort("opencode-go/qwen3.6-plus")).toBe("high");
       expect(getDefaultReasoningEffort("opencode-go/minimax-m2.7")).toBe("high");
       expect(getDefaultReasoningEffort("opencode-go/mimo-v2-pro")).toBe("high");

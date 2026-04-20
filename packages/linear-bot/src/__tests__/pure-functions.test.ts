@@ -47,6 +47,7 @@ describe("extractModelFromLabels", () => {
   });
 
   it("returns OpenCode Go-only models from model labels", () => {
+    expect(extractModelFromLabels([{ name: "model:kimi-k2.6" }])).toBe("opencode-go/kimi-k2.6");
     expect(extractModelFromLabels([{ name: "model:qwen3.6-plus" }])).toBe(
       "opencode-go/qwen3.6-plus"
     );
@@ -127,6 +128,9 @@ describe("extractModelFromLabels", () => {
     expect(
       extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:kimi-k2.5" }])
     ).toBe("opencode-go/kimi-k2.5");
+    expect(
+      extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:kimi-k2.6" }])
+    ).toBe("opencode-go/kimi-k2.6");
     expect(
       extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:minimax-m2.7" }])
     ).toBe("opencode-go/minimax-m2.7");

@@ -504,6 +504,26 @@ describe("handleAgentSessionEvent started-state behavior", () => {
     expect(requestBody.model).toBe("opencode-go/minimax-m2.7");
   });
 
+  it("uses OpenCode Go Kimi K2.6 model label for session model selection", async () => {
+    const { env, controlPlaneFetch } = createEnv({
+      projectMapping: { "project-1": { owner: "acme", name: "platform" } },
+    });
+    const linearFetch = createLinearFetch({
+      currentStateType: "backlog",
+      labels: [{ id: "label-1", name: "model:kimi-k2.6" }],
+    });
+    globalThis.fetch = linearFetch as typeof globalThis.fetch;
+
+    await handleAgentSessionEvent(createCreatedWebhook(), env, "trace-9b");
+
+    const createSessionCall = controlPlaneFetch.mock.calls.find(
+      ([url]) => url === "https://internal/sessions"
+    );
+    const requestBody = JSON.parse(String(createSessionCall?.[1]?.body)) as { model: string };
+
+    expect(requestBody.model).toBe("opencode-go/kimi-k2.6");
+  });
+
   it("uses Ollama Cloud provider and model labels for session model selection", async () => {
     const { env, controlPlaneFetch } = createEnv({
       projectMapping: { "project-1": { owner: "acme", name: "platform" } },

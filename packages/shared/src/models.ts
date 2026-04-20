@@ -46,6 +46,7 @@ const FIREWORKS_AI_MODELS = ["fireworks-ai/kimi-k2p5-turbo"] as const;
 const OPENCODE_GO_MODELS = [
   "opencode-go/glm-5.1",
   "opencode-go/kimi-k2.5",
+  "opencode-go/kimi-k2.6",
   "opencode-go/qwen3.6-plus",
   "opencode-go/minimax-m2.7",
   "opencode-go/mimo-v2-pro",
@@ -176,6 +177,7 @@ export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningCo
   "opencode/glm-5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
   "opencode-go/glm-5.1": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
   "opencode-go/kimi-k2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+  "opencode-go/kimi-k2.6": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
   "opencode-go/qwen3.6-plus": {
     efforts: ["low", "medium", "high", "xhigh"],
     default: "high",
@@ -473,6 +475,11 @@ export const MODEL_OPTIONS: ModelCategory[] = [
         id: "opencode-go/kimi-k2.5",
         name: "Kimi K2.5",
         description: "Moonshot AI via OpenCode Go",
+      },
+      {
+        id: "opencode-go/kimi-k2.6",
+        name: "Kimi K2.6",
+        description: "Latest Moonshot AI via OpenCode Go",
       },
       {
         id: "opencode-go/qwen3.6-plus",
