@@ -2,6 +2,7 @@ locals {
   name_suffix         = var.deployment_name
   use_modal_backend   = var.sandbox_provider == "modal"
   use_daytona_backend = var.sandbox_provider == "daytona"
+  project_root_path   = trimsuffix(trimsuffix(var.project_root, "/"), "\\")
 
   # URLs for cross-service configuration
   control_plane_host = "open-inspect-control-plane-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
@@ -16,8 +17,8 @@ locals {
   )
 
   # Worker script paths (deterministic output locations)
-  control_plane_script_path = "${var.project_root}/packages/control-plane/dist/index.js"
-  slack_bot_script_path     = "${var.project_root}/packages/slack-bot/dist/index.js"
-  linear_bot_script_path    = "${var.project_root}/packages/linear-bot/dist/index.js"
-  github_bot_script_path    = "${var.project_root}/packages/github-bot/dist/index.js"
+  control_plane_script_path = abspath("${local.project_root_path}/packages/control-plane/dist/index.js")
+  slack_bot_script_path     = abspath("${local.project_root_path}/packages/slack-bot/dist/index.js")
+  linear_bot_script_path    = abspath("${local.project_root_path}/packages/linear-bot/dist/index.js")
+  github_bot_script_path    = abspath("${local.project_root_path}/packages/github-bot/dist/index.js")
 }
