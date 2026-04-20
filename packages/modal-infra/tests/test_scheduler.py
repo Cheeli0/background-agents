@@ -78,7 +78,7 @@ class TestShouldRebuild:
 
     def test_rebuild_when_no_images(self):
         """No images at all → should rebuild."""
-        result = _should_rebuild("acme", "repo", "abc123", [])
+        result = _should_rebuild("acme", "repo", "main", "abc123", [])
         assert result is True
 
     def test_skip_when_building(self):
@@ -91,7 +91,7 @@ class TestShouldRebuild:
                 "base_sha": "",
             }
         ]
-        result = _should_rebuild("acme", "repo", "abc123", images)
+        result = _should_rebuild("acme", "repo", "main", "abc123", images)
         assert result is False
 
     def test_rebuild_when_sha_mismatch(self):
@@ -104,7 +104,7 @@ class TestShouldRebuild:
                 "base_sha": "old-sha-111",
             }
         ]
-        result = _should_rebuild("acme", "repo", "new-sha-222", images)
+        result = _should_rebuild("acme", "repo", "main", "new-sha-222", images)
         assert result is True
 
     def test_skip_when_sha_matches(self):
@@ -117,7 +117,7 @@ class TestShouldRebuild:
                 "base_sha": "abc123",
             }
         ]
-        result = _should_rebuild("acme", "repo", "abc123", images)
+        result = _should_rebuild("acme", "repo", "main", "abc123", images)
         assert result is False
 
     def test_rebuild_when_only_failed_images(self):
@@ -130,7 +130,7 @@ class TestShouldRebuild:
                 "base_sha": "",
             }
         ]
-        result = _should_rebuild("acme", "repo", "abc123", images)
+        result = _should_rebuild("acme", "repo", "main", "abc123", images)
         assert result is True
 
     def test_case_insensitive_repo_match(self):
@@ -143,7 +143,7 @@ class TestShouldRebuild:
                 "base_sha": "abc123",
             }
         ]
-        result = _should_rebuild("acme", "repo", "abc123", images)
+        result = _should_rebuild("acme", "repo", "main", "abc123", images)
         assert result is False
 
     def test_ignores_other_repos(self):
@@ -156,7 +156,21 @@ class TestShouldRebuild:
                 "base_sha": "abc123",
             }
         ]
-        result = _should_rebuild("acme", "repo", "abc123", images)
+        result = _should_rebuild("acme", "repo", "main", "abc123", images)
+        assert result is True
+
+    def test_ignores_ready_image_from_other_branch(self):
+        """A ready image for main should not block a develop rebuild."""
+        images = [
+            {
+                "repo_owner": "acme",
+                "repo_name": "repo",
+                "base_branch": "main",
+                "status": "ready",
+                "base_sha": "abc123",
+            }
+        ]
+        result = _should_rebuild("acme", "repo", "develop", "abc123", images)
         assert result is True
 
 
@@ -324,6 +338,64 @@ class TestRebuildRepoImages:
         # Verify trigger was NOT called (only mark-stale + cleanup)
         trigger_calls = [c for c in mock_post.call_args_list if "trigger" in str(c)]
         assert len(trigger_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_uses_repo_default_branch_for_ls_remote(self):
+        """Should use repo defaultBranch from control plane instead of hardcoded main."""
+        env = {
+            "CONTROL_PLANE_URL": "https://cp.test",
+            "MODAL_API_SECRET": "test-secret",
+        }
+
+        mock_enabled = {
+            "repos": [{"repoOwner": "acme", "repoName": "repo", "defaultBranch": "develop"}]
+        }
+
+        async def mock_get_side_effect(url, **kwargs):
+            if "enabled-repos" in url:
+                return mock_enabled
+            if "status" in url:
+                return {"images": []}
+            return {}
+
+        async def mock_post_side_effect(url, payload=None, **kwargs):
+            return {
+                "ok": True,
+                "markedFailed": 0,
+                "deleted": 0,
+                "buildId": "b1",
+                "status": "building",
+            }
+
+        with (
+            patch.dict("os.environ", env, clear=False),
+            patch(
+                "src.scheduler.image_builder._api_get",
+                new_callable=AsyncMock,
+                side_effect=mock_get_side_effect,
+            ),
+            patch(
+                "src.scheduler.image_builder._api_post",
+                new_callable=AsyncMock,
+                side_effect=mock_post_side_effect,
+            ),
+            patch(
+                "src.scheduler.image_builder._git_ls_remote_sha",
+                return_value="abc123",
+            ) as mock_ls_remote,
+            patch(
+                "sandbox_runtime.auth.github_app.generate_installation_token",
+                return_value="gh-token",
+            ),
+        ):
+            from src.scheduler.image_builder import rebuild_repo_images
+
+            await rebuild_repo_images.local()
+
+        # Only branch selection is under test here; token value depends on env wiring.
+        mock_ls_remote.assert_called_once()
+        args = mock_ls_remote.call_args.args
+        assert args[:3] == ("acme", "repo", "develop")
 
     @pytest.mark.asyncio
     async def test_calls_mark_stale_and_cleanup(self):

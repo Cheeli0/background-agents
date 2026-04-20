@@ -6,6 +6,7 @@
  */
 
 import { generateInternalToken, type SandboxSettings } from "@open-inspect/shared";
+import type { McpServerConfig } from "@open-inspect/shared";
 import { createLogger } from "../logger";
 import type { CorrelationContext } from "../logger";
 
@@ -39,6 +40,7 @@ export interface CreateSandboxRequest {
   timeoutSeconds?: number;
   branch?: string;
   codeServerEnabled?: boolean;
+  mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
 }
 
@@ -67,6 +69,7 @@ export interface RestoreSandboxRequest {
   timeoutSeconds?: number;
   branch?: string;
   codeServerEnabled?: boolean;
+  mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
 }
 
@@ -254,9 +257,10 @@ export class ModalClient {
           user_env_vars: request.userEnvVars || null,
           repo_image_id: request.repoImageId || null,
           repo_image_sha: request.repoImageSha || null,
-          timeout_seconds: request.timeoutSeconds || null,
+          timeout_seconds: request.timeoutSeconds,
           branch: request.branch || null,
           code_server_enabled: request.codeServerEnabled ?? false,
+          mcp_servers: request.mcpServers || null,
           sandbox_settings: request.sandboxSettings ?? null,
         }),
       });
@@ -335,12 +339,13 @@ export class ModalClient {
             provider: request.provider,
             model: request.model,
             branch: request.branch || null,
+            mcp_servers: request.mcpServers || null,
           },
           sandbox_id: request.sandboxId,
           control_plane_url: request.controlPlaneUrl,
           sandbox_auth_token: request.sandboxAuthToken,
           user_env_vars: request.userEnvVars || null,
-          timeout_seconds: request.timeoutSeconds || null,
+          timeout_seconds: request.timeoutSeconds,
           code_server_enabled: request.codeServerEnabled ?? false,
           sandbox_settings: request.sandboxSettings ?? null,
         }),

@@ -398,13 +398,18 @@ project_root    = "../../../"
 enable_durable_object_bindings = false
 enable_service_bindings        = false
 
-# Access Control (at least one recommended for security)
+# Access Control (set at least one allowlist for production)
 allowed_users         = "your-github-username"  # Comma-separated GitHub usernames, or empty
 allowed_email_domains = ""                      # Comma-separated domains (e.g., "example.com,corp.io")
+
+# Explicitly opt into open access only if you want any authenticated GitHub user
+# to be able to sign in when both allowlists are empty.
+unsafe_allow_all_users = false
 ```
 
 > **Note**: Review `allowed_users` and `allowed_email_domains` carefully - these control who can
-> sign in. If both are empty, any GitHub user can access your deployment.
+> sign in. Terraform now fails if both are empty unless you explicitly set
+> `unsafe_allow_all_users = true`.
 
 ---
 

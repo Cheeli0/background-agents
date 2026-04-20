@@ -61,7 +61,7 @@ async def test_deploys_codex_plugin_for_openai_provider(tmp_path):
     original_exists = Path.exists
 
     def fake_exists(path_obj):
-        if str(path_obj).replace("\\", "/") == "/app/sandbox_runtime/plugins/codex-auth-plugin.ts":
+        if str(path_obj).replace("\\", "/") == "/app/sandbox_runtime/plugins/codex-auth-plugin.js":
             return True
         return original_exists(path_obj)
 
@@ -77,7 +77,7 @@ async def test_deploys_codex_plugin_for_openai_provider(tmp_path):
         await supervisor.start_opencode()
 
     copy_targets = [str(call.args[1]).replace("\\", "/") for call in copy_mock.call_args_list]
-    assert any(target.endswith(".opencode/plugins/codex-auth-plugin.ts") for target in copy_targets)
+    assert any(target.endswith(".opencode/plugins/codex-auth-plugin.js") for target in copy_targets)
 
 
 @pytest.mark.asyncio
@@ -128,7 +128,7 @@ async def test_skips_codex_plugin_for_github_copilot_provider(tmp_path):
     original_exists = Path.exists
 
     def fake_exists(path_obj):
-        if str(path_obj).replace("\\", "/") == "/app/sandbox_runtime/plugins/codex-auth-plugin.ts":
+        if str(path_obj).replace("\\", "/") == "/app/sandbox_runtime/plugins/codex-auth-plugin.js":
             return True
         return original_exists(path_obj)
 
@@ -145,7 +145,7 @@ async def test_skips_codex_plugin_for_github_copilot_provider(tmp_path):
 
     copy_targets = [str(call.args[1]).replace("\\", "/") for call in copy_mock.call_args_list]
     assert not any(
-        target.endswith(".opencode/plugins/codex-auth-plugin.ts") for target in copy_targets
+        target.endswith(".opencode/plugins/codex-auth-plugin.js") for target in copy_targets
     )
 
 

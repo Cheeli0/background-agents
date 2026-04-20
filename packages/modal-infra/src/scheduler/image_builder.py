@@ -390,6 +390,7 @@ def _git_ls_remote_sha(
 def _should_rebuild(
     repo_owner: str,
     repo_name: str,
+    default_branch: str,
     remote_sha: str,
     all_images: list[dict],
 ) -> bool:
@@ -400,13 +401,15 @@ def _should_rebuild(
     """
     owner_lower = repo_owner.lower()
     name_lower = repo_name.lower()
+    branch_lower = default_branch.lower()
 
-    # Find images for this repo
+    # Find images for this repo + branch
     repo_images = [
         img
         for img in all_images
         if img.get("repo_owner", "").lower() == owner_lower
         and img.get("repo_name", "").lower() == name_lower
+        and str(img.get("base_branch") or "main").lower() == branch_lower
     ]
 
     # Check if there's already a build in progress
@@ -416,6 +419,7 @@ def _should_rebuild(
             "scheduler.skip_building",
             repo_owner=repo_owner,
             repo_name=repo_name,
+            default_branch=default_branch,
             building_count=len(building),
         )
         return False
@@ -428,6 +432,7 @@ def _should_rebuild(
             "scheduler.no_ready_image",
             repo_owner=repo_owner,
             repo_name=repo_name,
+            default_branch=default_branch,
         )
         return True
 
@@ -438,6 +443,7 @@ def _should_rebuild(
             "scheduler.sha_mismatch",
             repo_owner=repo_owner,
             repo_name=repo_name,
+            default_branch=default_branch,
             ready_sha=latest_ready.get("base_sha", "")[:12],
             remote_sha=remote_sha[:12],
         )
@@ -491,15 +497,16 @@ async def rebuild_repo_images():
         for repo in enabled_repos:
             repo_owner = repo.get("repoOwner", "")
             repo_name = repo.get("repoName", "")
+            default_branch = repo.get("defaultBranch") or "main"
 
             if not repo_owner or not repo_name:
                 continue
 
-            remote_sha = _git_ls_remote_sha(repo_owner, repo_name, "main", clone_token)
+            remote_sha = _git_ls_remote_sha(repo_owner, repo_name, default_branch, clone_token)
             if not remote_sha:
                 continue
 
-            if _should_rebuild(repo_owner, repo_name, remote_sha, all_images):
+            if _should_rebuild(repo_owner, repo_name, default_branch, remote_sha, all_images):
                 try:
                     await _api_post(
                         f"{control_plane_url}/repo-images/trigger/{repo_owner}/{repo_name}",
@@ -509,12 +516,14 @@ async def rebuild_repo_images():
                         "scheduler.build_triggered",
                         repo_owner=repo_owner,
                         repo_name=repo_name,
+                        default_branch=default_branch,
                     )
                 except Exception as e:
                     log.error(
                         "scheduler.trigger_error",
                         repo_owner=repo_owner,
                         repo_name=repo_name,
+                        default_branch=default_branch,
                         error=str(e),
                     )
 

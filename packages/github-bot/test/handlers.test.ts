@@ -199,6 +199,8 @@ describe("handlePullRequestOpened", () => {
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("Review PR #42");
     expect(sessionBody.creationSource).toBe("github");
+    expect(sessionBody.scmLogin).toBe("alice");
+    expect(sessionBody.spawnSource).toBe("github-bot");
 
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.source).toBe("github");
@@ -365,6 +367,8 @@ describe("handleReviewRequested", () => {
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("Review PR #42");
+    expect(sessionBody.scmLogin).toBe("alice");
+    expect(sessionBody.spawnSource).toBe("github-bot");
 
     // Verify prompt sending
     const promptCall = cpFetch.mock.calls[1];
@@ -456,6 +460,10 @@ describe("handleIssueComment", () => {
     const cpFetch = getControlPlaneFetch(env);
     expect(cpFetch).toHaveBeenCalledTimes(2);
 
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(sessionBody.scmLogin).toBe("bob");
+    expect(sessionBody.spawnSource).toBe("github-bot");
+
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("please fix the error handling");
     expect(promptBody.content).not.toContain("@test-bot[bot]");
@@ -542,6 +550,11 @@ describe("handleReviewComment", () => {
     );
 
     const cpFetch = getControlPlaneFetch(env);
+
+    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    expect(sessionBody.scmLogin).toBe("carol");
+    expect(sessionBody.spawnSource).toBe("github-bot");
+
     const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
     expect(promptBody.content).toContain("src/cache.ts");
     expect(promptBody.content).toContain("const cache = new Map()");

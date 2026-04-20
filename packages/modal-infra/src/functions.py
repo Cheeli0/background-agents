@@ -7,9 +7,15 @@ Modal functions that can be called from the control plane.
 Note: Uses lazy imports to avoid pydantic dependency at module load time.
 """
 
+from __future__ import annotations
+
 import os
+from typing import TYPE_CHECKING
 
 from .app import app, function_image, github_app_secrets, inspect_volume
+
+if TYPE_CHECKING:
+    from sandbox_runtime import McpServerConfig
 
 # Global sandbox manager (lazy loaded)
 _manager = None
@@ -38,6 +44,7 @@ async def create_sandbox(
     provider: str = "anthropic",
     model: str = "claude-sonnet-4-6",
     branch: str | None = None,
+    mcp_servers: list[McpServerConfig] | None = None,
 ) -> dict:
     """
     Create a new sandbox for a session.
@@ -89,6 +96,7 @@ async def create_sandbox(
         opencode_session_id=opencode_session_id,
         provider=provider,
         model=model,
+        mcp_servers=mcp_servers,
     )
 
     config = SandboxConfig(
