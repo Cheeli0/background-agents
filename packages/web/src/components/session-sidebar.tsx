@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useMemo, useCallback, useEffect, useRef, type TouchEvent } from "react";
 import { useSession, signOut } from "next-auth/react";
 import useSWR, { useSWRConfig } from "swr";
+import { BrandMark } from "@/components/brand-mark";
 import { formatRelativeTime, isInactiveSession } from "@/lib/time";
 import {
   buildSessionsPageKey,
@@ -20,7 +21,6 @@ import { useSessionPrStatus } from "@/hooks/use-session-pr-status";
 import {
   MoreIcon,
   SidebarIcon,
-  InspectIcon,
   PlusIcon,
   SettingsIcon,
   AutomationsIcon,
@@ -458,8 +458,8 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
             <SidebarIcon className="w-4 h-4" />
           </Button>
           <Link href="/" onClick={handleNavigationSelect} className="flex items-center gap-2">
-            <InspectIcon className="w-5 h-5" />
-            <span className="font-semibold text-foreground">Inspect</span>
+            <BrandMark className="h-6 w-6 rounded-md" priority />
+            <span className="font-semibold text-foreground">Open-Inspect</span>
           </Link>
         </div>
         <div className="flex items-center gap-2">
