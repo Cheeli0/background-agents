@@ -19,6 +19,7 @@ type SessionRow = {
   automation_id: string | null;
   automation_run_id: string | null;
   scm_login: string | null;
+  user_id: string | null;
   total_cost: number;
   active_duration_ms: number;
   message_count: number;
@@ -139,6 +140,7 @@ class FakeD1Database {
         automationId,
         automationRunId,
         scmLogin,
+        userId,
         createdAt,
         updatedAt,
       ] = args as [
@@ -155,6 +157,7 @@ class FakeD1Database {
         "user" | "agent" | "automation",
         "web" | "slack" | "linear" | "extension" | "github" | "automation" | "agent",
         number,
+        string | null,
         string | null,
         string | null,
         string | null,
@@ -180,6 +183,7 @@ class FakeD1Database {
           automation_id: automationId,
           automation_run_id: automationRunId,
           scm_login: scmLogin,
+          user_id: userId,
           total_cost: 0,
           active_duration_ms: 0,
           message_count: 0,
@@ -376,6 +380,7 @@ describe("SessionIndexStore", () => {
         automationId: null,
         automationRunId: null,
         scmLogin: null,
+        userId: null,
         totalCost: 0,
         activeDurationMs: 0,
         messageCount: 0,
@@ -415,6 +420,22 @@ describe("SessionIndexStore", () => {
       expect(result?.spawnSource).toBe("agent");
       expect(result?.creationSource).toBe("web");
       expect(result?.spawnDepth).toBe(1);
+    });
+
+    it("stores userId when provided", async () => {
+      const session = makeSession({ userId: "user-123" });
+      await store.create(session);
+
+      const result = await store.get("test-id");
+      expect(result?.userId).toBe("user-123");
+    });
+
+    it("defaults userId to null when omitted", async () => {
+      const session = makeSession();
+      await store.create(session);
+
+      const result = await store.get("test-id");
+      expect(result?.userId).toBeNull();
     });
   });
 

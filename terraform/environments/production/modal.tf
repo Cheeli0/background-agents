@@ -32,8 +32,6 @@ module "modal_app" {
   deploy_module = "deploy"
   source_hash   = local.modal_source_hash
 
-  volume_name = "open-inspect-data"
-
   secrets = [
     {
       name = "llm-api-keys"

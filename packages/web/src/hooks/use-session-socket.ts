@@ -455,7 +455,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
           setReplaying(false);
           void fetchArtifacts();
 
-          if (data.spawnError) {
+          if (data.spawnError && data.state?.sandboxStatus === "failed") {
             console.error("Sandbox spawn error:", data.spawnError);
             setSessionState((prev) => (prev ? { ...prev, sandboxStatus: "failed" } : null));
           }

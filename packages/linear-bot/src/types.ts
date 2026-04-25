@@ -120,6 +120,7 @@ export interface CompletionCallback {
   sessionId: string;
   messageId: string;
   success: boolean;
+  error?: string;
   timestamp: number;
   signature: string;
   context: LinearCallbackContext;

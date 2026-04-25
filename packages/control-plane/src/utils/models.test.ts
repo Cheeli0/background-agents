@@ -36,6 +36,7 @@ describe("model utilities", () => {
     it("returns true for OpenAI models", () => {
       expect(isValidModel("openai/gpt-5.2")).toBe(true);
       expect(isValidModel("openai/gpt-5.4")).toBe(true);
+      expect(isValidModel("openai/gpt-5.5")).toBe(true);
       expect(isValidModel("openai/gpt-5.2-codex")).toBe(true);
       expect(isValidModel("openai/gpt-5.3-codex")).toBe(true);
       expect(isValidModel("openai/gpt-5.3-codex-spark")).toBe(true);
@@ -88,6 +89,7 @@ describe("model utilities", () => {
 
     it("accepts bare GPT model names via normalization", () => {
       expect(isValidModel("gpt-5.4")).toBe(true);
+      expect(isValidModel("gpt-5.5")).toBe(true);
       expect(isValidModel("gpt-5.2")).toBe(true);
       expect(isValidModel("gpt-5.2-codex")).toBe(true);
       expect(isValidModel("gpt-5.3-codex")).toBe(true);
@@ -151,6 +153,11 @@ describe("model utilities", () => {
       expect(extractProviderAndModel("openai/gpt-5.4")).toEqual({
         provider: "openai",
         model: "gpt-5.4",
+      });
+
+      expect(extractProviderAndModel("openai/gpt-5.5")).toEqual({
+        provider: "openai",
+        model: "gpt-5.5",
       });
 
       expect(extractProviderAndModel("openai/gpt-5.2-codex")).toEqual({
@@ -315,6 +322,7 @@ describe("model utilities", () => {
 
     it("normalizes bare GPT model names to prefixed format", () => {
       expect(getValidModelOrDefault("gpt-5.4")).toBe("openai/gpt-5.4");
+      expect(getValidModelOrDefault("gpt-5.5")).toBe("openai/gpt-5.5");
       expect(getValidModelOrDefault("gpt-5.2")).toBe("openai/gpt-5.2");
       expect(getValidModelOrDefault("gpt-5.2-codex")).toBe("openai/gpt-5.2-codex");
     });
@@ -355,6 +363,7 @@ describe("model utilities", () => {
     it("returns true for OpenAI models with reasoning config", () => {
       expect(supportsReasoning("openai/gpt-5.2")).toBe(true);
       expect(supportsReasoning("openai/gpt-5.4")).toBe(true);
+      expect(supportsReasoning("openai/gpt-5.5")).toBe(true);
       expect(supportsReasoning("openai/gpt-5.2-codex")).toBe(true);
       expect(supportsReasoning("openai/gpt-5.3-codex")).toBe(true);
       expect(supportsReasoning("openai/gpt-5.3-codex-spark")).toBe(true);
@@ -423,9 +432,10 @@ describe("model utilities", () => {
       expect(getDefaultReasoningEffort("openai/gpt-5.3-codex-spark")).toBe("high");
     });
 
-    it("returns undefined for GPT 5.2 and GPT 5.4 (no default)", () => {
+    it("returns undefined for GPT 5.2, GPT 5.4, and GPT 5.5", () => {
       expect(getDefaultReasoningEffort("openai/gpt-5.2")).toBeUndefined();
       expect(getDefaultReasoningEffort("openai/gpt-5.4")).toBeUndefined();
+      expect(getDefaultReasoningEffort("openai/gpt-5.5")).toBeUndefined();
     });
 
     it("returns undefined for invalid models", () => {
@@ -543,6 +553,14 @@ describe("model utilities", () => {
       });
     });
 
+    it("returns config for GPT 5.5 with none effort", () => {
+      const config = getReasoningConfig("openai/gpt-5.5");
+      expect(config).toEqual({
+        efforts: ["none", "low", "medium", "high", "xhigh"],
+        default: undefined,
+      });
+    });
+
     it("returns undefined for invalid models", () => {
       expect(getReasoningConfig("invalid")).toBeUndefined();
     });
@@ -596,11 +614,13 @@ describe("model utilities", () => {
       expect(isValidReasoningEffort("openai/gpt-5.3-codex-spark", "max")).toBe(false);
       expect(isValidReasoningEffort("openai/gpt-5.2", "max")).toBe(false);
       expect(isValidReasoningEffort("openai/gpt-5.4", "max")).toBe(false);
+      expect(isValidReasoningEffort("openai/gpt-5.5", "max")).toBe(false);
     });
 
     it("returns true for none on GPT 5.x baseline models", () => {
       expect(isValidReasoningEffort("openai/gpt-5.2", "none")).toBe(true);
       expect(isValidReasoningEffort("openai/gpt-5.4", "none")).toBe(true);
+      expect(isValidReasoningEffort("openai/gpt-5.5", "none")).toBe(true);
       expect(isValidReasoningEffort("openai/gpt-5.2-codex", "none")).toBe(false);
     });
 
@@ -656,6 +676,7 @@ describe("model utilities", () => {
     it("passes through OpenAI models unchanged", () => {
       expect(normalizeModelId("openai/gpt-5.2")).toBe("openai/gpt-5.2");
       expect(normalizeModelId("openai/gpt-5.4")).toBe("openai/gpt-5.4");
+      expect(normalizeModelId("openai/gpt-5.5")).toBe("openai/gpt-5.5");
       expect(normalizeModelId("openai/gpt-5.2-codex")).toBe("openai/gpt-5.2-codex");
       expect(normalizeModelId("openai/gpt-5.3-codex")).toBe("openai/gpt-5.3-codex");
       expect(normalizeModelId("openai/gpt-5.3-codex-spark")).toBe("openai/gpt-5.3-codex-spark");
@@ -663,6 +684,7 @@ describe("model utilities", () => {
 
     it("adds openai/ prefix to bare GPT models", () => {
       expect(normalizeModelId("gpt-5.4")).toBe("openai/gpt-5.4");
+      expect(normalizeModelId("gpt-5.5")).toBe("openai/gpt-5.5");
       expect(normalizeModelId("gpt-5.2")).toBe("openai/gpt-5.2");
       expect(normalizeModelId("gpt-5.2-codex")).toBe("openai/gpt-5.2-codex");
     });

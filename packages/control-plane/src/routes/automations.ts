@@ -17,6 +17,7 @@ import {
   type AutomationTriggerType,
 } from "@open-inspect/shared";
 import { AutomationStore, toAutomation, toAutomationRun } from "../db/automation-store";
+import { UserStore } from "../db/user-store";
 import { generateId } from "../auth/crypto";
 import { generateWebhookApiKey, hashApiKey, encryptSentrySecret } from "../auth/webhook-key";
 import { createLogger } from "../logger";
@@ -93,7 +94,16 @@ async function handleCreateAutomation(
   _match: RegExpMatchArray,
   ctx: RequestContext
 ): Promise<Response> {
-  const body = await parseJsonBody<CreateAutomationRequest & { userId?: string }>(request);
+  const body = await parseJsonBody<
+    CreateAutomationRequest & {
+      userId?: string;
+      scmUserId?: string;
+      scmLogin?: string;
+      scmName?: string;
+      scmEmail?: string;
+      scmAvatarUrl?: string;
+    }
+  >(request);
   if (body instanceof Response) return body;
 
   // Validate required fields
@@ -235,6 +245,28 @@ async function handleCreateAutomation(
     triggerAuthData = await encryptSentrySecret(sentrySecret, env.REPO_SECRETS_ENCRYPTION_KEY);
   }
 
+  // Resolve canonical user model ID (best-effort, same pattern as handleCreateSession)
+  let resolvedUserId: string | null = null;
+  if (body.scmUserId) {
+    try {
+      const userStore = new UserStore(env.DB);
+      const resolvedUser = await userStore.resolveOrCreateUser({
+        provider: "github",
+        providerUserId: body.scmUserId,
+        providerLogin: body.scmLogin,
+        providerEmail: body.scmEmail,
+        displayName: body.scmName || body.scmLogin,
+        avatarUrl: body.scmAvatarUrl,
+      });
+      resolvedUserId = resolvedUser.id;
+    } catch (e) {
+      logger.warn("Failed to resolve user identity for automation", {
+        error: e instanceof Error ? e : String(e),
+        scmUserId: body.scmUserId,
+      });
+    }
+  }
+
   const store = new AutomationStore(env.DB);
   await store.create({
     id,
@@ -253,6 +285,7 @@ async function handleCreateAutomation(
     next_run_at: nextRunAt,
     consecutive_failures: 0,
     created_by: body.userId || "anonymous",
+    user_id: resolvedUserId,
     created_at: now,
     updated_at: now,
     deleted_at: null,
