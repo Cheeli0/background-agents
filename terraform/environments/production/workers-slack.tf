@@ -2,20 +2,23 @@
 # Slack Bot Worker
 # =============================================================================
 
-# Build slack-bot worker bundle (only runs during apply, not plan)
-resource "null_resource" "slack_bot_build" {
+# Build slack-bot worker bundle during plan so cloudflare_worker_version reads
+# stable module content during apply.
+data "external" "slack_bot_build" {
   count = var.enable_slack_bot ? 1 : 0
 
-  triggers = {
-    # Rebuild when source files change - use timestamp to always check
-    # In CI, this ensures fresh builds; locally, npm handles caching
-    always_run = timestamp()
-  }
-
-  provisioner "local-exec" {
-    command     = "npm run build"
-    working_dir = "${var.project_root}/packages/slack-bot"
-  }
+  program = ["bash", "-c", <<-EOF
+    cd ${var.project_root}
+    npm run build -w @open-inspect/shared >&2
+    npm run build -w @open-inspect/slack-bot >&2
+    if command -v sha256sum >/dev/null 2>&1; then
+      hash=$(sha256sum packages/slack-bot/dist/index.js | cut -d' ' -f1)
+    else
+      hash=$(shasum -a 256 packages/slack-bot/dist/index.js | cut -d' ' -f1)
+    fi
+    echo "{\"hash\": \"$hash\"}"
+  EOF
+  ]
 }
 
 module "slack_bot_worker" {
@@ -60,5 +63,5 @@ module "slack_bot_worker" {
   compatibility_date  = "2024-09-23"
   compatibility_flags = ["nodejs_compat"]
 
-  depends_on = [null_resource.slack_bot_build[0], module.slack_kv[0]]
+  depends_on = [data.external.slack_bot_build[0], module.slack_kv[0]]
 }

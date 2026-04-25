@@ -455,6 +455,14 @@ export class SandboxLifecycleManager {
         );
       }
 
+      const currentSandbox = this.storage.getSandbox();
+      if (currentSandbox?.status === "stopped" || currentSandbox?.status === "stale") {
+        this.log.info("Sandbox spawn completed after terminal state; preserving status", {
+          sandbox_status: currentSandbox.status,
+        });
+        return;
+      }
+
       this.storage.updateSandboxStatus("connecting");
       this.broadcaster.broadcast({ type: "sandbox_status", status: "connecting" });
 
@@ -489,7 +497,10 @@ export class SandboxLifecycleManager {
         this.log.info("Circuit breaker incremented", { error_type: "unknown" });
       }
 
-      this.storage.updateSandboxStatus("failed");
+      const currentSandbox = this.storage.getSandbox();
+      if (currentSandbox?.status !== "stopped" && currentSandbox?.status !== "stale") {
+        this.storage.updateSandboxStatus("failed");
+      }
       this.broadcaster.broadcast({
         type: "sandbox_error",
         error: errorMessage,
@@ -1204,11 +1215,12 @@ export class SandboxLifecycleManager {
 
   /**
    * Notify the manager that a sandbox has connected.
-   * Resets the in-memory spawning flag to allow future spawns.
+   * Resets the in-memory spawning flag and clears any stale spawn error.
    *
    * Called by SessionDO when sandbox WebSocket connects successfully.
    */
   onSandboxConnected(): void {
     this.isSpawningSandbox = false;
+    this.storage.setLastSpawnError(null, null);
   }
 }

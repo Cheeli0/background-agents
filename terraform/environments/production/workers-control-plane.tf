@@ -2,18 +2,21 @@
 # Cloudflare Workers
 # =============================================================================
 
-# Build control-plane worker bundle (only runs during apply, not plan)
-resource "null_resource" "control_plane_build" {
-  triggers = {
-    # Rebuild when source files change - use timestamp to always check
-    # In CI, this ensures fresh builds; locally, npm handles caching
-    always_run = timestamp()
-  }
-
-  provisioner "local-exec" {
-    command     = "npm run build"
-    working_dir = "${var.project_root}/packages/control-plane"
-  }
+# Build control-plane worker bundle during plan so cloudflare_worker_version
+# reads the same dist/index.js bytes at plan and apply time.
+data "external" "control_plane_build" {
+  program = ["bash", "-c", <<-EOF
+    cd ${var.project_root}
+    npm run build -w @open-inspect/shared >&2
+    npm run build -w @open-inspect/control-plane >&2
+    if command -v sha256sum >/dev/null 2>&1; then
+      hash=$(sha256sum packages/control-plane/dist/index.js | cut -d' ' -f1)
+    else
+      hash=$(shasum -a 256 packages/control-plane/dist/index.js | cut -d' ' -f1)
+    fi
+    echo "{\"hash\": \"$hash\"}"
+  EOF
+  ]
 }
 
 module "control_plane_worker" {
@@ -116,7 +119,7 @@ module "control_plane_worker" {
   cron_triggers = ["* * * * *"]
 
   depends_on = [
-    null_resource.control_plane_build,
+    data.external.control_plane_build,
     module.session_index_kv,
     null_resource.d1_migrations,
     module.linear_bot_worker,

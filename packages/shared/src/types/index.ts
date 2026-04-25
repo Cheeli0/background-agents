@@ -470,6 +470,7 @@ export interface AgentResponse {
   toolCalls: ToolCallSummary[];
   artifacts: ArtifactInfo[];
   success: boolean;
+  error?: string;
 }
 
 export interface UserPreferences {
@@ -633,6 +634,7 @@ export interface AnalyticsTimeseriesResponse {
 
 export interface AnalyticsBreakdownEntry {
   key: string;
+  displayName?: string;
   sessions: number;
   completed: number;
   failed: number;

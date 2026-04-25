@@ -15,6 +15,7 @@ import {
   emitAgentActivity,
   fetchIssueDetails,
   moveIssueToStartedStateIfNeeded,
+  fetchUser,
   updateAgentSession,
   getRepoSuggestions,
 } from "./utils/linear-client";
@@ -127,6 +128,48 @@ async function getAuthHeaders(env: Env, traceId?: string): Promise<Record<string
     "Content-Type": "application/json",
     ...(await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId)),
   };
+}
+
+/**
+ * Create a session via the control plane.
+ */
+async function createSession(
+  env: Env,
+  params: {
+    repoOwner: string;
+    repoName: string;
+    title: string;
+    model: string;
+    reasoningEffort?: string;
+    actorUserId?: string;
+    actorDisplayName?: string;
+    actorEmail?: string;
+  },
+  traceId?: string
+): Promise<{ ok: true; sessionId: string } | { ok: false; status: number; body: string }> {
+  const headers = await getAuthHeaders(env, traceId);
+  const response = await env.CONTROL_PLANE.fetch("https://internal/sessions", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      ...params,
+      creationSource: "linear",
+      spawnSource: "linear-bot",
+    }),
+  });
+
+  if (!response.ok) {
+    let body = "";
+    try {
+      body = await response.text();
+    } catch {
+      /* ignore */
+    }
+    return { ok: false, status: response.status, body };
+  }
+
+  const result = (await response.json()) as { sessionId: string };
+  return { ok: true, sessionId: result.sessionId };
 }
 
 // ─── Sub-handlers ────────────────────────────────────────────────────────────
@@ -458,10 +501,12 @@ async function handleNewSession(
     return;
   }
 
-  // ─── Resolve model ────────────────────────────────────────────────────
+  // ─── Resolve user preferences and identity ────────────────────────────
 
   let userModel: string | undefined;
   let userReasoningEffort: string | undefined;
+  let actorDisplayName: string | undefined;
+  let actorEmail: string | undefined;
   const appUserId = webhook.appUserId;
   if (appUserId) {
     const prefs = await getUserPreferences(env, appUserId);
@@ -469,6 +514,10 @@ async function handleNewSession(
       userModel = prefs.model;
     }
     userReasoningEffort = prefs?.reasoningEffort;
+
+    const linearUser = await fetchUser(client, appUserId);
+    actorDisplayName = linearUser?.name;
+    actorEmail = linearUser?.email ?? undefined;
   }
 
   const baseSessionModelSettings = resolveSessionModelSettings({
@@ -505,45 +554,39 @@ async function handleNewSession(
     true
   );
 
-  const headers = await getAuthHeaders(env, traceId);
-
-  const sessionRes = await env.CONTROL_PLANE.fetch("https://internal/sessions", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      repoOwner,
-      repoName,
+  const sessionResult = await createSession(
+    env,
+    {
+      repoOwner: repoOwner!,
+      repoName: repoName!,
       title: `${issue.identifier}: ${issue.title}`,
       model,
       reasoningEffort,
-      creationSource: "linear",
-      spawnSource: "linear-bot",
-    }),
-  });
+      actorUserId: appUserId,
+      actorDisplayName,
+      actorEmail,
+    },
+    traceId
+  );
 
-  if (!sessionRes.ok) {
-    let sessionErrBody = "";
-    try {
-      sessionErrBody = await sessionRes.text();
-    } catch {
-      /* ignore */
-    }
+  if (!sessionResult.ok) {
     await emitAgentActivity(client, agentSessionId, {
       type: "error",
-      body: `Failed to create a coding session.\n\n\`HTTP ${sessionRes.status}: ${sessionErrBody.slice(0, 200)}\``,
+      body: `Failed to create a coding session.\n\n\`HTTP ${sessionResult.status}: ${sessionResult.body.slice(0, 200)}\``,
     });
     log.error("control_plane.create_session", {
       trace_id: traceId,
       issue_identifier: issue.identifier,
       repo: repoFullName,
-      http_status: sessionRes.status,
-      response_body: sessionErrBody.slice(0, 500),
+      http_status: sessionResult.status,
+      response_body: sessionResult.body.slice(0, 500),
       duration_ms: Date.now() - startTime,
     });
     return;
   }
 
-  const session = (await sessionRes.json()) as { sessionId: string };
+  const headers = await getAuthHeaders(env, traceId);
+  const session = sessionResult;
 
   await storeIssueSession(env, issue.id, {
     sessionId: session.sessionId,
