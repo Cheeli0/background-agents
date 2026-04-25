@@ -2,18 +2,23 @@
 # GitHub Bot Worker
 # =============================================================================
 
-# Build github-bot worker bundle (only runs during apply, not plan)
-resource "null_resource" "github_bot_build" {
+# Build github-bot worker bundle during plan so cloudflare_worker_version reads
+# stable module content during apply.
+data "external" "github_bot_build" {
   count = var.enable_github_bot ? 1 : 0
 
-  triggers = {
-    always_run = timestamp()
-  }
-
-  provisioner "local-exec" {
-    command     = "npm run build"
-    working_dir = "${var.project_root}/packages/github-bot"
-  }
+  program = ["bash", "-c", <<-EOF
+    cd ${var.project_root}
+    npm run build -w @open-inspect/shared >&2
+    npm run build -w @open-inspect/github-bot >&2
+    if command -v sha256sum >/dev/null 2>&1; then
+      hash=$(sha256sum packages/github-bot/dist/index.js | cut -d' ' -f1)
+    else
+      hash=$(shasum -a 256 packages/github-bot/dist/index.js | cut -d' ' -f1)
+    fi
+    echo "{\"hash\": \"$hash\"}"
+  EOF
+  ]
 }
 
 module "github_bot_worker" {
@@ -57,5 +62,5 @@ module "github_bot_worker" {
   compatibility_date  = "2024-09-23"
   compatibility_flags = ["nodejs_compat"]
 
-  depends_on = [null_resource.github_bot_build[0], module.control_plane_worker, module.github_kv[0]]
+  depends_on = [data.external.github_bot_build[0], module.control_plane_worker, module.github_kv[0]]
 }
