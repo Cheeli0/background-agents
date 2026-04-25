@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildToolProgressActivity, formatToolAction, isValidToolCallPayload } from "./callbacks";
+import {
+  buildFailureMessage,
+  buildToolProgressActivity,
+  formatToolAction,
+  isValidToolCallPayload,
+} from "./callbacks";
 
 // ─── formatToolAction ────────────────────────────────────────────────────────
 
@@ -120,6 +125,34 @@ describe("isValidToolCallPayload", () => {
 
   it("rejects sessionId of wrong type", () => {
     expect(isValidToolCallPayload({ ...valid, sessionId: 123 })).toBe(false);
+  });
+});
+
+describe("buildFailureMessage", () => {
+  it("uses extracted text content when present", () => {
+    expect(
+      buildFailureMessage({
+        textContent: "Normal failure output",
+        agentError: "Spawn failed",
+        payloadError: "Payload failed",
+      })
+    ).toBe("The agent encountered an error.\n\nNormal failure output");
+  });
+
+  it("uses the extracted agent error when no text was produced", () => {
+    expect(buildFailureMessage({ agentError: "Sandbox auth failed" })).toBe(
+      "The agent encountered an error.\n\nSandbox auth failed"
+    );
+  });
+
+  it("falls back to the callback payload error when extraction has no error", () => {
+    expect(buildFailureMessage({ payloadError: "Failed to spawn sandbox" })).toBe(
+      "The agent encountered an error.\n\nFailed to spawn sandbox"
+    );
+  });
+
+  it("uses the generic fallback only when no concrete failure reason exists", () => {
+    expect(buildFailureMessage({})).toBe("The agent was unable to complete this task.");
   });
 });
 

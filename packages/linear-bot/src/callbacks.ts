@@ -258,6 +258,24 @@ callbacksRouter.post("/tool_call", async (c) => {
 
 // ─── Completion Callback ─────────────────────────────────────────────────────
 
+export function buildFailureMessage(params: {
+  textContent?: string;
+  agentError?: string;
+  payloadError?: string;
+}): string {
+  const textContent = params.textContent?.trim();
+  if (textContent) {
+    return `The agent encountered an error.\n\n${textContent.slice(0, 500)}`;
+  }
+
+  const errorMessage = (params.agentError || params.payloadError)?.trim();
+  if (errorMessage) {
+    return `The agent encountered an error.\n\n${errorMessage.slice(0, 500)}`;
+  }
+
+  return "The agent was unable to complete this task.";
+}
+
 async function handleCompletionCallback(
   payload: CompletionCallback,
   env: Env,
@@ -269,6 +287,7 @@ async function handleCompletionCallback(
   try {
     // Extract rich agent response from events
     const agentResponse = await extractAgentResponse(env, sessionId, payload.messageId, traceId);
+    agentResponse.error = agentResponse.error || payload.error;
 
     let message: string;
     let activityType: "response" | "error";
@@ -278,11 +297,11 @@ async function handleCompletionCallback(
       message = formatAgentResponse(agentResponse);
     } else {
       activityType = "error";
-      if (agentResponse.textContent) {
-        message = `The agent encountered an error.\n\n${agentResponse.textContent.slice(0, 500)}`;
-      } else {
-        message = `The agent was unable to complete this task.`;
-      }
+      message = buildFailureMessage({
+        textContent: agentResponse.textContent,
+        agentError: agentResponse.error,
+        payloadError: payload.error,
+      });
     }
 
     // Emit via Agent API if we have session context

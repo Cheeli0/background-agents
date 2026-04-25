@@ -455,6 +455,14 @@ export class SandboxLifecycleManager {
         );
       }
 
+      const currentSandbox = this.storage.getSandbox();
+      if (currentSandbox?.status === "stopped" || currentSandbox?.status === "stale") {
+        this.log.info("Sandbox spawn completed after terminal state; preserving status", {
+          sandbox_status: currentSandbox.status,
+        });
+        return;
+      }
+
       this.storage.updateSandboxStatus("connecting");
       this.broadcaster.broadcast({ type: "sandbox_status", status: "connecting" });
 
@@ -489,7 +497,10 @@ export class SandboxLifecycleManager {
         this.log.info("Circuit breaker incremented", { error_type: "unknown" });
       }
 
-      this.storage.updateSandboxStatus("failed");
+      const currentSandbox = this.storage.getSandbox();
+      if (currentSandbox?.status !== "stopped" && currentSandbox?.status !== "stale") {
+        this.storage.updateSandboxStatus("failed");
+      }
       this.broadcaster.broadcast({
         type: "sandbox_error",
         error: errorMessage,
