@@ -28,8 +28,13 @@ import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "reac
 import { TerminalPanel } from "@/components/terminal-panel";
 import { ActionBar } from "@/components/action-bar";
 import { copyToClipboard, formatModelNameLower, formatPremiumMultiplierLabel } from "@/lib/format";
+import { archiveSession } from "@/lib/archive-session";
 import { SHORTCUT_LABELS } from "@/lib/keyboard-shortcuts";
-import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
+import {
+  removeSessionFromList,
+  SIDEBAR_SESSIONS_KEY,
+  type SessionListResponse,
+} from "@/lib/session-list";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { DEFAULT_MODEL, getDefaultReasoningEffort, type ModelCategory } from "@open-inspect/shared";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
@@ -48,7 +53,6 @@ import {
 import { Combobox, type ComboboxGroup } from "@/components/ui/combobox";
 
 type ToolCallEvent = Extract<SandboxEvent, { type: "tool_call" }>;
-import type { SessionItem } from "@/components/session-sidebar";
 
 // Event grouping types
 type EventGroup =
@@ -63,7 +67,7 @@ type FallbackSessionInfo = {
   title: string | null;
 };
 
-type SessionsResponse = { sessions: SessionItem[] };
+type SessionsResponse = SessionListResponse;
 
 // Group consecutive tool calls of the same type
 function groupEvents(events: SandboxEvent[]): EventGroup[] {
@@ -211,21 +215,6 @@ function SessionPageContent() {
     [searchParams]
   );
 
-  const { trigger: triggerArchive } = useSWRMutation(
-    `/api/sessions/${sessionId}/archive`,
-    (url: string) =>
-      fetch(url, { method: "POST" }).then((r) => {
-        if (r.ok) {
-          mutate(SIDEBAR_SESSIONS_KEY);
-          return true;
-        }
-
-        console.error("Failed to archive session");
-        return false;
-      }),
-    { throwOnError: false }
-  );
-
   const { trigger: triggerRename } = useSWRMutation(
     `/api/sessions/${sessionId}/title`,
     (url: string, { arg }: { arg: { title: string } }) =>
@@ -242,17 +231,25 @@ function SessionPageContent() {
   );
 
   const handleArchive = useCallback(async () => {
-    const didArchive = await triggerArchive();
+    const didArchive = await archiveSession(sessionId);
     if (didArchive) {
+      await mutate<SessionListResponse>(
+        SIDEBAR_SESSIONS_KEY,
+        (current) =>
+          current
+            ? { ...current, sessions: removeSessionFromList(current.sessions, sessionId) }
+            : current,
+        { revalidate: false, populateCache: true }
+      );
       router.push("/");
     }
-  }, [router, triggerArchive]);
+  }, [router, sessionId]);
 
   const renameSession = useCallback(
     async (title: string) => {
       const updatedAt = Date.now();
       const updateSessionsTitle = (data?: SessionsResponse): SessionsResponse => {
-        if (!data?.sessions) return { sessions: [] };
+        if (!data?.sessions) return { sessions: [], hasMore: false };
         return {
           ...data,
           sessions: data.sessions.map((session) =>

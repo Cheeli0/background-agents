@@ -49,8 +49,8 @@
       "prettier --write"
     ],
     "packages/modal-infra/**/*.py": [
-      "ruff check --fix",
-      "ruff format"
+      "uv run --project packages/modal-infra ruff check --fix",
+      "uv run --project packages/modal-infra ruff format"
     ]
   }
 }

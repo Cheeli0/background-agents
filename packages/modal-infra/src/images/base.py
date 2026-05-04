@@ -33,8 +33,8 @@ TTYD_VERSION = "1.7.7"
 TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 
 # Cache buster - change this to force Modal image rebuild
-# v47: combine repo image refreshes with pre-built OpenCode plugin deps
-CACHE_BUSTER = "v47-ttyd-zai-glm51-prebuilt-deps"
+# v49: combine Claude Opus 4.7 refresh with pre-built OpenCode plugin deps
+CACHE_BUSTER = "v49-opus-4-7-opencode-prebuilt-deps"
 
 # Base image with all development tools
 base_image = (

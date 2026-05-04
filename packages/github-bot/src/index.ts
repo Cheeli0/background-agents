@@ -16,6 +16,7 @@ import type {
 import type { Logger } from "./logger";
 import { createLogger, parseLogLevel } from "./logger";
 import { verifyWebhookSignature } from "./verify";
+import { normalizeGitHubEvent, buildInternalAuthHeaders } from "@open-inspect/shared";
 import {
   handlePullRequestOpened,
   handleReviewRequested,
@@ -23,6 +24,7 @@ import {
   handleReviewComment,
   type HandlerResult,
 } from "./handlers";
+import { createKvCacheStore } from "@open-inspect/shared";
 
 const app = new Hono<{ Bindings: Env }>();
 const DELIVERY_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -42,6 +44,7 @@ app.get("/health", (c) => c.json({ status: "healthy", service: "open-inspect-git
 
 app.post("/webhooks/github", async (c) => {
   const log = createLogger("webhook", {}, parseLogLevel(c.env.LOG_LEVEL));
+  const cacheStore = createKvCacheStore(c.env.GITHUB_KV);
 
   const rawBody = await c.req.text();
   const signature = c.req.header("X-Hub-Signature-256") ?? null;
@@ -57,7 +60,7 @@ app.post("/webhooks/github", async (c) => {
   let dedupeKey: string | null = null;
   if (deliveryId) {
     dedupeKey = getDeliveryDedupeKey(deliveryId);
-    const existing = await c.env.GITHUB_KV.get(dedupeKey);
+    const existing = await cacheStore.get(dedupeKey);
     if (existing) {
       log.info("webhook.duplicate_delivery", {
         delivery_id: deliveryId,
@@ -67,7 +70,7 @@ app.post("/webhooks/github", async (c) => {
       return c.json({ ok: true, duplicate: true });
     }
 
-    await c.env.GITHUB_KV.put(dedupeKey, DELIVERY_STATUS_PROCESSING, {
+    await cacheStore.put(dedupeKey, DELIVERY_STATUS_PROCESSING, {
       expirationTtl: ttlSecondsFromMs(DELIVERY_PROCESSING_TTL_MS),
     });
   } else {
@@ -93,7 +96,7 @@ app.post("/webhooks/github", async (c) => {
         if (!dedupeKey) return;
 
         try {
-          await c.env.GITHUB_KV.put(dedupeKey, DELIVERY_STATUS_PROCESSED, {
+          await cacheStore.put(dedupeKey, DELIVERY_STATUS_PROCESSED, {
             expirationTtl: ttlSecondsFromMs(DELIVERY_DEDUPE_TTL_MS),
           });
         } catch (err) {
@@ -107,7 +110,7 @@ app.post("/webhooks/github", async (c) => {
       .catch(async (err) => {
         if (dedupeKey) {
           try {
-            await c.env.GITHUB_KV.delete(dedupeKey);
+            await cacheStore.delete(dedupeKey);
           } catch (deleteErr) {
             log.warn("webhook.dedupe_clear_failed", {
               trace_id: traceId,
@@ -183,6 +186,38 @@ async function handleWebhook(
     wideEvent.handler_action = result.handler_action;
   }
   log.info("webhook.handled", wideEvent);
+
+  // Forward normalized event to control-plane for automation triggering.
+  // This is additive — failures here must not affect existing bot behavior.
+  if (event) {
+    const normalizedEvent = normalizeGitHubEvent(event, p);
+    if (normalizedEvent !== null) {
+      try {
+        const body = JSON.stringify(normalizedEvent);
+        const authHeaders = await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId);
+        const response = await env.CONTROL_PLANE.fetch("https://internal/internal/github-event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body,
+        });
+        if (!response.ok) {
+          log.warn("webhook.github_event_forward_failed", {
+            trace_id: traceId,
+            delivery_id: deliveryId,
+            event_type: event,
+            status: response.status,
+          });
+        }
+      } catch (err) {
+        log.warn("webhook.github_event_forward_error", {
+          trace_id: traceId,
+          delivery_id: deliveryId,
+          event_type: event,
+          error: err instanceof Error ? err : new Error(String(err)),
+        });
+      }
+    }
+  }
 }
 
 function dispatchHandler(

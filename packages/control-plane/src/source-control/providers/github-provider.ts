@@ -85,11 +85,11 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
   readonly name = "github";
 
   private readonly appConfig?: GitHubProviderConfig["appConfig"];
-  private readonly kvCache?: KVNamespace;
+  private readonly cacheStore?: GitHubProviderConfig["cacheStore"];
 
   constructor(config: GitHubProviderConfig = {}) {
     this.appConfig = config.appConfig;
-    this.kvCache = config.kvCache;
+    this.cacheStore = config.cacheStore;
   }
 
   /**
@@ -240,7 +240,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
         this.appConfig,
         config.owner,
         config.name,
-        this.kvCache ? { REPOS_CACHE: this.kvCache } : undefined
+        this.cacheStore ? { cacheStore: this.cacheStore } : undefined
       );
       if (!repo) {
         return null;
@@ -269,7 +269,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
       try {
         const token = await getCachedInstallationToken(
           this.appConfig,
-          this.kvCache ? { REPOS_CACHE: this.kvCache } : undefined
+          this.cacheStore ? { cacheStore: this.cacheStore } : undefined
         );
         return await this.fetchPullRequestStatus(config, token);
       } catch (error) {
@@ -313,7 +313,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     try {
       const result = await listInstallationRepositories(
         this.appConfig,
-        this.kvCache ? { REPOS_CACHE: this.kvCache } : undefined
+        this.cacheStore ? { cacheStore: this.cacheStore } : undefined
       );
       return result.repos;
     } catch (error) {
@@ -341,7 +341,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
         this.appConfig,
         config.owner,
         config.name,
-        this.kvCache ? { REPOS_CACHE: this.kvCache } : undefined
+        this.cacheStore ? { cacheStore: this.cacheStore } : undefined
       );
     } catch (error) {
       throw SourceControlProviderError.fromFetchError(

@@ -5,11 +5,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useMemo, useCallback, useEffect, useRef, type TouchEvent } from "react";
 import { useSession, signOut } from "next-auth/react";
 import useSWR, { useSWRConfig } from "swr";
+import { ArchiveSessionDialog } from "@/components/archive-session-dialog";
 import { BrandMark } from "@/components/brand-mark";
+import { archiveSession } from "@/lib/archive-session";
 import { formatRelativeTime, isInactiveSession } from "@/lib/time";
 import {
+  applyTitleUpdate,
   buildSessionsPageKey,
   mergeUniqueSessions,
+  removeSessionFromList,
   SIDEBAR_SESSIONS_KEY,
   type SidebarSession,
   type SessionListResponse,
@@ -34,16 +38,6 @@ import {
 import { PullRequestStatusIcon } from "@/components/pull-request-status-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -414,7 +408,7 @@ export function SessionSidebar({ onNewSession, onToggle, onSessionSelect }: Sess
           return baseData
             ? {
                 ...baseData,
-                sessions: baseData.sessions.filter((session) => session.id !== sessionId),
+                sessions: removeSessionFromList(baseData.sessions, sessionId),
               }
             : currentData;
         },
@@ -750,6 +744,8 @@ function SessionListItem({
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
   const [title, setTitle] = useState(displayTitle);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const isStartingRenameRef = useRef(false);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -763,10 +759,22 @@ function SessionListItem({
   }, [displayTitle, isRenaming]);
 
   const handleStartRename = () => {
+    isStartingRenameRef.current = true;
     setIsActionsOpen(false);
     setTitle(displayTitle);
     setIsRenaming(true);
   };
+
+  useEffect(() => {
+    if (!isRenaming) return;
+
+    const timeout = window.setTimeout(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [isRenaming]);
 
   const handleCancelRename = () => {
     setTitle(displayTitle);
@@ -778,16 +786,12 @@ function SessionListItem({
     setIsActionsOpen(false);
 
     try {
-      const response = await fetch(`/api/sessions/${session.id}/archive`, { method: "POST" });
-
-      if (!response.ok) {
-        throw new Error("Failed to archive session");
-      }
-
-      onArchiveSuccess?.(session.id);
-
-      if (isActive) {
-        onArchiveCurrentSession?.();
+      const didArchive = await archiveSession(session.id);
+      if (didArchive) {
+        onArchiveSuccess?.(session.id);
+        if (isActive) {
+          onArchiveCurrentSession?.();
+        }
       }
     } catch {
       console.error("Failed to archive session");
@@ -805,18 +809,12 @@ function SessionListItem({
     const previousTitle = displayTitle;
     setIsRenaming(false);
 
-    const updateSessionsTitle = (data?: SessionListResponse): SessionListResponse => ({
-      sessions: (data?.sessions ?? []).map((currentSession) =>
-        currentSession.id === session.id
-          ? {
-              ...currentSession,
-              title: trimmed,
-              updatedAt: Date.now(),
-            }
-          : currentSession
-      ),
-      hasMore: data?.hasMore ?? false,
-    });
+    const updatedAt = Date.now();
+    const updateSessionsTitle = (data?: SessionListResponse) =>
+      applyTitleUpdate(data, session.id, trimmed, updatedAt) ?? {
+        sessions: [],
+        hasMore: false,
+      };
 
     try {
       onBeforeSidebarMutation?.();
@@ -907,6 +905,7 @@ function SessionListItem({
       {isRenaming ? (
         <>
           <input
+            ref={renameInputRef}
             autoFocus
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -1029,8 +1028,16 @@ function SessionListItem({
               <MoreIcon className="w-4 h-4" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={handleStartRename}>Rename</DropdownMenuItem>
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => {
+              if (isStartingRenameRef.current) {
+                event.preventDefault();
+                isStartingRenameRef.current = false;
+              }
+            }}
+          >
+            <DropdownMenuItem onSelect={handleStartRename}>Rename</DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 setIsActionsOpen(false);
@@ -1043,21 +1050,11 @@ function SessionListItem({
         </DropdownMenu>
       </div>
 
-      <AlertDialog open={showArchiveDialog} onOpenChange={setShowArchiveDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Archive session</AlertDialogTitle>
-            <AlertDialogDescription>
-              Archive this session? You can restore archived sessions from Settings &gt; Data
-              Controls.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleArchive}>Archive</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ArchiveSessionDialog
+        open={showArchiveDialog}
+        onOpenChange={setShowArchiveDialog}
+        onConfirm={handleArchive}
+      />
     </div>
   );
 }
