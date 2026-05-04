@@ -102,6 +102,7 @@ function createHandler() {
   const getPublicSessionId = vi.fn<(session: SessionRow) => string>();
   const getParticipantByUserId = vi.fn<(userId: string) => ParticipantRow | null>();
   const transitionSessionStatus = vi.fn<(status: SessionRow["status"]) => Promise<boolean>>();
+  const syncSessionIndexTitle = vi.fn();
   const stopExecution = vi.fn();
   const getSandboxSocket = vi.fn<() => WebSocket | null>();
   const sendToSandbox = vi.fn();
@@ -125,6 +126,7 @@ function createHandler() {
     getPublicSessionId,
     getParticipantByUserId,
     transitionSessionStatus,
+    syncSessionIndexTitle,
     stopExecution,
     getSandboxSocket,
     sendToSandbox,
@@ -150,6 +152,7 @@ function createHandler() {
     getPublicSessionId,
     getParticipantByUserId,
     transitionSessionStatus,
+    syncSessionIndexTitle,
     stopExecution,
     getSandboxSocket,
     sendToSandbox,
@@ -552,9 +555,18 @@ describe("createSessionLifecycleHandler", () => {
     expect(response.status).toBe(403);
   });
 
-  it("updates title, broadcasts, and returns new title", async () => {
-    const { handler, getSession, getParticipantByUserId, repository, broadcast } = createHandler();
+  it("updates title, broadcasts, syncs to D1 index, and returns new title", async () => {
+    const {
+      handler,
+      getSession,
+      getPublicSessionId,
+      getParticipantByUserId,
+      repository,
+      syncSessionIndexTitle,
+      broadcast,
+    } = createHandler();
     getSession.mockReturnValue(createSession());
+    getPublicSessionId.mockReturnValue("public-session-1");
     getParticipantByUserId.mockReturnValue(createParticipant());
 
     const response = await handler.updateTitle(
@@ -568,6 +580,7 @@ describe("createSessionLifecycleHandler", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ title: "New Title" });
     expect(repository.updateSessionTitle).toHaveBeenCalledWith("session-1", "New Title", 1234);
+    expect(syncSessionIndexTitle).toHaveBeenCalledWith("public-session-1", "New Title");
     expect(broadcast).toHaveBeenCalledWith({ type: "session_title", title: "New Title" });
   });
 

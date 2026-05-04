@@ -152,6 +152,10 @@ describe("extractModelFromLabels", () => {
     ).toBe("ollama-cloud/minimax-m2.7");
   });
 
+  it("returns Opus 4.7 for model:opus-4-7 label", () => {
+    expect(extractModelFromLabels([{ name: "model:opus-4-7" }])).toBe("anthropic/claude-opus-4-7");
+  });
+
   it("returns null for unknown model label", () => {
     expect(extractModelFromLabels([{ name: "model:unknown-model" }])).toBeNull();
   });
