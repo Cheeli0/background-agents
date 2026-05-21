@@ -76,6 +76,7 @@ export function GitHubIntegrationSettings() {
   const settings = globalData?.settings;
   const repoOverrides = repoSettingsData?.repos ?? [];
   const availableRepos = reposData?.repos ?? [];
+  const defaultAutoReviewOnOpen = settings?.defaults?.autoReviewOnOpen ?? true;
 
   return (
     <div>
@@ -110,6 +111,7 @@ export function GitHubIntegrationSettings() {
           overrides={repoOverrides}
           availableRepos={availableRepos}
           enabledModelOptions={enabledModelOptions}
+          defaultAutoReviewOnOpen={defaultAutoReviewOnOpen}
         />
       </Section>
     </div>
@@ -508,10 +510,12 @@ function RepoOverridesSection({
   overrides,
   availableRepos,
   enabledModelOptions,
+  defaultAutoReviewOnOpen,
 }: {
   overrides: RepoSettingsEntry[];
   availableRepos: EnrichedRepository[];
   enabledModelOptions: ModelCategory[];
+  defaultAutoReviewOnOpen: boolean;
 }) {
   const [addingRepo, setAddingRepo] = useState("");
 
@@ -553,6 +557,7 @@ function RepoOverridesSection({
               key={entry.repo}
               entry={entry}
               enabledModelOptions={enabledModelOptions}
+              defaultAutoReviewOnOpen={defaultAutoReviewOnOpen}
             />
           ))}
         </div>
@@ -586,9 +591,11 @@ function RepoOverridesSection({
 function RepoOverrideRow({
   entry,
   enabledModelOptions,
+  defaultAutoReviewOnOpen,
 }: {
   entry: RepoSettingsEntry;
   enabledModelOptions: ModelCategory[];
+  defaultAutoReviewOnOpen: boolean;
 }) {
   const [model, setModel] = useState(entry.settings.model ?? "");
   const [effort, setEffort] = useState(entry.settings.reasoningEffort ?? "");
@@ -610,6 +617,12 @@ function RepoOverrideRow({
   const [commentActionInstructions, setCommentActionInstructions] = useState(
     entry.settings.commentActionInstructions ?? ""
   );
+  const [autoReviewMode, setAutoReviewMode] = useState<"global" | "override">(
+    entry.settings.autoReviewOnOpen !== undefined ? "override" : "global"
+  );
+  const [autoReviewOnOpen, setAutoReviewOnOpen] = useState(
+    entry.settings.autoReviewOnOpen ?? defaultAutoReviewOnOpen
+  );
   const [newUsername, setNewUsername] = useState("");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -625,6 +638,14 @@ function RepoOverrideRow({
     }
   };
 
+  const handleAutoReviewModeChange = (newMode: "global" | "override") => {
+    setAutoReviewMode(newMode);
+    if (newMode === "override" && entry.settings.autoReviewOnOpen === undefined) {
+      setAutoReviewOnOpen(defaultAutoReviewOnOpen);
+    }
+    setDirty(true);
+  };
+
   const handleSave = async () => {
     setSaving(true);
 
@@ -636,6 +657,7 @@ function RepoOverrideRow({
     if (codeReviewMode === "override") settings.codeReviewInstructions = codeReviewInstructions;
     if (commentActionMode === "override")
       settings.commentActionInstructions = commentActionInstructions;
+    if (autoReviewMode === "override") settings.autoReviewOnOpen = autoReviewOnOpen;
 
     try {
       const res = await fetch(`/api/integration-settings/github/repos/${owner}/${name}`, {
@@ -741,6 +763,33 @@ function RepoOverrideRow({
         <Button variant="destructive" size="sm" onClick={handleDelete}>
           Remove
         </Button>
+      </div>
+
+      <div>
+        <p className="text-xs font-medium text-muted-foreground mb-1">Auto-review new PRs</p>
+        <div className="flex items-center gap-2 mb-1">
+          <Select value={autoReviewMode} onValueChange={handleAutoReviewModeChange}>
+            <SelectTrigger density="compact" className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="global">Use global default</SelectItem>
+              <SelectItem value="override">Override for this repo</SelectItem>
+            </SelectContent>
+          </Select>
+          {autoReviewMode === "override" && (
+            <label className="flex items-center gap-2 text-xs text-foreground">
+              <Switch
+                checked={autoReviewOnOpen}
+                onCheckedChange={(checked) => {
+                  setAutoReviewOnOpen(checked);
+                  setDirty(true);
+                }}
+              />
+              <span>{autoReviewOnOpen ? "Enabled" : "Disabled"}</span>
+            </label>
+          )}
+        </div>
       </div>
 
       <div>

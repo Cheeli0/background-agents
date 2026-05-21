@@ -11,6 +11,7 @@ import type {
   ServerMessage,
   SessionArtifact,
   SessionState as SharedSessionState,
+  VideoArtifactMetadata,
 } from "@open-inspect/shared";
 
 // WebSocket URL (should come from env in production)
@@ -127,10 +128,12 @@ interface SessionArtifactsResponse {
 type ArtifactMetadata = NonNullable<Artifact["metadata"]>;
 type ArtifactPrState = NonNullable<ArtifactMetadata["prState"]>;
 type ArtifactPreviewStatus = NonNullable<ArtifactMetadata["previewStatus"]>;
-const SCREENSHOT_MIME_TYPES = new Set<ScreenshotArtifactMetadata["mimeType"]>([
+type MediaMimeType = ScreenshotArtifactMetadata["mimeType"] | VideoArtifactMetadata["mimeType"];
+const MEDIA_MIME_TYPES = new Set<MediaMimeType>([
   "image/png",
   "image/jpeg",
   "image/webp",
+  "video/mp4",
 ]);
 
 function toRecord(value: unknown): Record<string, unknown> | null {
@@ -166,11 +169,11 @@ function toPreviewStatusOrUndefined(value: unknown): ArtifactPreviewStatus | und
   return undefined;
 }
 
-function isScreenshotMimeType(value: string): value is ScreenshotArtifactMetadata["mimeType"] {
-  return SCREENSHOT_MIME_TYPES.has(value as ScreenshotArtifactMetadata["mimeType"]);
+function isMediaMimeType(value: string): value is MediaMimeType {
+  return MEDIA_MIME_TYPES.has(value as MediaMimeType);
 }
 
-function toViewportOrUndefined(value: unknown): ArtifactMetadata["viewport"] | undefined {
+function toViewportOrUndefined(value: unknown): { width: number; height: number } | undefined {
   const viewport = toRecord(value);
   const width = viewport ? toNumberOrUndefined(viewport.width) : undefined;
   const height = viewport ? toNumberOrUndefined(viewport.height) : undefined;
@@ -208,12 +211,19 @@ function toUiArtifact(artifact: RawArtifact | SessionArtifact): Artifact {
   const sizeBytes = toNumberOrUndefined(rawMetadata.sizeBytes);
   const viewport = toViewportOrUndefined(rawMetadata.viewport);
   const sourceUrl = toStringOrUndefined(rawMetadata.sourceUrl);
+  const endUrl = toStringOrUndefined(rawMetadata.endUrl);
   const fullPage = toBooleanOrUndefined(rawMetadata.fullPage);
   const annotated = toBooleanOrUndefined(rawMetadata.annotated);
   const caption = toStringOrUndefined(rawMetadata.caption);
+  const durationMs = toNumberOrUndefined(rawMetadata.durationMs);
+  const recordingStartedAt = toNumberOrUndefined(rawMetadata.recordingStartedAt);
+  const recordingEndedAt = toNumberOrUndefined(rawMetadata.recordingEndedAt);
+  const dimensions = toViewportOrUndefined(rawMetadata.dimensions);
+  const truncated = toBooleanOrUndefined(rawMetadata.truncated);
+  const hasAudio = rawMetadata.hasAudio === false ? false : undefined;
   const previewStatus = toPreviewStatusOrUndefined(rawMetadata.previewStatus);
 
-  const metadata: Artifact["metadata"] = {
+  const metadata: ArtifactMetadata = {
     prNumber,
     prState,
     mode,
@@ -223,16 +233,23 @@ function toUiArtifact(artifact: RawArtifact | SessionArtifact): Artifact {
     provider,
     filename,
     objectKey,
-    mimeType: mimeType && isScreenshotMimeType(mimeType) ? mimeType : undefined,
+    mimeType: mimeType && isMediaMimeType(mimeType) ? mimeType : undefined,
     sizeBytes:
       sizeBytes !== undefined && Number.isFinite(sizeBytes) && sizeBytes >= 0
         ? sizeBytes
         : undefined,
     viewport,
     sourceUrl,
+    endUrl,
     fullPage,
     annotated,
     caption,
+    durationMs,
+    recordingStartedAt,
+    recordingEndedAt,
+    dimensions,
+    truncated,
+    hasAudio,
     previewStatus,
   };
   const hasMetadata = Object.values(metadata).some((value) => value !== undefined);

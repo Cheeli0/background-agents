@@ -1,4 +1,4 @@
-import { generateInternalToken } from "../utils/internal";
+import { generateInternalToken } from "@open-inspect/shared";
 import type { Env } from "../types";
 
 export interface ClassifierRuntimeConfig {

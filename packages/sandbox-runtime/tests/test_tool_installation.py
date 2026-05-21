@@ -207,7 +207,7 @@ class TestInstallTools:
         opencode_dir = workdir / ".opencode"
         package_json = json.loads((opencode_dir / "package.json").read_text())
         assert package_json["type"] == "module"
-        assert (opencode_dir / "node_modules").is_symlink()
+        assert (opencode_dir / "node_modules").is_dir()
 
     def test_does_not_overwrite_existing_files(self, tmp_path):
         """Pre-existing package.json or node_modules in .opencode/ should not be overwritten."""
@@ -262,6 +262,27 @@ class TestInstallTools:
         assert (tool_dest / "_bridge-client.js").exists()
         js_files = list(tool_dest.glob("*.js"))
         assert len(js_files) == 3
+
+    def test_slack_notify_installed_when_enabled(self, tmp_path):
+        """slack-notify.js should be installed when AGENT_SLACK_NOTIFY_ENABLED=true."""
+        sup = _make_supervisor()
+        workdir = tmp_path / "workspace"
+        workdir.mkdir()
+
+        tools_dir = tmp_path / "app" / "sandbox" / "tools"
+        tools_dir.mkdir(parents=True)
+        (tools_dir / "slack-notify.js").write_text("// slack-notify")
+        (tools_dir / "spawn-task.js").write_text("// spawn-task")
+
+        with (
+            patch.dict("os.environ", {"AGENT_SLACK_NOTIFY_ENABLED": "true"}),
+            _patch_paths(legacy=tmp_path / "no-legacy", tools=tools_dir),
+        ):
+            sup._install_tools(workdir)
+
+        tool_dest = workdir / ".opencode" / "tool"
+        assert (tool_dest / "slack-notify.js").exists()
+        assert (tool_dest / "spawn-task.js").exists()
 
 
 class TestInstallBinScripts:
@@ -329,16 +350,38 @@ class TestInstallBinScripts:
 class TestInstallSkills:
     """Cases for _install_skills() bundled Skill installation."""
 
-    def test_skills_dir_files_copied(self, tmp_path):
-        """Bundled Skills should be copied into .opencode/skills."""
+    def test_complete_skill_directories_are_copied(self, tmp_path):
+        """Bundled Skills should include companion files and directories."""
         sup = _make_supervisor()
         workdir = tmp_path / "workspace"
         workdir.mkdir()
 
         skills_dir = tmp_path / "app" / "sandbox" / "skills"
         agent_browser_dir = skills_dir / "agent-browser"
-        agent_browser_dir.mkdir(parents=True)
+        scripts_dir = agent_browser_dir / "scripts"
+        references_dir = agent_browser_dir / "references"
+        scripts_dir.mkdir(parents=True)
+        references_dir.mkdir()
         (agent_browser_dir / "SKILL.md").write_text("# agent-browser")
+        (scripts_dir / "helper.py").write_text("print('helper')")
+        (references_dir / "notes.md").write_text("Use this reference")
+        pycache_dir = scripts_dir / "__pycache__"
+        pycache_dir.mkdir()
+        (pycache_dir / "helper.cpython-314.pyc").write_bytes(b"compiled")
+
+        record_video_dir = skills_dir / "record-video"
+        record_video_dir.mkdir()
+        (record_video_dir / "SKILL.md").write_text("# record-video")
+        (record_video_dir / "helper.txt").write_text("fresh install")
+
+        (skills_dir / "README.md").write_text("not a skill")
+        no_skill_dir = skills_dir / "not-a-skill"
+        no_skill_dir.mkdir()
+        (no_skill_dir / "notes.md").write_text("missing SKILL.md")
+
+        existing_file = workdir / ".opencode" / "skills" / "agent-browser" / "local.txt"
+        existing_file.parent.mkdir(parents=True)
+        existing_file.write_text("keep me")
 
         with _patch_paths(
             legacy=tmp_path / "no-legacy",
@@ -347,9 +390,17 @@ class TestInstallSkills:
         ):
             sup._install_skills(workdir)
 
-        skill_dest = workdir / ".opencode" / "skills" / "agent-browser" / "SKILL.md"
-        assert skill_dest.exists()
-        assert skill_dest.read_text() == "# agent-browser"
+        skill_dest = workdir / ".opencode" / "skills" / "agent-browser"
+        assert (skill_dest / "SKILL.md").read_text() == "# agent-browser"
+        assert (skill_dest / "scripts" / "helper.py").read_text() == "print('helper')"
+        assert (skill_dest / "references" / "notes.md").read_text() == "Use this reference"
+        assert not (skill_dest / "scripts" / "__pycache__").exists()
+        assert existing_file.read_text() == "keep me"
+        fresh_skill_dest = workdir / ".opencode" / "skills" / "record-video"
+        assert (fresh_skill_dest / "SKILL.md").read_text() == "# record-video"
+        assert (fresh_skill_dest / "helper.txt").read_text() == "fresh install"
+        assert not (workdir / ".opencode" / "skills" / "README.md").exists()
+        assert not (workdir / ".opencode" / "skills" / "not-a-skill").exists()
 
     def test_skills_dir_non_directory_is_ignored(self, tmp_path):
         """A non-directory skills path should not raise or copy files."""

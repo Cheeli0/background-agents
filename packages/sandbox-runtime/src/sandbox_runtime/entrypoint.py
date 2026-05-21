@@ -28,6 +28,11 @@ from .log_config import configure_logging, get_logger
 configure_logging()
 
 
+AGENT_TOOLS_GATED_ON_ENV: dict[str, str] = {
+    "slack-notify.js": "AGENT_SLACK_NOTIFY_ENABLED",
+}
+
+
 class SandboxSupervisor:
     """
     Supervisor process for sandbox lifecycle management.
@@ -331,11 +336,17 @@ class SandboxSupervisor:
         if legacy_tool.exists():
             shutil.copy(legacy_tool, tool_dest / "create-pull-request.js")
 
-        # Copy all .js files from tools/ — these must export tool() for OpenCode
+        # Copy all .js files from tools/ — these must export tool() for OpenCode.
+        # Tools listed in AGENT_TOOLS_GATED_ON_ENV are skipped unless their gate
+        # env var is "true".
         if tools_dir.exists():
             for tool_file in tools_dir.iterdir():
-                if tool_file.is_file() and tool_file.suffix == ".js":
-                    shutil.copy(tool_file, tool_dest / tool_file.name)
+                if not (tool_file.is_file() and tool_file.suffix == ".js"):
+                    continue
+                gate_env = AGENT_TOOLS_GATED_ON_ENV.get(tool_file.name)
+                if gate_env and os.environ.get(gate_env, "").lower() != "true":
+                    continue
+                shutil.copy(tool_file, tool_dest / tool_file.name)
 
         # Copy pre-built deps (package.json, package-lock.json, node_modules)
         # from the image staging directory.  This gives OpenCode a lockfile
@@ -365,6 +376,8 @@ class SandboxSupervisor:
                 local_modules.symlink_to(global_modules)
             except Exception as e:
                 self.log.warn("opencode.symlink_error", exc=e)
+                if global_modules.is_dir() and not local_modules.exists():
+                    shutil.copytree(global_modules, local_modules, symlinks=True)
 
     def _install_bin_scripts(self) -> None:
         """Install standalone CLI scripts into /usr/local/bin.
@@ -399,8 +412,14 @@ class SandboxSupervisor:
                 continue
 
             dest_dir = skills_dest / skill_dir.name
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy(skill_file, dest_dir / "SKILL.md")
+            # Preserve symlinks rather than dereferencing paths outside the bundled skill.
+            shutil.copytree(
+                skill_dir,
+                dest_dir,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"),
+                symlinks=True,
+            )
             installed_any = True
 
         if installed_any:

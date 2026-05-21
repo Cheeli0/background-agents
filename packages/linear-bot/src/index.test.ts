@@ -153,7 +153,7 @@ describe("POST /webhook AgentSessionEvent deduplication", () => {
     });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "Invalid payload" });
+    expect(await response.json()).toEqual({ error: "Missing Linear-Delivery header" });
     expect(handleAgentSessionEvent).not.toHaveBeenCalled();
   });
 });

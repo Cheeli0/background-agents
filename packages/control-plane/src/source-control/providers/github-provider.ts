@@ -42,11 +42,15 @@ function extractHttpStatus(error: unknown): number | undefined {
   return undefined;
 }
 
-function getGitHubApiHeaders(token?: string, extraHeaders?: HeadersInit): HeadersInit {
+function getGitHubApiHeaders(
+  token?: string,
+  userAgent = USER_AGENT,
+  extraHeaders?: HeadersInit
+): HeadersInit {
   return {
     Accept: "application/vnd.github.v3+json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    "User-Agent": USER_AGENT,
+    "User-Agent": userAgent,
     ...extraHeaders,
   };
 }
@@ -86,10 +90,12 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
 
   private readonly appConfig?: GitHubProviderConfig["appConfig"];
   private readonly cacheStore?: GitHubProviderConfig["cacheStore"];
+  private readonly userAgent: string;
 
   constructor(config: GitHubProviderConfig = {}) {
     this.appConfig = config.appConfig;
     this.cacheStore = config.cacheStore;
+    this.userAgent = config.userAgent || USER_AGENT;
   }
 
   /**
@@ -102,7 +108,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     const response = await fetchWithTimeout(
       `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}`,
       {
-        headers: getGitHubApiHeaders(auth.token),
+        headers: getGitHubApiHeaders(auth.token, this.userAgent),
       }
     );
 
@@ -158,7 +164,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
       {
         method: "POST",
         headers: {
-          ...getGitHubApiHeaders(auth.token),
+          ...getGitHubApiHeaders(auth.token, this.userAgent),
           "Content-Type": "application/json",
         },
         body: JSON.stringify(requestBody),
@@ -236,12 +242,10 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     }
 
     try {
-      const repo = await getInstallationRepository(
-        this.appConfig,
-        config.owner,
-        config.name,
-        this.cacheStore ? { cacheStore: this.cacheStore } : undefined
-      );
+      const repo = await getInstallationRepository(this.appConfig, config.owner, config.name, {
+        cacheStore: this.cacheStore,
+        userAgent: this.userAgent,
+      });
       if (!repo) {
         return null;
       }
@@ -311,10 +315,10 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     }
 
     try {
-      const result = await listInstallationRepositories(
-        this.appConfig,
-        this.cacheStore ? { cacheStore: this.cacheStore } : undefined
-      );
+      const result = await listInstallationRepositories(this.appConfig, {
+        cacheStore: this.cacheStore,
+        userAgent: this.userAgent,
+      });
       return result.repos;
     } catch (error) {
       throw SourceControlProviderError.fromFetchError(
@@ -337,12 +341,10 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     }
 
     try {
-      return await listRepositoryBranches(
-        this.appConfig,
-        config.owner,
-        config.name,
-        this.cacheStore ? { cacheStore: this.cacheStore } : undefined
-      );
+      return await listRepositoryBranches(this.appConfig, config.owner, config.name, {
+        cacheStore: this.cacheStore,
+        userAgent: this.userAgent,
+      });
     } catch (error) {
       throw SourceControlProviderError.fromFetchError(
         `Failed to list branches: ${error instanceof Error ? error.message : String(error)}`,
@@ -364,7 +366,10 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     }
 
     try {
-      const token = await getCachedInstallationToken(this.appConfig);
+      const token = await getCachedInstallationToken(this.appConfig, {
+        cacheStore: this.cacheStore,
+        userAgent: this.userAgent,
+      });
       return {
         authType: "app",
         token,
@@ -416,7 +421,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
         {
           method: "POST",
           headers: {
-            ...getGitHubApiHeaders(accessToken),
+            ...getGitHubApiHeaders(accessToken, this.userAgent),
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ labels }),
@@ -449,7 +454,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
         {
           method: "POST",
           headers: {
-            ...getGitHubApiHeaders(accessToken),
+            ...getGitHubApiHeaders(accessToken, this.userAgent),
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ reviewers }),
@@ -472,7 +477,7 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     const response = await fetchWithTimeout(
       `${GITHUB_API_BASE}/repos/${config.owner}/${config.name}/pulls/${config.pullRequestNumber}`,
       {
-        headers: getGitHubApiHeaders(token),
+        headers: getGitHubApiHeaders(token, this.userAgent),
       }
     );
 

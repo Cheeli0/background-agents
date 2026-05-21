@@ -166,12 +166,17 @@ await configureGitIdentity({
 
 Choose the AI model that fits your task, with per-session reasoning effort controls:
 
-| Provider       | Models                                                      |
-| -------------- | ----------------------------------------------------------- |
-| Anthropic      | Claude Haiku 4.5, Sonnet 4.5/4.6, Opus 4.5/4.6              |
-| OpenAI         | GPT 5.2, GPT 5.4, GPT 5.2 Codex, 5.3 Codex, 5.3 Codex Spark |
-| GitHub Copilot | Copilot-backed GPT 4.1, GPT 5, Claude Sonnet 4              |
-| OpenCode Zen   | Kimi K2.5, MiniMax M2.5, GLM 5.1 (opt-in)                   |
+| Provider       | Models                                                               |
+| -------------- | -------------------------------------------------------------------- |
+| Anthropic      | Claude Haiku 4.5, Sonnet 4.5/4.6, Opus 4.5/4.6/4.7                   |
+| OpenAI         | GPT 5.2, GPT 5.4, GPT 5.5, GPT 5.2 Codex, 5.3 Codex, 5.3 Codex Spark |
+| GitHub Copilot | Copilot-backed GPT, Claude, and Gemini models                         |
+| Z.AI           | GLM 4.5 Air, GLM 4.7, GLM 5, GLM 5.1, GLM 5 Turbo                    |
+| MiniMax        | MiniMax M2.7                                                         |
+| Fireworks AI   | Kimi K2.5 Turbo                                                      |
+| OpenCode Zen   | Kimi K2.5, MiniMax M2.5, GLM 5 (opt-in)                              |
+| OpenCode Go    | GLM 5.1, Kimi K2.5/K2.6, Qwen3.6 Plus, MiniMax M2.7, MiMo V2         |
+| Ollama Cloud   | GLM 5.1, Kimi K2.5, MiniMax M2.7                                     |
 
 OpenAI models work with your existing ChatGPT subscription via OAuth — no separate API key needed.
 See **[docs/OPENAI_MODELS.md](docs/OPENAI_MODELS.md)** for setup instructions.
@@ -183,11 +188,11 @@ Interact with agents from wherever your team already works:
 - **Web UI** — Full session management with real-time streaming, model/reasoning selectors, terminal
   panel, and multiplayer presence
 - **Slack Bot** — @mention or DM to start a session; replies thread back with results. Per-user
-  model and branch preferences via App Home
-- **GitHub Bot** — Auto-review on PR open, respond to @mentions in PR comments, or trigger on
-  reviewer assignment. Configurable per-repo
-- **Linear Bot** — Assign an issue to the agent and it creates a coding session, posts progress
-  activities, and links the resulting PR
+  model and branch preferences via App Home. See [Slack integration](docs/integrations/SLACK.md)
+- **GitHub Bot** — Auto-review on PR open or respond to @mentions in PR comments. Configurable
+  per-repo. See [GitHub integration](docs/integrations/GITHUB.md)
+- **Linear Bot** — Mention or assign the agent on an issue to start a coding session, post progress
+  activities, and link the resulting PR. See [Linear integration](docs/integrations/LINEAR.md)
 - **Webhooks** — Trigger sessions from any external system via authenticated HTTP POST
 
 ### Automations

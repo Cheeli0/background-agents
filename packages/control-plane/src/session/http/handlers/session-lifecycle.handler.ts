@@ -27,6 +27,11 @@ interface AssociatedPrResponse {
   } | null;
 }
 
+/**
+ * Request body for the /internal/init endpoint.
+ * The router constructs this from SessionInitInput — see session/initialize.ts.
+ * Note: `userId` here is the participantUserId from SessionInitInput.
+ */
 interface InitRequest {
   sessionName: string;
   repoOwner: string;

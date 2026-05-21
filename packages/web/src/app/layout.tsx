@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "./providers";
+import { APP_ICON_URL, APP_NAME } from "@/lib/site-config";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,12 +15,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Open-Inspect",
+  title: APP_NAME,
   description: "Background coding agent for your team",
   icons: {
-    icon: [{ url: "/icon.png", type: "image/png" }],
-    apple: [{ url: "/apple-icon.png", type: "image/png" }],
-    shortcut: ["/icon.png"],
+    icon: [{ url: APP_ICON_URL || "/brand/brand-mark.png", type: "image/png" }],
+    apple: [{ url: APP_ICON_URL || "/brand/brand-mark.png", type: "image/png" }],
+    shortcut: [APP_ICON_URL || "/brand/brand-mark.png"],
   },
 };
 
