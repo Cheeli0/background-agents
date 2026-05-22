@@ -14,6 +14,12 @@ variable "worker_name" {
   type        = string
 }
 
+variable "worker_subdomain" {
+  description = "Cloudflare Workers account subdomain used for the default workers.dev URL"
+  type        = string
+  default     = null
+}
+
 variable "script_path" {
   description = "Path to the bundled JavaScript worker script file"
   type        = string
