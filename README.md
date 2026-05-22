@@ -170,7 +170,7 @@ Choose the AI model that fits your task, with per-session reasoning effort contr
 | -------------- | -------------------------------------------------------------------- |
 | Anthropic      | Claude Haiku 4.5, Sonnet 4.5/4.6, Opus 4.5/4.6/4.7                   |
 | OpenAI         | GPT 5.2, GPT 5.4, GPT 5.5, GPT 5.2 Codex, 5.3 Codex, 5.3 Codex Spark |
-| GitHub Copilot | Copilot-backed GPT, Claude, and Gemini models                         |
+| GitHub Copilot | Copilot-backed GPT, Claude, and Gemini models                        |
 | Z.AI           | GLM 4.5 Air, GLM 4.7, GLM 5, GLM 5.1, GLM 5 Turbo                    |
 | MiniMax        | MiniMax M2.7                                                         |
 | Fireworks AI   | Kimi K2.5 Turbo                                                      |
@@ -215,7 +215,9 @@ Every session runs in an isolated Modal sandbox with a full development environm
   and UI verification
 - **Code-server:** Optional browser-based VS Code connected to the session workspace
 - **Web terminal:** ttyd-powered terminal accessible from the session UI
-- **Port tunneling:** Expose up to 10 dev server ports via encrypted tunnels
+- **Port tunneling:** Expose up to 10 dev server ports via encrypted tunnels. URLs are available
+  in-sandbox at `/workspace/.tunnels.env` before `.openinspect/start.sh` runs
+  ([details](docs/HOW_IT_WORKS.md#tunnel-urls-inside-the-sandbox))
 - **Repo secrets:** AES-256-GCM encrypted, scoped per-repo or globally, injected as env vars at
   spawn time. Supports bulk `.env` paste import
 
