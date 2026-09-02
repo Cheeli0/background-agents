@@ -24,7 +24,7 @@ cd "${DEPLOY_PATH}" || {
   exit 1
 }
 
-# Install Python deps via uv (mirrors terraform/modules/modal-app/scripts/deploy.sh).
+# Install Python deps via uv (mirrors the Modal deployment helper).
 # uv provisions an isolated, project-local .venv, avoiding writes to the
 # read-only system/Nix Python that break a plain `pip install`.
 if ! command -v uv >/dev/null 2>&1; then

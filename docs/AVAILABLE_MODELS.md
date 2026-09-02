@@ -1,10 +1,9 @@
 # Available Models
 
 Open-Inspect exposes these models in the model picker and integration preferences. The default
-enabled set includes Anthropic and OpenAI models. xAI / SuperGrok, OpenCode Zen, Z.AI Coding Plan,
-and DeepSeek models are available but must be enabled in **Settings > Models**. OpenAI and SuperGrok
-subscriptions are configured in **Settings > Provider Accounts**; Z.AI Coding Plan requires
-`ZHIPU_API_KEY`; DeepSeek requires `DEEPSEEK_API_KEY`.
+enabled set includes Anthropic and OpenAI models. Every other provider is opt-in under **Settings >
+Models**. OpenAI and SuperGrok subscriptions are configured in **Settings > Provider Accounts**.
+API-key providers require the matching global, environment, or repository secret described below.
 
 OpenAI and xAI session selectors offer provider policy, any active connected account, and API-key
 mode. Automation editors can resolve defaults on each run or pin an account/API-key choice.
@@ -83,3 +82,43 @@ DeepSeek models require `DEEPSEEK_API_KEY` as a global or repository secret.
 | ---------------------------- | ----------------- | ------------ | ----------------- | -------------- |
 | `deepseek/deepseek-v4-flash` | DeepSeek V4 Flash | Fast model   | Not supported     | N/A            |
 | `deepseek/deepseek-v4-pro`   | DeepSeek V4 Pro   | Most capable | Not supported     | N/A            |
+
+## MiniMax Coding Plan
+
+MiniMax Coding Plan requires `MINIMAX_API_KEY` as a global, environment, or repository secret.
+
+| Model ID                           | Display name | Description         | Reasoning efforts | Default effort |
+| ---------------------------------- | ------------ | ------------------- | ----------------- | -------------- |
+| `minimax-coding-plan/MiniMax-M2.7` | MiniMax M2.7 | MiniMax Coding Plan | Not supported     | N/A            |
+
+## Fireworks AI
+
+Fireworks AI requires `FIREWORKS_API_KEY` as a global, environment, or repository secret.
+
+| Model ID                       | Display name    | Description  | Reasoning efforts | Default effort |
+| ------------------------------ | --------------- | ------------ | ----------------- | -------------- |
+| `fireworks-ai/kimi-k2p5-turbo` | Kimi K2.5 Turbo | Fireworks AI | Not supported     | N/A            |
+
+## OpenCode Go
+
+OpenCode Go requires `OPENCODE_GO_API_KEY` as a global, environment, or repository secret.
+
+| Model ID                   | Display name | Description   | Reasoning efforts | Default effort |
+| -------------------------- | ------------ | ------------- | ----------------- | -------------- |
+| `opencode-go/glm-5.1`      | GLM 5.1      | Z.ai          | Not supported     | N/A            |
+| `opencode-go/kimi-k2.5`    | Kimi K2.5    | Moonshot AI   | Not supported     | N/A            |
+| `opencode-go/kimi-k2.6`    | Kimi K2.6    | Moonshot AI   | Not supported     | N/A            |
+| `opencode-go/qwen3.6-plus` | Qwen3.6 Plus | Alibaba Cloud | Not supported     | N/A            |
+| `opencode-go/minimax-m2.7` | MiniMax M2.7 | MiniMax       | Not supported     | N/A            |
+| `opencode-go/mimo-v2-pro`  | MiMo V2 Pro  | Xiaomi        | Not supported     | N/A            |
+| `opencode-go/mimo-v2-omni` | MiMo V2 Omni | Xiaomi        | Not supported     | N/A            |
+
+## Ollama Cloud
+
+Ollama Cloud requires `OLLAMA_CLOUD_API_KEY` as a global, environment, or repository secret.
+
+| Model ID                    | Display name | Description | Reasoning efforts | Default effort |
+| --------------------------- | ------------ | ----------- | ----------------- | -------------- |
+| `ollama-cloud/glm-5.1`      | GLM 5.1      | Z.ai        | Not supported     | N/A            |
+| `ollama-cloud/kimi-k2.5`    | Kimi K2.5    | Moonshot AI | Not supported     | N/A            |
+| `ollama-cloud/minimax-m2.7` | MiniMax M2.7 | MiniMax     | Not supported     | N/A            |

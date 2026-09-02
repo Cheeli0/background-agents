@@ -20,6 +20,12 @@ from .constants import (
 )
 from .git_excludes import install_runtime_git_excludes
 from .process_output import iter_process_lines
+from .provider_auth import (
+    model_route,
+    provider_auth_entries,
+    provider_plugin,
+    write_auth_entries,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -382,6 +388,14 @@ class OpenCodeServer:
         except Exception as e:
             self.log.warn("managed_oauth.setup_error", exc=e)
 
+    def _setup_provider_auth(self) -> None:
+        """Write API-key auth for a selected fork-only provider."""
+        entries = provider_auth_entries(self.provider, os.environ)
+        if not entries:
+            return
+        write_auth_entries(entries)
+        self.log.info("provider_auth.setup", provider=self.provider)
+
     def _resolve_mcp_servers(self) -> list[Mapping[str, Any]]:
         """Resolve MCP servers from session config."""
         return list(self.mcp_servers)
@@ -480,11 +494,12 @@ class OpenCodeServer:
     async def start(self, repositories: tuple[RepoEntry, ...], workdir: Path) -> None:
         """Start OpenCode server with configuration."""
         self._setup_managed_oauth()
+        self._setup_provider_auth()
         self.log.info("opencode.start")
 
         # Build OpenCode config from session settings
         opencode_config: dict[str, Any] = {
-            "model": f"{self.provider}/{self.model}",
+            "model": model_route(self.provider, self.model),
             "permission": {"*": {"*": "allow"}},
         }
 
@@ -521,6 +536,17 @@ class OpenCodeServer:
             shutil.copy(plugin_source, plugin_dir / filename)
             installed_runtime_paths.add(f".opencode/plugins/{filename}")
             self.log.info(log_event)
+
+        provider_plugin_name = provider_plugin(self.provider)
+        if provider_plugin_name:
+            plugin_source = Path(f"/app/sandbox_runtime/plugins/{provider_plugin_name}")
+            if not plugin_source.exists():
+                raise RuntimeError(f"Missing provider plugin: {plugin_source}")
+            plugin_dir = opencode_dir / "plugins"
+            plugin_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy(plugin_source, plugin_dir / provider_plugin_name)
+            installed_runtime_paths.add(f".opencode/plugins/{provider_plugin_name}")
+            self.log.info("provider_auth.plugin_deployed", provider=self.provider)
 
         if installed_runtime_paths and (workdir / ".git").exists():
             try:

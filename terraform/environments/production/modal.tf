@@ -2,23 +2,22 @@
 # Modal Sandbox Infrastructure
 # =============================================================================
 
-# Calculate hash of Modal source files for change detection
-# Uses sha256sum (Linux) or shasum (macOS) for cross-platform compatibility
-# Includes every bundled source file, including skill Markdown and companion
-# assets, plus dependency and deployment inputs.
-data "external" "modal_source_hash" {
-  count = local.use_modal_backend ? 1 : 0
-
-  program = ["bash", "-c", <<-EOF
-    cd ${var.project_root}
-    if command -v sha256sum &> /dev/null; then
-      hash=$( ( find packages/modal-infra/src packages/sandbox-runtime/src -type f -exec sha256sum {} \; ; sha256sum packages/modal-infra/deploy.py packages/modal-infra/pyproject.toml packages/modal-infra/uv.lock terraform/modules/modal-app/scripts/deploy.sh ) | sort | sha256sum | cut -d' ' -f1)
-    else
-      hash=$( ( find packages/modal-infra/src packages/sandbox-runtime/src -type f -exec shasum -a 256 {} \; ; shasum -a 256 packages/modal-infra/deploy.py packages/modal-infra/pyproject.toml packages/modal-infra/uv.lock terraform/modules/modal-app/scripts/deploy.sh ) | sort | shasum -a 256 | cut -d' ' -f1)
-    fi
-    echo "{\"hash\": \"$hash\"}"
-  EOF
-  ]
+# Calculate the Modal source hash with Terraform functions so the deployment
+# path works on Windows, macOS, and Linux without shell-specific utilities.
+locals {
+  modal_source_files = concat(
+    [for file in fileset("${var.project_root}/packages/modal-infra/src", "**") : "${var.project_root}/packages/modal-infra/src/${file}"],
+    [for file in fileset("${var.project_root}/packages/sandbox-runtime/src", "**") : "${var.project_root}/packages/sandbox-runtime/src/${file}"],
+    [
+      "${var.project_root}/packages/modal-infra/deploy.py",
+      "${var.project_root}/packages/modal-infra/pyproject.toml",
+      "${var.project_root}/packages/modal-infra/uv.lock",
+      "${var.project_root}/terraform/modules/modal-app/scripts/modal-helper.mjs",
+    ]
+  )
+  modal_source_hash = sha256(join("", [
+    for file in sort(local.modal_source_files) : "${file}:${filesha256(file)}"
+  ]))
 }
 
 module "modal_app" {
@@ -34,7 +33,7 @@ module "modal_app" {
   modal_environment_web_suffix = var.modal_environment_web_suffix
   deploy_path                  = "${var.project_root}/packages/modal-infra"
   deploy_module                = "deploy"
-  source_hash                  = data.external.modal_source_hash[0].result.hash
+  source_hash                  = local.modal_source_hash
 
   secrets = [
     {

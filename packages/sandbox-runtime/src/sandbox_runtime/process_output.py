@@ -17,14 +17,16 @@ TRUNCATED_LINE_NOTICE = "[log line too large to forward; truncated]"
 async def terminate_owned_subprocess(
     process: asyncio.subprocess.Process,
     *,
-    kill_process_group: Callable[[int, int], None] = os.killpg,
+    kill_process_group: Callable[[int, int], None] | None = None,
 ) -> None:
     """Kill a child-owned process group and reap its leader."""
     if process.returncode is None:
         process_id = getattr(process, "pid", None)
-        if isinstance(process_id, int):
+        platform_killpg = getattr(os, "killpg", None)
+        group_killer = kill_process_group or platform_killpg
+        if isinstance(process_id, int) and group_killer is not None:
             with contextlib.suppress(ProcessLookupError):
-                kill_process_group(process_id, signal.SIGKILL)
+                group_killer(process_id, signal.SIGKILL)
         else:
             process.kill()
     await asyncio.shield(process.wait())
@@ -33,7 +35,7 @@ async def terminate_owned_subprocess(
 async def communicate_owned_subprocess(
     process: asyncio.subprocess.Process,
     *,
-    kill_process_group: Callable[[int, int], None] = os.killpg,
+    kill_process_group: Callable[[int, int], None] | None = None,
 ) -> tuple[bytes, bytes]:
     """Communicate with a child and terminate its process group if cancelled."""
     try:

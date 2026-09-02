@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import deploy
+import pytest
 
 
 def test_build_sandbox_image_eagerly_builds_against_deployed_app(monkeypatch) -> None:
@@ -22,7 +23,7 @@ def test_build_sandbox_image_eagerly_builds_against_deployed_app(monkeypatch) ->
     build.assert_called_once_with(deployed_app)
 
 
-def _run_deploy_script(
+def _run_deploy_helper(
     tmp_path: Path, *, deploy_module: str = "deploy", fail_eager_build: bool = False
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     bin_dir = tmp_path / "bin"
@@ -32,16 +33,25 @@ def _run_deploy_script(
     deploy_dir.mkdir()
     (deploy_dir / "pyproject.toml").touch()
 
-    uv = bin_dir / "uv"
-    uv.write_text(
-        """#!/bin/sh
+    if os.name == "nt":
+        uv = bin_dir / "uv.cmd"
+        uv.write_text(
+            """@echo off
+echo %*>>"%UV_CALL_LOG%"
+if "%FAIL_EAGER_BUILD%"=="1" if "%*"=="run python deploy.py --build-sandbox-image" exit /b 42
+"""
+        )
+    else:
+        uv = bin_dir / "uv"
+        uv.write_text(
+            """#!/bin/sh
 printf '%s\\n' "$*" >> "$UV_CALL_LOG"
 if [ "${FAIL_EAGER_BUILD:-}" = "1" ] && [ "$*" = "run python deploy.py --build-sandbox-image" ]; then
     exit 42
 fi
 """
-    )
-    uv.chmod(0o755)
+        )
+        uv.chmod(0o755)
 
     environment = os.environ | {
         "APP_NAME": "open-inspect",
@@ -54,9 +64,9 @@ fi
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "UV_CALL_LOG": str(call_log),
     }
-    script = Path(__file__).parents[3] / "terraform/modules/modal-app/scripts/deploy.sh"
+    helper = Path(__file__).parents[3] / "terraform/modules/modal-app/scripts/modal-helper.mjs"
     result = subprocess.run(
-        [str(script)],
+        ["node", str(helper), "deploy"],
         capture_output=True,
         check=False,
         env=environment,
@@ -65,8 +75,9 @@ fi
     return result, call_log.read_text().splitlines()
 
 
-def test_modal_deploy_script_builds_sandbox_image_before_app_deploy(tmp_path: Path) -> None:
-    result, uv_calls = _run_deploy_script(tmp_path)
+@pytest.mark.skipif(os.name == "nt", reason="fake uv executable uses a POSIX shell")
+def test_modal_deploy_helper_builds_sandbox_image_before_app_deploy(tmp_path: Path) -> None:
+    result, uv_calls = _run_deploy_helper(tmp_path)
 
     assert result.returncode == 0
     assert uv_calls == [
@@ -76,8 +87,9 @@ def test_modal_deploy_script_builds_sandbox_image_before_app_deploy(tmp_path: Pa
     ]
 
 
-def test_modal_deploy_script_stops_when_eager_build_fails(tmp_path: Path) -> None:
-    result, uv_calls = _run_deploy_script(tmp_path, fail_eager_build=True)
+@pytest.mark.skipif(os.name == "nt", reason="fake uv executable uses a POSIX shell")
+def test_modal_deploy_helper_stops_when_eager_build_fails(tmp_path: Path) -> None:
+    result, uv_calls = _run_deploy_helper(tmp_path, fail_eager_build=True)
 
     assert result.returncode == 1
     assert uv_calls == [
@@ -86,8 +98,9 @@ def test_modal_deploy_script_stops_when_eager_build_fails(tmp_path: Path) -> Non
     ]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="fake uv executable uses a POSIX shell")
 def test_src_modal_deploy_builds_sandbox_image_before_app_deploy(tmp_path: Path) -> None:
-    result, uv_calls = _run_deploy_script(tmp_path, deploy_module="src")
+    result, uv_calls = _run_deploy_helper(tmp_path, deploy_module="src")
 
     assert result.returncode == 0
     assert uv_calls == [
@@ -103,4 +116,4 @@ def test_modal_deployment_hash_includes_deployment_entrypoints() -> None:
     ).read_text()
 
     assert "packages/modal-infra/deploy.py" in modal_tf
-    assert "terraform/modules/modal-app/scripts/deploy.sh" in modal_tf
+    assert "terraform/modules/modal-app/scripts/modal-helper.mjs" in modal_tf

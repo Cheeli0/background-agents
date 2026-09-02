@@ -1053,6 +1053,10 @@ Go to your fork's Settings → Secrets and variables → Actions, and add:
 | `OPENAI_API_KEY`                   | Optional OpenAI API key used when a session selects API-key authentication                  |
 | `XAI_API_KEY`                      | Optional xAI API key used when a session selects API-key authentication                     |
 | `DEEPSEEK_API_KEY`                 | DeepSeek API key (optional, required only for DeepSeek models)                              |
+| `MINIMAX_API_KEY`                  | MiniMax API key (optional, required only for MiniMax Coding Plan models)                    |
+| `FIREWORKS_API_KEY`                | Fireworks API key (optional, required only for Fireworks AI models)                         |
+| `OPENCODE_GO_API_KEY`              | OpenCode Go API key (optional, required only for OpenCode Go models)                        |
+| `OLLAMA_CLOUD_API_KEY`             | Ollama Cloud API key (optional, required only for Ollama Cloud models)                      |
 | `TOKEN_ENCRYPTION_KEY`             | Generated encryption key (OAuth tokens)                                                     |
 | `REPO_SECRETS_ENCRYPTION_KEY`      | Generated encryption key (repo secrets)                                                     |
 | `PROVIDER_ACCOUNTS_ENCRYPTION_KEY` | Optional existing provider-account key override; Terraform generates one when omitted       |

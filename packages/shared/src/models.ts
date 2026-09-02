@@ -242,6 +242,50 @@ export const MODEL_CATALOG = [
       { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro", description: "Most capable" },
     ],
   },
+  {
+    category: "MiniMax Coding Plan",
+    enabledByDefault: false,
+    models: [
+      {
+        id: "minimax-coding-plan/MiniMax-M2.7",
+        name: "MiniMax M2.7",
+        description: "MiniMax Coding Plan",
+      },
+    ],
+  },
+  {
+    category: "Fireworks AI",
+    enabledByDefault: false,
+    models: [
+      {
+        id: "fireworks-ai/kimi-k2p5-turbo",
+        name: "Kimi K2.5 Turbo",
+        description: "Fireworks AI",
+      },
+    ],
+  },
+  {
+    category: "OpenCode Go",
+    enabledByDefault: false,
+    models: [
+      { id: "opencode-go/glm-5.1", name: "GLM 5.1", description: "Z.ai" },
+      { id: "opencode-go/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
+      { id: "opencode-go/kimi-k2.6", name: "Kimi K2.6", description: "Moonshot AI" },
+      { id: "opencode-go/qwen3.6-plus", name: "Qwen3.6 Plus", description: "Alibaba Cloud" },
+      { id: "opencode-go/minimax-m2.7", name: "MiniMax M2.7", description: "MiniMax" },
+      { id: "opencode-go/mimo-v2-pro", name: "MiMo V2 Pro", description: "Xiaomi" },
+      { id: "opencode-go/mimo-v2-omni", name: "MiMo V2 Omni", description: "Xiaomi" },
+    ],
+  },
+  {
+    category: "Ollama Cloud",
+    enabledByDefault: false,
+    models: [
+      { id: "ollama-cloud/glm-5.1", name: "GLM 5.1", description: "Z.ai" },
+      { id: "ollama-cloud/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
+      { id: "ollama-cloud/minimax-m2.7", name: "MiniMax M2.7", description: "MiniMax" },
+    ],
+  },
 ] as const satisfies readonly ModelCatalogGroup[];
 
 export type ValidModel = (typeof MODEL_CATALOG)[number]["models"][number]["id"];

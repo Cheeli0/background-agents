@@ -590,8 +590,7 @@ restores still mint a fresh fallback token on restore.
 You can configure environment variables (API keys, credentials) at global, per-repository, or
 per-environment scope. A session receives global secrets plus its **session target's** secrets:
 
-- **Global secrets** apply to all sessions (e.g., `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`,
-  `ZHIPU_API_KEY`)
+- **Global secrets** apply to all sessions (for example, model-provider API keys)
 - **Repository secrets** apply to sessions launched from that repo (including all bot-created
   sessions) and override global secrets with the same key; ad-hoc multi-repository sessions receive
   each selected repository's secrets, with the primary winning collisions
@@ -636,10 +635,10 @@ operators may remove legacy keys after legacy-bound sessions are no longer neede
 > **Daytona and Vercel users**: LLM API keys (e.g., `ANTHROPIC_API_KEY` for Claude models) must be
 > added as global secrets. Modal injects these automatically via its own secrets mechanism.
 >
-> **Opt-in model providers**: DeepSeek models require `DEEPSEEK_API_KEY`, and Z.AI Coding Plan
-> models require `ZHIPU_API_KEY`, as a global secret with any sandbox provider. SuperGrok models
-> require an xAI provider account or `XAI_API_KEY` mode and must be enabled under **Settings >
-> Models**.
+> **Opt-in model providers**: Add the provider key listed in
+> [Available Models](./AVAILABLE_MODELS.md) to the session's secret scope. SuperGrok models require
+> an xAI provider account or `XAI_API_KEY` mode. Opt-in providers must also be enabled under
+> **Settings > Models**.
 
 See [Secrets Management](./SECRETS.md) for setup instructions.
 

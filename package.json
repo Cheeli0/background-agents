@@ -16,6 +16,7 @@
     "test:lint-complexity": "node --test scripts/lint-complexity-message.test.mjs",
     "test:rbac-bootstrap-owner": "node --experimental-transform-types --test scripts/bootstrap-workspace-owner.test.ts",
     "test:user-merge-cli": "node --experimental-transform-types --test scripts/merge-split-users.test.ts",
+    "test:d1-fork-migrations": "node --experimental-transform-types --test scripts/d1-fork-migration-chain.test.ts",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
     "test:integration": "npm run test:integration --workspaces --if-present",
     "typecheck": "npm run build -w @open-inspect/shared && npm run typecheck --workspaces --if-present",
@@ -57,8 +58,8 @@
       "prettier --write"
     ],
     "packages/{daytona-infra,e2b-infra,modal-infra,sandbox-runtime}/**/*.py": [
-      "ruff check --fix",
-      "ruff format"
+      "uv run --project packages/modal-infra --extra dev ruff check --fix",
+      "uv run --project packages/modal-infra --extra dev ruff format"
     ]
   }
 }

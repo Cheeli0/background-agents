@@ -57,6 +57,22 @@ const ZEN_MODELS = [
 
 const DEEPSEEK_MODELS = ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"] as const;
 const ZAI_CODING_PLAN_MODELS = ["zai-coding-plan/glm-5.2", "zai-coding-plan/glm-5.3"] as const;
+const MINIMAX_CODING_PLAN_MODELS = ["minimax-coding-plan/MiniMax-M2.7"] as const;
+const FIREWORKS_MODELS = ["fireworks-ai/kimi-k2p5-turbo"] as const;
+const OPENCODE_GO_MODELS = [
+  "opencode-go/glm-5.1",
+  "opencode-go/kimi-k2.5",
+  "opencode-go/kimi-k2.6",
+  "opencode-go/qwen3.6-plus",
+  "opencode-go/minimax-m2.7",
+  "opencode-go/mimo-v2-pro",
+  "opencode-go/mimo-v2-omni",
+] as const;
+const OLLAMA_CLOUD_MODELS = [
+  "ollama-cloud/glm-5.1",
+  "ollama-cloud/kimi-k2.5",
+  "ollama-cloud/minimax-m2.7",
+] as const;
 
 describe("model utilities", () => {
   it("derives every public model view from the authoritative catalog", () => {
@@ -107,6 +123,10 @@ describe("model utilities", () => {
       ...ZEN_MODELS,
       ...ZAI_CODING_PLAN_MODELS,
       ...DEEPSEEK_MODELS,
+      ...MINIMAX_CODING_PLAN_MODELS,
+      ...FIREWORKS_MODELS,
+      ...OPENCODE_GO_MODELS,
+      ...OLLAMA_CLOUD_MODELS,
     ]) {
       expect(isValidModel(model)).toBe(true);
     }
@@ -380,6 +400,20 @@ describe("model utilities", () => {
     expect(
       MODEL_OPTIONS.find((group) => group.category === "DeepSeek")?.models.map((m) => m.id)
     ).toEqual(DEEPSEEK_MODELS);
+    expect(
+      MODEL_OPTIONS.find((group) => group.category === "MiniMax Coding Plan")?.models.map(
+        (m) => m.id
+      )
+    ).toEqual(MINIMAX_CODING_PLAN_MODELS);
+    expect(
+      MODEL_OPTIONS.find((group) => group.category === "Fireworks AI")?.models.map((m) => m.id)
+    ).toEqual(FIREWORKS_MODELS);
+    expect(
+      MODEL_OPTIONS.find((group) => group.category === "OpenCode Go")?.models.map((m) => m.id)
+    ).toEqual(OPENCODE_GO_MODELS);
+    expect(
+      MODEL_OPTIONS.find((group) => group.category === "Ollama Cloud")?.models.map((m) => m.id)
+    ).toEqual(OLLAMA_CLOUD_MODELS);
 
     expect(DEFAULT_ENABLED_MODELS).toEqual([...ANTHROPIC_MODELS, ...OPENAI_MODELS]);
     for (const optInModel of [
@@ -387,6 +421,10 @@ describe("model utilities", () => {
       ...ZEN_MODELS,
       ...ZAI_CODING_PLAN_MODELS,
       ...DEEPSEEK_MODELS,
+      ...MINIMAX_CODING_PLAN_MODELS,
+      ...FIREWORKS_MODELS,
+      ...OPENCODE_GO_MODELS,
+      ...OLLAMA_CLOUD_MODELS,
     ]) {
       expect(DEFAULT_ENABLED_MODELS).not.toContain(optInModel);
     }
