@@ -33,9 +33,6 @@ export interface WebSocketManagerConfig {
 
 /** Manages session sockets, client identity, and expiring authorization leases. */
 export interface SessionWebSocketManager {
-  /** Create the client/server WebSocket pair for an upgrade response. */
-  createUpgradeSockets(): { client: WebSocket; server: WebSocket };
-
   /** Accept a client WebSocket with a wsId tag for hibernation recovery. */
   acceptClientSocket(ws: WebSocket, wsId: string): void;
 
@@ -128,12 +125,6 @@ export class SessionWebSocketManagerImpl implements SessionWebSocketManager {
   // Accept
   // -------------------------------------------------------------------------
 
-  createUpgradeSockets(): { client: WebSocket; server: WebSocket } {
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
-    return { client, server };
-  }
-
   acceptClientSocket(ws: WebSocket, wsId: string): void {
     this.host.accept(ws, [`wsid:${wsId}`]);
   }
@@ -143,12 +134,16 @@ export class SessionWebSocketManagerImpl implements SessionWebSocketManager {
     this.host.accept(ws, tags);
 
     let replaced = false;
-    if (this.sandboxWs && this.sandboxWs !== ws) {
+    // Close every other live sandbox socket, not only the cached one: after
+    // hibernation the pointer is gone but the old bridge's socket is still
+    // attached under its tags.
+    const existingSockets = new Set(this.host.sockets("sandbox"));
+    if (this.sandboxWs) existingSockets.add(this.sandboxWs);
+    for (const existing of existingSockets) {
+      if (existing === ws || existing.readyState !== WebSocket.OPEN) continue;
       try {
-        if (this.sandboxWs.readyState === WebSocket.OPEN) {
-          this.sandboxWs.close(1000, "New sandbox connecting");
-          replaced = true;
-        }
+        existing.close(1000, "New sandbox connecting");
+        replaced = true;
       } catch {
         // Ignore errors closing old WebSocket
       }
@@ -198,7 +193,15 @@ export class SessionWebSocketManagerImpl implements SessionWebSocketManager {
     }
 
     if (this.sandboxWs?.readyState === WebSocket.OPEN) {
-      return this.sandboxWs;
+      const cached = this.classify(this.sandboxWs);
+      if (
+        !expectedSandboxId ||
+        (cached.kind === "sandbox" && cached.sandboxId === expectedSandboxId)
+      ) {
+        return this.sandboxWs;
+      }
+      this.close(this.sandboxWs, 1000, "Sandbox identity changed");
+      this.sandboxWs = null;
     }
 
     // Hibernation recovery: scan all WebSockets, validate sandbox identity
