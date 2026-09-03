@@ -6,25 +6,31 @@
  */
 
 import { Hono } from "hono";
-import type {
-  Env,
-  PullRequestOpenedPayload,
-  ReviewRequestedPayload,
-  IssueCommentPayload,
-  ReviewCommentPayload,
-} from "./types";
+import type { Env } from "./types";
 import type { Logger } from "./logger";
 import { createLogger, parseLogLevel } from "./logger";
 import { verifyWebhookSignature } from "./verify";
-import { normalizeGitHubEvent, buildInternalAuthHeaders } from "@open-inspect/shared";
+import { normalizeGitHubEvent } from "@open-inspect/shared/triggers";
+import { signedControlPlaneFetch } from "./internal-auth";
+import {
+  issueCommentPayloadSchema,
+  pullRequestOpenedPayloadSchema,
+  reviewCommentPayloadSchema,
+  reviewRequestedPayloadSchema,
+  webhookActionPayloadSchema,
+  webhookSummaryPayloadSchema,
+  type WebhookSummaryPayload,
+} from "./payload-schemas";
 import {
   handlePullRequestOpened,
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
+  isReviewRequestedForBot,
   type HandlerResult,
 } from "./handlers";
-import { createKvCacheStore } from "@open-inspect/shared";
+import { createKvCacheStore } from "@open-inspect/shared/cache-store";
+import { toAutofixEnvelope } from "./autofix-ingress";
 
 const app = new Hono<{ Bindings: Env }>();
 const DELIVERY_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -77,18 +83,41 @@ app.post("/webhooks/github", async (c) => {
     log.warn("webhook.delivery_id_missing", { event_type: event });
   }
 
-  const payload = JSON.parse(rawBody);
+  const payload: unknown = JSON.parse(rawBody);
+  const summaryResult = webhookSummaryPayloadSchema.safeParse(payload);
+  const summary = summaryResult.success ? summaryResult.data : null;
+  const actionResult = webhookActionPayloadSchema.safeParse(payload);
+  const action = summary?.action ?? (actionResult.success ? actionResult.data.action : undefined);
   const traceId = crypto.randomUUID();
 
   log.info("webhook.received", {
     event_type: event,
     delivery_id: deliveryId,
     trace_id: traceId,
-    repo: payload?.repository
-      ? `${payload.repository.owner?.login}/${payload.repository.name}`
+    repo: summary?.repository
+      ? `${summary.repository.owner.login}/${summary.repository.name}`
       : undefined,
-    action: payload?.action,
+    action,
   });
+
+  const autofixEnvelope = toAutofixEnvelope({
+    event,
+    payload,
+    deliveryId: deliveryId ?? `missing:${traceId}`,
+    botUsername: c.env.GITHUB_BOT_USERNAME,
+    receivedAt: new Date(),
+  });
+  if (autofixEnvelope) {
+    try {
+      await c.env.AUTOFIX_QUEUE.send(autofixEnvelope);
+    } catch (err) {
+      log.error("webhook.autofix_queue_failed", {
+        trace_id: traceId,
+        delivery_id: deliveryId,
+        error: err instanceof Error ? err : new Error(String(err)),
+      });
+    }
+  }
 
   c.executionCtx.waitUntil(
     handleWebhook(c.env, log, event, payload, traceId, deliveryId)
@@ -139,14 +168,14 @@ async function handleWebhook(
   traceId: string,
   deliveryId: string | undefined
 ): Promise<void> {
-  const p = payload as Record<string, unknown>;
-  const repo = p.repository
-    ? `${(p.repository as Record<string, unknown> & { owner: { login: string }; name: string }).owner.login}/${(p.repository as Record<string, unknown> & { name: string }).name}`
-    : undefined;
-  const sender = (p.sender as { login?: string } | undefined)?.login;
-  const pullNumber =
-    (p.pull_request as { number?: number } | undefined)?.number ??
-    (p.issue as { number?: number } | undefined)?.number;
+  const parsed = webhookSummaryPayloadSchema.safeParse(payload);
+  const actionResult = webhookActionPayloadSchema.safeParse(payload);
+  const p: WebhookSummaryPayload = parsed.success
+    ? parsed.data
+    : { action: actionResult.success ? actionResult.data.action : undefined };
+  const repo = p.repository ? `${p.repository.owner.login}/${p.repository.name}` : undefined;
+  const sender = p.sender?.login;
+  const pullNumber = p.pull_request?.number ?? p.issue?.number;
 
   const wideEventBase = {
     trace_id: traceId,
@@ -159,47 +188,48 @@ async function handleWebhook(
   };
 
   const start = Date.now();
-  let result: HandlerResult;
+  let result: HandlerResult | undefined;
+  let dispatchFailure: { error: unknown } | undefined;
 
   try {
     result = await dispatchHandler(env, log, event, p, payload, traceId);
   } catch (err) {
+    dispatchFailure = { error: err };
     log.info("webhook.handled", {
       ...wideEventBase,
       outcome: "error",
       duration_ms: Date.now() - start,
       error: err instanceof Error ? err : new Error(String(err)),
     });
-    throw err;
   }
 
-  const wideEvent: Record<string, unknown> = {
-    ...wideEventBase,
-    outcome: result.outcome,
-    duration_ms: Date.now() - start,
-  };
-  if (result.outcome === "skipped") {
-    wideEvent.skip_reason = result.skip_reason;
-  } else {
-    wideEvent.session_id = result.session_id;
-    wideEvent.message_id = result.message_id;
-    wideEvent.handler_action = result.handler_action;
+  if (result !== undefined) {
+    const wideEvent: Record<string, unknown> = {
+      ...wideEventBase,
+      outcome: result.outcome,
+      duration_ms: Date.now() - start,
+    };
+    if (result.outcome === "skipped") {
+      wideEvent.skip_reason = result.skip_reason;
+    } else {
+      wideEvent.session_id = result.session_id;
+      wideEvent.message_id = result.message_id;
+      wideEvent.handler_action = result.handler_action;
+    }
+    log.info("webhook.handled", wideEvent);
   }
-  log.info("webhook.handled", wideEvent);
 
-  // Forward normalized event to control-plane for automation triggering.
-  // This is additive — failures here must not affect existing bot behavior.
+  // Forwarding and built-in dispatch are independent; both must run before a
+  // failure reaches the waitUntil cleanup path. Use the passthrough parse so
+  // nested lifecycle fields are not stripped by the summary schema.
   if (event) {
-    const normalizedEvent = normalizeGitHubEvent(event, p);
+    const normalizationPayload = actionResult.success ? actionResult.data : {};
+    const normalizedEvent = normalizeGitHubEvent(event, normalizationPayload);
     if (normalizedEvent !== null) {
       try {
+        const url = "https://internal/internal/github-event";
         const body = JSON.stringify(normalizedEvent);
-        const authHeaders = await buildInternalAuthHeaders(env.INTERNAL_CALLBACK_SECRET, traceId);
-        const response = await env.CONTROL_PLANE.fetch("https://internal/internal/github-event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body,
-        });
+        const response = await signedControlPlaneFetch(env, { method: "POST", url, body, traceId });
         if (!response.ok) {
           log.warn("webhook.github_event_forward_failed", {
             trace_id: traceId,
@@ -218,23 +248,32 @@ async function handleWebhook(
       }
     }
   }
+
+  if (dispatchFailure !== undefined) throw dispatchFailure.error;
 }
 
 function dispatchHandler(
   env: Env,
   log: Logger,
   event: string | undefined,
-  p: Record<string, unknown>,
+  p: WebhookSummaryPayload,
   payload: unknown,
   traceId: string
 ): Promise<HandlerResult> {
   switch (event) {
     case "pull_request":
       if (p.action === "opened") {
-        return handlePullRequestOpened(env, log, payload as PullRequestOpenedPayload, traceId);
+        const parsed = pullRequestOpenedPayloadSchema.safeParse(payload);
+        if (!parsed.success) throw new Error("Malformed pull_request opened payload");
+        return handlePullRequestOpened(env, log, parsed.data, traceId);
       }
       if (p.action === "review_requested") {
-        return handleReviewRequested(env, log, payload as ReviewRequestedPayload, traceId);
+        if (!isReviewRequestedForBot(payload, env.GITHUB_BOT_USERNAME)) {
+          return Promise.resolve({ outcome: "skipped", skip_reason: "review_not_for_bot" });
+        }
+        const parsed = reviewRequestedPayloadSchema.safeParse(payload);
+        if (!parsed.success) throw new Error("Malformed pull_request review_requested payload");
+        return handleReviewRequested(env, log, parsed.data, traceId);
       }
       return Promise.resolve({
         outcome: "skipped",
@@ -242,7 +281,9 @@ function dispatchHandler(
       });
     case "issue_comment":
       if (p.action === "created") {
-        return handleIssueComment(env, log, payload as IssueCommentPayload, traceId);
+        const parsed = issueCommentPayloadSchema.safeParse(payload);
+        if (!parsed.success) throw new Error("Malformed issue_comment created payload");
+        return handleIssueComment(env, log, parsed.data, traceId);
       }
       return Promise.resolve({
         outcome: "skipped",
@@ -250,7 +291,10 @@ function dispatchHandler(
       });
     case "pull_request_review_comment":
       if (p.action === "created") {
-        return handleReviewComment(env, log, payload as ReviewCommentPayload, traceId);
+        const parsed = reviewCommentPayloadSchema.safeParse(payload);
+        if (!parsed.success)
+          throw new Error("Malformed pull_request_review_comment created payload");
+        return handleReviewComment(env, log, parsed.data, traceId);
       }
       return Promise.resolve({
         outcome: "skipped",

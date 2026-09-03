@@ -1,15 +1,35 @@
+import { getSignInProviderIssuer } from "@open-inspect/shared/sign-in-provider";
 import { generateId } from "../auth/crypto";
+import { normalizeEmail } from "./email";
+import { isUniqueConstraintError } from "./errors";
+import type { SqlDatabase } from "./sql-database";
 
 // ── Public types ────────────────────────────────────────────────────
 
 export interface ProviderIdentity {
-  provider: "github" | "slack" | "linear";
+  provider: "github" | "slack" | "linear" | "google";
   providerUserId: string;
   providerLogin?: string;
   providerEmail?: string;
   displayName?: string;
   avatarUrl?: string;
 }
+
+/**
+ * Ingress providers whose attributed emails are platform-verified mailboxes
+ * fetched server-side by first-party bots: Slack confirms every address at
+ * signup and on change, and Linear's email is its login credential. Emails
+ * written from these providers carry verification (`email_verified = 1`) —
+ * the same weight as a completed OAuth sign-in proof, and what admits the
+ * user through Better Auth's implicit-linking gate at their first web
+ * sign-in. Every other provider's attribution stays unproven until the
+ * sign-in claim mints proof; a new ingress provider must be added here
+ * deliberately, never by default.
+ */
+const EMAIL_ATTESTING_PROVIDERS: ReadonlySet<ProviderIdentity["provider"]> = new Set([
+  "slack",
+  "linear",
+]);
 
 export interface ResolvedUser {
   id: string;
@@ -22,6 +42,7 @@ export interface User {
   id: string;
   displayName: string | null;
   email: string | null;
+  emailVerified: boolean;
   avatarUrl: string | null;
   createdAt: number;
   updatedAt: number;
@@ -34,12 +55,15 @@ export interface UserIdentity {
   providerUserId: string;
   providerLogin: string | null;
   providerEmail: string | null;
+  providerIssuer: string | null;
   createdAt: number;
 }
 
 export interface NewUser {
   displayName?: string;
   email?: string;
+  /** Whether `email` comes with mailbox-ownership proof (attesting provider). */
+  emailVerified?: boolean;
   avatarUrl?: string;
 }
 
@@ -55,6 +79,8 @@ export interface UserUpdate {
   displayName?: string;
   avatarUrl?: string;
   email?: string;
+  /** Only meaningful alongside `email`: its mailbox-ownership proof. */
+  emailVerified?: boolean;
 }
 
 // ── Row types (D1 snake_case) ───────────────────────────────────────
@@ -63,6 +89,7 @@ interface UserRow {
   id: string;
   display_name: string | null;
   email: string | null;
+  email_verified: number;
   avatar_url: string | null;
   created_at: number;
   updated_at: number;
@@ -75,6 +102,7 @@ interface UserIdentityRow {
   provider_user_id: string;
   provider_login: string | null;
   provider_email: string | null;
+  provider_issuer: string | null;
   created_at: number;
 }
 
@@ -85,6 +113,7 @@ function toUser(row: UserRow): User {
     id: row.id,
     displayName: row.display_name,
     email: row.email,
+    emailVerified: row.email_verified === 1,
     avatarUrl: row.avatar_url,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -99,6 +128,7 @@ function toUserIdentity(row: UserIdentityRow): UserIdentity {
     providerUserId: row.provider_user_id,
     providerLogin: row.provider_login,
     providerEmail: row.provider_email,
+    providerIssuer: row.provider_issuer,
     createdAt: row.created_at,
   };
 }
@@ -106,7 +136,24 @@ function toUserIdentity(row: UserIdentityRow): UserIdentity {
 // ── UserStore ───────────────────────────────────────────────────────
 
 export class UserStore {
-  constructor(private readonly db: D1Database) {}
+  constructor(private readonly db: SqlDatabase) {}
+
+  async getUsersByIds(userIds: readonly string[]): Promise<User[]> {
+    const uniqueIds = [...new Set(userIds)];
+    if (uniqueIds.length === 0) return [];
+
+    const statements = [];
+    for (let offset = 0; offset < uniqueIds.length; offset += 100) {
+      const ids = uniqueIds.slice(offset, offset + 100);
+      statements.push(
+        this.db
+          .prepare(`SELECT * FROM users WHERE id IN (${ids.map(() => "?").join(", ")})`)
+          .bind(...ids)
+      );
+    }
+    const results = await this.db.batch<UserRow>(statements);
+    return results.flatMap((result) => result.results.map(toUser));
+  }
 
   /**
    * Core resolution entry point. Finds or creates a canonical user for the
@@ -136,7 +183,7 @@ export class UserStore {
   async getUserByEmail(email: string): Promise<User | null> {
     const row = await this.db
       .prepare("SELECT * FROM users WHERE email = ?")
-      .bind(email.toLowerCase())
+      .bind(normalizeEmail(email))
       .first<UserRow>();
     return row ? toUser(row) : null;
   }
@@ -150,8 +197,12 @@ export class UserStore {
   }
 
   async getIdentitiesForUser(userId: string): Promise<UserIdentity[]> {
+    // ORDER BY created_at gives a deterministic order so callers that pick a
+    // single identity (e.g. resolveGitHubEnrichment) get a stable result.
+    // Google's email-based cross-provider linking makes multi-identity users
+    // more common, so the previously-unordered query could otherwise vary.
     const result = await this.db
-      .prepare("SELECT * FROM user_identities WHERE user_id = ?")
+      .prepare("SELECT * FROM user_identities WHERE user_id = ? ORDER BY created_at ASC")
       .bind(userId)
       .all<UserIdentityRow>();
     return (result.results ?? []).map(toUserIdentity);
@@ -160,19 +211,29 @@ export class UserStore {
   async createUser(user: NewUser): Promise<User> {
     const id = generateId();
     const now = Date.now();
-    const email = user.email?.toLowerCase() ?? null;
+    const email = normalizeEmail(user.email);
+    const emailVerified = email !== null && user.emailVerified === true;
 
     await this.db
       .prepare(
-        "INSERT INTO users (id, display_name, email, avatar_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO users (id, display_name, email, email_verified, avatar_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
       )
-      .bind(id, user.displayName ?? null, email, user.avatarUrl ?? null, now, now)
+      .bind(
+        id,
+        user.displayName ?? null,
+        email,
+        emailVerified ? 1 : 0,
+        user.avatarUrl ?? null,
+        now,
+        now
+      )
       .run();
 
     return {
       id,
       displayName: user.displayName ?? null,
       email,
+      emailVerified,
       avatarUrl: user.avatarUrl ?? null,
       createdAt: now,
       updatedAt: now,
@@ -182,11 +243,12 @@ export class UserStore {
   async createIdentity(identity: NewUserIdentity): Promise<UserIdentity> {
     const id = generateId();
     const now = Date.now();
-    const email = identity.providerEmail?.toLowerCase() ?? null;
+    const email = normalizeEmail(identity.providerEmail);
+    const issuer = getSignInProviderIssuer(identity.provider);
 
     await this.db
       .prepare(
-        "INSERT INTO user_identities (id, user_id, provider, provider_user_id, provider_login, provider_email, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO user_identities (id, user_id, provider, provider_user_id, provider_login, provider_email, provider_issuer, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       )
       .bind(
         id,
@@ -195,6 +257,7 @@ export class UserStore {
         identity.providerUserId,
         identity.providerLogin ?? null,
         email,
+        issuer,
         now
       )
       .run();
@@ -206,6 +269,7 @@ export class UserStore {
       providerUserId: identity.providerUserId,
       providerLogin: identity.providerLogin ?? null,
       providerEmail: email,
+      providerIssuer: issuer,
       createdAt: now,
     };
   }
@@ -223,8 +287,14 @@ export class UserStore {
       values.push(updates.avatarUrl);
     }
     if (updates.email !== undefined) {
+      // A blank email normalizes to null — treated as absent, never stored.
+      // Verification travels with the email: it reflects the new address's
+      // proof (attesting provider or not), never the old address's state.
+      const email = normalizeEmail(updates.email);
       sets.push("email = ?");
-      values.push(updates.email.toLowerCase());
+      values.push(email);
+      sets.push("email_verified = ?");
+      values.push(email !== null && updates.emailVerified === true ? 1 : 0);
     }
 
     if (sets.length === 0) return;
@@ -242,7 +312,7 @@ export class UserStore {
   // ── Private ─────────────────────────────────────────────────────
 
   private async doResolveOrCreate(identity: ProviderIdentity): Promise<ResolvedUser> {
-    const normalizedEmail = identity.providerEmail?.toLowerCase() ?? null;
+    const normalizedEmail = normalizeEmail(identity.providerEmail);
 
     // Step 1: Look up by provider identity
     const existing = await this.getIdentity(identity.provider, identity.providerUserId);
@@ -275,6 +345,7 @@ export class UserStore {
         const emailOwner = await this.getUserByEmail(normalizedEmail);
         if (!emailOwner) {
           updates.email = normalizedEmail;
+          updates.emailVerified = EMAIL_ATTESTING_PROVIDERS.has(identity.provider);
         } else if (emailOwner.id !== user.id) {
           // Another user owns this email — re-link this identity to that user.
           // This prevents permanent identity splits when e.g. a Slack identity
@@ -334,16 +405,20 @@ export class UserStore {
     const now = Date.now();
     const displayName = identity.displayName ?? null;
     const avatarUrl = identity.avatarUrl ?? null;
+    const issuer = getSignInProviderIssuer(identity.provider);
+
+    const emailVerified =
+      normalizedEmail !== null && EMAIL_ATTESTING_PROVIDERS.has(identity.provider);
 
     await this.db.batch([
       this.db
         .prepare(
-          "INSERT INTO users (id, display_name, email, avatar_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+          "INSERT INTO users (id, display_name, email, email_verified, avatar_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
-        .bind(userId, displayName, normalizedEmail, avatarUrl, now, now),
+        .bind(userId, displayName, normalizedEmail, emailVerified ? 1 : 0, avatarUrl, now, now),
       this.db
         .prepare(
-          "INSERT INTO user_identities (id, user_id, provider, provider_user_id, provider_login, provider_email, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          "INSERT INTO user_identities (id, user_id, provider, provider_user_id, provider_login, provider_email, provider_issuer, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(
           identityId,
@@ -352,6 +427,7 @@ export class UserStore {
           identity.providerUserId,
           identity.providerLogin ?? null,
           normalizedEmail,
+          issuer,
           now
         ),
     ]);
@@ -394,9 +470,4 @@ export class UserStore {
       .bind(...values)
       .run();
   }
-}
-
-function isUniqueConstraintError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return msg.toLowerCase().includes("unique constraint failed");
 }

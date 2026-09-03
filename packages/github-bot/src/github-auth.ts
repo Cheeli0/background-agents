@@ -1,7 +1,22 @@
+import { DEFAULT_APP_NAME } from "@open-inspect/shared/app-name";
+import { z } from "zod";
+
+export const GITHUB_API_REQUEST_TIMEOUT_MS = 10_000;
+
+const collaboratorPermissionResponseSchema = z.object({
+  permission: z.string(),
+});
+
+const installationTokenResponseSchema = z.object({
+  token: z.string(),
+});
+
 export interface GitHubAppConfig {
   appId: string;
   privateKey: string;
   installationId: string;
+  /** User-Agent header sent on outbound GitHub API requests. */
+  userAgent?: string;
 }
 
 function base64UrlEncode(input: Uint8Array | string): string {
@@ -63,7 +78,11 @@ export async function generateAppJwt(appId: string, privateKey: string): Promise
   return `${signingInput}.${base64UrlEncode(new Uint8Array(signature))}`;
 }
 
-async function getInstallationToken(jwt: string, installationId: string): Promise<string> {
+async function getInstallationToken(
+  jwt: string,
+  installationId: string,
+  userAgent: string
+): Promise<string> {
   const url = `https://api.github.com/app/installations/${installationId}/access_tokens`;
   const response = await fetch(url, {
     method: "POST",
@@ -71,8 +90,9 @@ async function getInstallationToken(jwt: string, installationId: string): Promis
       Authorization: `Bearer ${jwt}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "Open-Inspect",
+      "User-Agent": userAgent,
     },
+    signal: AbortSignal.timeout(GITHUB_API_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -80,13 +100,23 @@ async function getInstallationToken(jwt: string, installationId: string): Promis
     throw new Error(`Failed to get installation token: ${response.status} ${error}`);
   }
 
-  const data = (await response.json()) as { token: string };
-  return data.token;
+  let raw: unknown;
+  try {
+    raw = await response.json();
+  } catch {
+    throw new Error("Failed to get installation token: invalid response");
+  }
+
+  const parsed = installationTokenResponseSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error("Failed to get installation token: invalid response");
+  }
+  return parsed.data.token;
 }
 
 export async function generateInstallationToken(config: GitHubAppConfig): Promise<string> {
   const jwt = await generateAppJwt(config.appId, config.privateKey);
-  return getInstallationToken(jwt, config.installationId);
+  return getInstallationToken(jwt, config.installationId, config.userAgent || DEFAULT_APP_NAME);
 }
 
 const WRITE_PERMISSIONS = new Set(["write", "maintain", "admin"]);
@@ -100,7 +130,8 @@ export async function checkSenderPermission(
   token: string,
   owner: string,
   repo: string,
-  username: string
+  username: string,
+  userAgent: string = DEFAULT_APP_NAME
 ): Promise<PermissionCheckResult> {
   try {
     const response = await fetch(
@@ -110,19 +141,27 @@ export async function checkSenderPermission(
           Authorization: `Bearer ${token}`,
           Accept: "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "Open-Inspect",
+          "User-Agent": userAgent,
         },
+        signal: AbortSignal.timeout(GITHUB_API_REQUEST_TIMEOUT_MS),
       }
     );
     if (!response.ok) return { hasPermission: false, error: true };
-    const data = (await response.json()) as { permission: string };
+    const parsed = collaboratorPermissionResponseSchema.safeParse(await response.json());
+    if (!parsed.success) return { hasPermission: false, error: true };
+    const data = parsed.data;
     return { hasPermission: WRITE_PERMISSIONS.has(data.permission) };
   } catch {
     return { hasPermission: false, error: true };
   }
 }
 
-export async function postReaction(token: string, url: string, content: string): Promise<boolean> {
+export async function postReaction(
+  token: string,
+  url: string,
+  content: string,
+  userAgent: string = DEFAULT_APP_NAME
+): Promise<boolean> {
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -130,9 +169,10 @@ export async function postReaction(token: string, url: string, content: string):
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "Open-Inspect",
+        "User-Agent": userAgent,
       },
       body: JSON.stringify({ content }),
+      signal: AbortSignal.timeout(GITHUB_API_REQUEST_TIMEOUT_MS),
     });
     return response.ok;
   } catch {

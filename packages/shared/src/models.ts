@@ -5,212 +5,327 @@
  * to ensure consistent behavior across control plane, web UI, and Slack bot.
  */
 
-const GITHUB_COPILOT_MODELS = [
-  "github-copilot/claude-haiku-4-5",
-  "github-copilot/claude-opus-4-5",
-  "github-copilot/claude-opus-4-6",
-  "github-copilot/claude-opus-4-6-fast",
-  "github-copilot/claude-sonnet-4",
-  "github-copilot/claude-sonnet-4-5",
-  "github-copilot/claude-sonnet-4-6",
-  "github-copilot/gemini-2.5-pro",
-  "github-copilot/gemini-3-flash",
-  "github-copilot/gemini-3-pro",
-  "github-copilot/gemini-3.1-pro",
-  "github-copilot/gpt-4.1",
-  "github-copilot/gpt-4o",
-  "github-copilot/gpt-5-mini",
-  "github-copilot/gpt-5.1",
-  "github-copilot/gpt-5.1-codex",
-  "github-copilot/gpt-5.1-codex-mini",
-  "github-copilot/gpt-5.1-codex-max",
-  "github-copilot/gpt-5.2",
-  "github-copilot/gpt-5.2-codex",
-  "github-copilot/gpt-5.3-codex",
-  "github-copilot/gpt-5.4",
-  "github-copilot/gpt-5.4-mini",
-] as const;
-
-const ZAI_CODING_PLAN_MODELS = [
-  "zai-coding-plan/glm-5.1",
-  "zai-coding-plan/glm-5",
-  "zai-coding-plan/glm-5-turbo",
-  "zai-coding-plan/glm-4.7",
-  "zai-coding-plan/glm-4.5-air",
-] as const;
-
-const MINIMAX_CODING_PLAN_MODELS = ["minimax-coding-plan/MiniMax-M2.7"] as const;
-
-const FIREWORKS_AI_MODELS = ["fireworks-ai/kimi-k2p5-turbo"] as const;
-
-const OPENCODE_GO_MODELS = [
-  "opencode-go/glm-5.1",
-  "opencode-go/kimi-k2.5",
-  "opencode-go/kimi-k2.6",
-  "opencode-go/qwen3.6-plus",
-  "opencode-go/minimax-m2.7",
-  "opencode-go/mimo-v2-pro",
-  "opencode-go/mimo-v2-omni",
-] as const;
-
-const OLLAMA_CLOUD_MODELS = [
-  "ollama-cloud/glm-5.1",
-  "ollama-cloud/kimi-k2.5",
-  "ollama-cloud/minimax-m2.7",
-] as const;
-
-/**
- * Valid model names supported by the system.
- * All models use "provider/model" format.
- */
-export const VALID_MODELS = [
-  "anthropic/claude-haiku-4-5",
-  "anthropic/claude-sonnet-4-5",
-  "anthropic/claude-sonnet-4-6",
-  "anthropic/claude-opus-4-5",
-  "anthropic/claude-opus-4-6",
-  "anthropic/claude-opus-4-7",
-  "openai/gpt-5.2",
-  "openai/gpt-5.4",
-  "openai/gpt-5.5",
-  "openai/gpt-5.2-codex",
-  "openai/gpt-5.3-codex",
-  "openai/gpt-5.3-codex-spark",
-  ...GITHUB_COPILOT_MODELS,
-  "opencode/kimi-k2.5",
-  "opencode/minimax-m2.5",
-  "opencode/glm-5",
-  ...ZAI_CODING_PLAN_MODELS,
-  ...MINIMAX_CODING_PLAN_MODELS,
-  ...FIREWORKS_AI_MODELS,
-  ...OPENCODE_GO_MODELS,
-  ...OLLAMA_CLOUD_MODELS,
-] as const;
-
-export type ValidModel = (typeof VALID_MODELS)[number];
-
-export const SUPPORTED_CLASSIFIER_MODELS = [
-  "anthropic/claude-haiku-4-5",
-  "github-copilot/gpt-5-mini",
-] as const satisfies readonly ValidModel[];
-
-export type SupportedClassifierModel = (typeof SUPPORTED_CLASSIFIER_MODELS)[number];
-
-/**
- * Default model to use when none specified or invalid.
- */
-export const DEFAULT_MODEL: ValidModel = "anthropic/claude-sonnet-4-6";
+import { SUBSCRIPTION_PROVIDER_IDS, type SubscriptionProviderId } from "./types/provider-accounts";
 
 /**
  * Reasoning effort levels supported across providers.
  *
  * - "none": No reasoning (OpenAI only)
  * - "low"/"medium"/"high"/"xhigh": Progressive reasoning depth
- * - "max": Maximum reasoning budget (Anthropic extended thinking)
+ * - "max": Maximum reasoning effort for models that support it
  */
 export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max";
+
+const GPT_5_6_DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 
 export interface ModelReasoningConfig {
   efforts: ReasoningEffort[];
   default: ReasoningEffort | undefined;
 }
 
+interface ModelCatalogGroup {
+  category: string;
+  enabledByDefault: boolean;
+  models: readonly ModelCatalogEntry[];
+}
+
+interface ModelCatalogEntry {
+  id: `${string}/${string}`;
+  name: string;
+  description: string;
+  default?: true;
+  reasoning?: {
+    readonly efforts: readonly ReasoningEffort[];
+    readonly default: ReasoningEffort | undefined;
+  };
+}
+
 /**
- * Per-model reasoning configuration.
- * Models not listed here do not support reasoning controls.
+ * Authoritative model metadata, grouped in UI display order.
  */
-export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningConfig>> = {
-  "anthropic/claude-haiku-4-5": { efforts: ["high", "max"], default: "max" },
-  "anthropic/claude-sonnet-4-5": { efforts: ["high", "max"], default: "max" },
-  "anthropic/claude-sonnet-4-6": { efforts: ["low", "medium", "high", "max"], default: "high" },
-  "anthropic/claude-opus-4-5": { efforts: ["high", "max"], default: "max" },
-  "anthropic/claude-opus-4-6": { efforts: ["low", "medium", "high", "max"], default: "high" },
-  "anthropic/claude-opus-4-7": { efforts: ["low", "medium", "high", "max"], default: "high" },
-  "openai/gpt-5.2": { efforts: ["none", "low", "medium", "high", "xhigh"], default: undefined },
-  "openai/gpt-5.4": { efforts: ["none", "low", "medium", "high", "xhigh"], default: undefined },
-  "openai/gpt-5.5": { efforts: ["none", "low", "medium", "high", "xhigh"], default: undefined },
-  "openai/gpt-5.2-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "openai/gpt-5.3-codex": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "openai/gpt-5.3-codex-spark": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "github-copilot/gpt-5-mini": {
-    efforts: ["none", "low", "medium", "high", "xhigh"],
-    default: undefined,
+export const MODEL_CATALOG = [
+  {
+    category: "Anthropic",
+    enabledByDefault: true,
+    models: [
+      {
+        id: "anthropic/claude-haiku-4-5",
+        name: "Claude Haiku 4.5",
+        description: "Fast and efficient",
+        reasoning: { efforts: ["high", "max"], default: "max" },
+      },
+      {
+        id: "anthropic/claude-sonnet-4-5",
+        name: "Claude Sonnet 4.5",
+        description: "Balanced performance",
+        reasoning: { efforts: ["high", "max"], default: "max" },
+      },
+      {
+        id: "anthropic/claude-sonnet-4-6",
+        name: "Claude Sonnet 4.6",
+        description: "Balanced, fast coding",
+        default: true,
+        reasoning: { efforts: ["low", "medium", "high", "max"], default: "high" },
+      },
+      {
+        id: "anthropic/claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        description: "Latest Sonnet, adaptive thinking",
+        reasoning: {
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+          default: "high",
+        },
+      },
+      {
+        id: "anthropic/claude-opus-4-5",
+        name: "Claude Opus 4.5",
+        description: "Most capable",
+        reasoning: { efforts: ["high", "max"], default: "max" },
+      },
+      {
+        id: "anthropic/claude-opus-4-6",
+        name: "Claude Opus 4.6",
+        description: "Most capable, adaptive thinking",
+        reasoning: { efforts: ["low", "medium", "high", "max"], default: "high" },
+      },
+      {
+        id: "anthropic/claude-opus-4-7",
+        name: "Claude Opus 4.7",
+        description: "Most capable, adaptive thinking",
+        reasoning: {
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+          default: "high",
+        },
+      },
+      {
+        id: "anthropic/claude-opus-4-8",
+        name: "Claude Opus 4.8",
+        description: "Most capable, adaptive thinking",
+        reasoning: {
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+          default: "high",
+        },
+      },
+      {
+        id: "anthropic/claude-opus-5",
+        name: "Claude Opus 5",
+        description: "Latest Opus, adaptive thinking",
+        reasoning: {
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+          default: "high",
+        },
+      },
+      {
+        id: "anthropic/claude-fable-5",
+        name: "Claude Fable 5",
+        description: "Most powerful, new tier above Opus",
+        reasoning: {
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+          default: "high",
+        },
+      },
+    ],
   },
-  "github-copilot/gpt-5.1": {
-    efforts: ["none", "low", "medium", "high", "xhigh"],
-    default: undefined,
+  {
+    category: "OpenAI",
+    enabledByDefault: true,
+    models: [
+      {
+        id: "openai/gpt-5.4",
+        name: "GPT 5.4",
+        description: "Flagship model",
+        reasoning: {
+          efforts: ["none", "low", "medium", "high", "xhigh"],
+          default: undefined,
+        },
+      },
+      {
+        id: "openai/gpt-5.5",
+        name: "GPT 5.5",
+        description: "Latest flagship model",
+        reasoning: {
+          efforts: ["none", "low", "medium", "high", "xhigh"],
+          default: undefined,
+        },
+      },
+      {
+        id: "openai/gpt-5.6-sol",
+        name: "GPT 5.6 Sol",
+        description: "Frontier model for complex professional work",
+        reasoning: {
+          efforts: ["none", "low", "medium", "high", "xhigh"],
+          default: GPT_5_6_DEFAULT_REASONING_EFFORT,
+        },
+      },
+      {
+        id: "openai/gpt-5.6-terra",
+        name: "GPT 5.6 Terra",
+        description: "Balanced, cost-efficient everyday work",
+        reasoning: {
+          efforts: ["none", "low", "medium", "high", "xhigh"],
+          default: GPT_5_6_DEFAULT_REASONING_EFFORT,
+        },
+      },
+      {
+        id: "openai/gpt-5.6-luna",
+        name: "GPT 5.6 Luna",
+        description: "Fast, cost-efficient high-volume workloads",
+        reasoning: {
+          efforts: ["none", "low", "medium", "high", "xhigh", "max"],
+          default: GPT_5_6_DEFAULT_REASONING_EFFORT,
+        },
+      },
+      {
+        id: "openai/gpt-5.3-codex",
+        name: "GPT 5.3 Codex",
+        description: "Latest codex",
+        reasoning: { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+      },
+      {
+        id: "openai/gpt-5.3-codex-spark",
+        name: "GPT 5.3 Codex Spark",
+        description: "Low-latency codex variant",
+        reasoning: { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
+      },
+    ],
   },
-  "github-copilot/gpt-5.1-codex": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
+  {
+    category: "OpenCode Zen",
+    enabledByDefault: false,
+    models: [
+      { id: "opencode/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
+      { id: "opencode/kimi-k2.6", name: "Kimi K2.6", description: "Moonshot AI" },
+      { id: "opencode/kimi-k3", name: "Kimi K3", description: "Moonshot AI" },
+      { id: "opencode/minimax-m2.5", name: "MiniMax M2.5", description: "MiniMax" },
+      { id: "opencode/qwen3.7-max", name: "Qwen3.7 Max", description: "Alibaba Cloud" },
+      { id: "opencode/glm-5", name: "GLM 5", description: "Z.ai 744B MoE" },
+      { id: "opencode/glm-5.1", name: "GLM 5.1", description: "Z.ai" },
+      { id: "opencode/glm-5.2", name: "GLM 5.2", description: "Z.ai" },
+    ],
   },
-  "github-copilot/gpt-5.1-codex-mini": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
+  {
+    category: "xAI / SuperGrok",
+    enabledByDefault: false,
+    models: [
+      {
+        id: "xai/grok-4.5",
+        name: "Grok 4.5",
+        description: "Grok for chat, coding, and agentic tools",
+        reasoning: { efforts: ["low", "medium", "high"], default: "high" },
+      },
+      {
+        id: "xai/grok-4.6",
+        name: "Grok 4.6",
+        description: "Latest Grok for chat, coding, and agentic tools",
+        reasoning: { efforts: ["low", "medium", "high"], default: "high" },
+      },
+      {
+        id: "xai/grok-build-0.1",
+        name: "Grok Build 0.1",
+        description: "Coding model for SuperGrok subscribers",
+      },
+    ],
   },
-  "github-copilot/gpt-5.1-codex-max": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
+  {
+    category: "Z.AI Coding Plan",
+    enabledByDefault: false,
+    models: [
+      { id: "zai-coding-plan/glm-5.2", name: "GLM 5.2", description: "Z.AI Coding Plan" },
+      { id: "zai-coding-plan/glm-5.3", name: "GLM 5.3", description: "Z.AI Coding Plan" },
+    ],
   },
-  "github-copilot/gpt-5.2": {
-    efforts: ["none", "low", "medium", "high", "xhigh"],
-    default: undefined,
+  {
+    category: "DeepSeek",
+    enabledByDefault: false,
+    models: [
+      { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", description: "Fast model" },
+      { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro", description: "Most capable" },
+    ],
   },
-  "github-copilot/gpt-5.2-codex": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
+  {
+    category: "MiniMax Coding Plan",
+    enabledByDefault: false,
+    models: [
+      {
+        id: "minimax-coding-plan/MiniMax-M2.7",
+        name: "MiniMax M2.7",
+        description: "MiniMax Coding Plan",
+      },
+    ],
   },
-  "github-copilot/gpt-5.3-codex": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
+  {
+    category: "Fireworks AI",
+    enabledByDefault: false,
+    models: [
+      {
+        id: "fireworks-ai/kimi-k2p5-turbo",
+        name: "Kimi K2.5 Turbo",
+        description: "Fireworks AI",
+      },
+    ],
   },
-  "github-copilot/gpt-5.4": {
-    efforts: ["none", "low", "medium", "high", "xhigh"],
-    default: undefined,
+  {
+    category: "OpenCode Go",
+    enabledByDefault: false,
+    models: [
+      { id: "opencode-go/glm-5.1", name: "GLM 5.1", description: "Z.ai" },
+      { id: "opencode-go/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
+      { id: "opencode-go/kimi-k2.6", name: "Kimi K2.6", description: "Moonshot AI" },
+      { id: "opencode-go/qwen3.6-plus", name: "Qwen3.6 Plus", description: "Alibaba Cloud" },
+      { id: "opencode-go/minimax-m2.7", name: "MiniMax M2.7", description: "MiniMax" },
+      { id: "opencode-go/mimo-v2-pro", name: "MiMo V2 Pro", description: "Xiaomi" },
+      { id: "opencode-go/mimo-v2-omni", name: "MiMo V2 Omni", description: "Xiaomi" },
+    ],
   },
-  "github-copilot/gpt-5.4-mini": {
-    efforts: ["none", "low", "medium", "high", "xhigh"],
-    default: undefined,
+  {
+    category: "Ollama Cloud",
+    enabledByDefault: false,
+    models: [
+      { id: "ollama-cloud/glm-5.1", name: "GLM 5.1", description: "Z.ai" },
+      { id: "ollama-cloud/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
+      { id: "ollama-cloud/minimax-m2.7", name: "MiniMax M2.7", description: "MiniMax" },
+    ],
   },
-  "opencode/kimi-k2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "opencode/minimax-m2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "minimax-coding-plan/MiniMax-M2.7": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
-  },
-  "opencode/glm-5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "opencode-go/glm-5.1": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "opencode-go/kimi-k2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "opencode-go/kimi-k2.6": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "opencode-go/qwen3.6-plus": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
-  },
-  "opencode-go/minimax-m2.7": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
-  },
-  "opencode-go/mimo-v2-pro": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
-  },
-  "opencode-go/mimo-v2-omni": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
-  },
-  "ollama-cloud/glm-5.1": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "ollama-cloud/kimi-k2.5": { efforts: ["low", "medium", "high", "xhigh"], default: "high" },
-  "ollama-cloud/minimax-m2.7": {
-    efforts: ["low", "medium", "high", "xhigh"],
-    default: "high",
-  },
-};
+] as const satisfies readonly ModelCatalogGroup[];
+
+export type ValidModel = (typeof MODEL_CATALOG)[number]["models"][number]["id"];
+
+type CatalogModel = (typeof MODEL_CATALOG)[number]["models"][number];
+const MODEL_DEFINITIONS: readonly CatalogModel[] = MODEL_CATALOG.flatMap((group) => [
+  ...group.models,
+]);
+
+/** Valid model names supported by the system, in UI display order. */
+export const VALID_MODELS: ValidModel[] = MODEL_DEFINITIONS.map((model) => model.id);
+
+/** Default model to use when none is specified or valid. */
+const defaultModels = MODEL_DEFINITIONS.filter((model) => "default" in model && model.default);
+if (defaultModels.length !== 1) {
+  throw new Error("MODEL_CATALOG must define exactly one model with `default: true`");
+}
+export const DEFAULT_MODEL: ValidModel = defaultModels[0].id;
+
+/** Per-model reasoning configuration. Models omitted do not support reasoning controls. */
+export const MODEL_REASONING_CONFIG: Partial<Record<ValidModel, ModelReasoningConfig>> =
+  Object.fromEntries(
+    MODEL_CATALOG.flatMap((group) =>
+      group.models.flatMap((model) =>
+        "reasoning" in model
+          ? [
+              [
+                model.id,
+                { efforts: [...model.reasoning.efforts], default: model.reasoning.default },
+              ],
+            ]
+          : []
+      )
+    )
+  );
 
 export interface ModelDisplayInfo {
   id: ValidModel;
   name: string;
   description: string;
-  premiumMultiplier?: number;
 }
 
 export interface ModelCategory {
@@ -222,355 +337,19 @@ export interface ModelCategory {
  * Model options grouped by provider, for use in UI dropdowns.
  */
 export const MODEL_OPTIONS: ModelCategory[] = [
-  {
-    category: "Anthropic",
-    models: [
-      {
-        id: "anthropic/claude-haiku-4-5",
-        name: "Claude Haiku 4.5",
-        description: "Fast and efficient",
-      },
-      {
-        id: "anthropic/claude-sonnet-4-5",
-        name: "Claude Sonnet 4.5",
-        description: "Balanced performance",
-      },
-      {
-        id: "anthropic/claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
-        description: "Latest balanced, fast coding",
-      },
-      {
-        id: "anthropic/claude-opus-4-5",
-        name: "Claude Opus 4.5",
-        description: "Most capable",
-      },
-      {
-        id: "anthropic/claude-opus-4-6",
-        name: "Claude Opus 4.6",
-        description: "Most capable, adaptive thinking",
-      },
-      {
-        id: "anthropic/claude-opus-4-7",
-        name: "Claude Opus 4.7",
-        description: "Latest, most capable",
-      },
-    ],
-  },
-  {
-    category: "OpenAI",
-    models: [
-      { id: "openai/gpt-5.2", name: "GPT 5.2", description: "400K context, fast" },
-      { id: "openai/gpt-5.4", name: "GPT 5.4", description: "Flagship model" },
-      { id: "openai/gpt-5.5", name: "GPT 5.5", description: "Latest flagship model" },
-      { id: "openai/gpt-5.2-codex", name: "GPT 5.2 Codex", description: "Optimized for code" },
-      { id: "openai/gpt-5.3-codex", name: "GPT 5.3 Codex", description: "Latest codex" },
-      {
-        id: "openai/gpt-5.3-codex-spark",
-        name: "GPT 5.3 Codex Spark",
-        description: "Low-latency codex variant",
-      },
-    ],
-  },
-  {
-    category: "GitHub Copilot",
-    models: [
-      {
-        id: "github-copilot/claude-haiku-4-5",
-        name: "Claude Haiku 4.5",
-        description: "Copilot-backed fast Claude model",
-        premiumMultiplier: 0.33,
-      },
-      {
-        id: "github-copilot/claude-opus-4-5",
-        name: "Claude Opus 4.5",
-        description: "Copilot-backed Claude model",
-        premiumMultiplier: 3,
-      },
-      {
-        id: "github-copilot/claude-opus-4-6",
-        name: "Claude Opus 4.6",
-        description: "Copilot-backed latest Claude model",
-        premiumMultiplier: 3,
-      },
-      {
-        id: "github-copilot/claude-opus-4-6-fast",
-        name: "Claude Opus 4.6 Fast",
-        description: "Copilot-backed fast mode preview",
-        premiumMultiplier: 30,
-      },
-      {
-        id: "github-copilot/claude-sonnet-4",
-        name: "Claude Sonnet 4",
-        description: "Copilot-backed balanced Claude model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/claude-sonnet-4-5",
-        name: "Claude Sonnet 4.5",
-        description: "Copilot-backed balanced Claude model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
-        description: "Copilot-backed latest Claude model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gemini-2.5-pro",
-        name: "Gemini 2.5 Pro",
-        description: "Copilot-backed Google model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gemini-3-flash",
-        name: "Gemini 3 Flash",
-        description: "Copilot-backed fast Google model",
-        premiumMultiplier: 0.33,
-      },
-      {
-        id: "github-copilot/gemini-3-pro",
-        name: "Gemini 3 Pro",
-        description: "Copilot-backed Google model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gemini-3.1-pro",
-        name: "Gemini 3.1 Pro",
-        description: "Copilot-backed latest Google model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gpt-4.1",
-        name: "GPT 4.1",
-        description: "Copilot-backed OpenAI model",
-        premiumMultiplier: 0,
-      },
-      {
-        id: "github-copilot/gpt-4o",
-        name: "GPT 4o",
-        description: "Copilot-backed multimodal OpenAI model",
-        premiumMultiplier: 0,
-      },
-      {
-        id: "github-copilot/gpt-5-mini",
-        name: "GPT 5 Mini",
-        description: "Copilot-backed fast OpenAI model",
-        premiumMultiplier: 0,
-      },
-      {
-        id: "github-copilot/gpt-5.1",
-        name: "GPT 5.1",
-        description: "Copilot-backed OpenAI model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gpt-5.1-codex",
-        name: "GPT 5.1 Codex",
-        description: "Copilot-backed coding model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gpt-5.1-codex-mini",
-        name: "GPT 5.1 Codex Mini",
-        description: "Copilot-backed fast coding model",
-        premiumMultiplier: 0.33,
-      },
-      {
-        id: "github-copilot/gpt-5.1-codex-max",
-        name: "GPT 5.1 Codex Max",
-        description: "Copilot-backed high-capability coding model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gpt-5.2",
-        name: "GPT 5.2",
-        description: "Copilot-backed OpenAI model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gpt-5.2-codex",
-        name: "GPT 5.2 Codex",
-        description: "Copilot-backed coding model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gpt-5.3-codex",
-        name: "GPT 5.3 Codex",
-        description: "Copilot-backed latest coding model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gpt-5.4",
-        name: "GPT 5.4",
-        description: "Copilot-backed flagship OpenAI model",
-        premiumMultiplier: 1,
-      },
-      {
-        id: "github-copilot/gpt-5.4-mini",
-        name: "GPT 5.4 Mini",
-        description: "Copilot-backed fast flagship variant",
-        premiumMultiplier: 0.33,
-      },
-    ],
-  },
-  {
-    category: "Z.AI",
-    models: [
-      {
-        id: "zai-coding-plan/glm-5.1",
-        name: "GLM 5.1",
-        description: "Latest flagship agentic engineering model",
-      },
-      {
-        id: "zai-coding-plan/glm-5",
-        name: "GLM 5",
-        description: "Flagship agentic engineering model",
-      },
-      {
-        id: "zai-coding-plan/glm-5-turbo",
-        name: "GLM 5 Turbo",
-        description: "Optimized for fast coding workflows",
-      },
-      {
-        id: "zai-coding-plan/glm-4.7",
-        name: "GLM 4.7",
-        description: "Strong coding model with improved aesthetics",
-      },
-      {
-        id: "zai-coding-plan/glm-4.5-air",
-        name: "GLM 4.5 Air",
-        description: "Lightweight coding model with fast responses",
-      },
-    ],
-  },
-  {
-    category: "MiniMax",
-    models: [
-      {
-        id: "minimax-coding-plan/MiniMax-M2.7",
-        name: "MiniMax M2.7",
-        description: "Latest MiniMax",
-      },
-    ],
-  },
-  {
-    category: "Fireworks AI",
-    models: [
-      {
-        id: "fireworks-ai/kimi-k2p5-turbo",
-        name: "Kimi K2.5 Turbo",
-        description: "Moonshot AI model served via Fireworks AI",
-      },
-    ],
-  },
-  {
-    category: "OpenCode Zen",
-    models: [
-      { id: "opencode/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
-      { id: "opencode/minimax-m2.5", name: "MiniMax M2.5", description: "MiniMax" },
-      { id: "opencode/glm-5", name: "GLM 5", description: "Z.ai via OpenCode Zen" },
-    ],
-  },
-  {
-    category: "OpenCode Go",
-    models: [
-      {
-        id: "opencode-go/glm-5.1",
-        name: "GLM 5.1",
-        description: "OpenCode Go flagship coding model",
-      },
-      {
-        id: "opencode-go/kimi-k2.5",
-        name: "Kimi K2.5",
-        description: "Moonshot AI via OpenCode Go",
-      },
-      {
-        id: "opencode-go/kimi-k2.6",
-        name: "Kimi K2.6",
-        description: "Latest Moonshot AI via OpenCode Go",
-      },
-      {
-        id: "opencode-go/qwen3.6-plus",
-        name: "Qwen3.6 Plus",
-        description: "Qwen coding model via OpenCode Go",
-      },
-      {
-        id: "opencode-go/minimax-m2.7",
-        name: "MiniMax M2.7",
-        description: "MiniMax via OpenCode Go",
-      },
-      {
-        id: "opencode-go/mimo-v2-pro",
-        name: "MiMo-V2-Pro",
-        description: "MiMo coding model via OpenCode Go",
-      },
-      {
-        id: "opencode-go/mimo-v2-omni",
-        name: "MiMo-V2-Omni",
-        description: "MiMo multimodal model via OpenCode Go",
-      },
-    ],
-  },
-  {
-    category: "Ollama Cloud",
-    models: [
-      {
-        id: "ollama-cloud/glm-5.1",
-        name: "GLM 5.1",
-        description: "Zhipu AI model via Ollama Cloud",
-      },
-      {
-        id: "ollama-cloud/kimi-k2.5",
-        name: "Kimi K2.5",
-        description: "Moonshot AI model via Ollama Cloud",
-      },
-      {
-        id: "ollama-cloud/minimax-m2.7",
-        name: "MiniMax M2.7",
-        description: "MiniMax model via Ollama Cloud",
-      },
-    ],
-  },
+  ...MODEL_CATALOG.map((group) => ({
+    category: group.category,
+    models: group.models.map(({ id, name, description }) => ({ id, name, description })),
+  })),
 ];
 
 /**
  * Models enabled by default when no preferences are stored.
- * Includes a curated Copilot starter set and excludes zen models.
+ * Excludes opt-in providers which must be enabled via settings.
  */
-export const DEFAULT_ENABLED_MODELS: ValidModel[] = [
-  "anthropic/claude-haiku-4-5",
-  "anthropic/claude-sonnet-4-5",
-  "anthropic/claude-sonnet-4-6",
-  "anthropic/claude-opus-4-5",
-  "anthropic/claude-opus-4-6",
-  "anthropic/claude-opus-4-7",
-  "openai/gpt-5.2",
-  "openai/gpt-5.4",
-  "openai/gpt-5.5",
-  "openai/gpt-5.2-codex",
-  "openai/gpt-5.3-codex",
-  "openai/gpt-5.3-codex-spark",
-  "github-copilot/claude-haiku-4-5",
-  "github-copilot/claude-opus-4-6",
-  "github-copilot/claude-sonnet-4-6",
-  "github-copilot/gemini-3-flash",
-  "github-copilot/gpt-4.1",
-  "github-copilot/gpt-4o",
-  "github-copilot/gpt-5-mini",
-  "github-copilot/gpt-5.3-codex",
-  "github-copilot/gpt-5.4",
-  "zai-coding-plan/glm-5.1",
-  "zai-coding-plan/glm-5",
-  "zai-coding-plan/glm-5-turbo",
-  "zai-coding-plan/glm-4.7",
-  "zai-coding-plan/glm-4.5-air",
-  "minimax-coding-plan/MiniMax-M2.7",
-  "fireworks-ai/kimi-k2p5-turbo",
-  ...OPENCODE_GO_MODELS,
-  ...OLLAMA_CLOUD_MODELS,
-];
+export const DEFAULT_ENABLED_MODELS: ValidModel[] = MODEL_CATALOG.filter(
+  (group) => group.enabledByDefault
+).flatMap((group) => group.models.map((model) => model.id));
 
 // === Normalization ===
 
@@ -595,6 +374,36 @@ export function normalizeModelId(modelId: string): string {
  */
 export function isValidModel(model: string): model is ValidModel {
   return VALID_MODELS.includes(normalizeModelId(model) as ValidModel);
+}
+
+/** Normalize a list to unique, canonical model IDs that exist in the current catalog. */
+export function normalizeValidModels(modelIds: readonly string[]): ValidModel[] {
+  const validModels = new Set<ValidModel>();
+  for (const modelId of modelIds) {
+    const normalized = normalizeModelId(modelId);
+    if (isValidModel(normalized)) validModels.add(normalized);
+  }
+  return [...validModels];
+}
+
+/** Resolve a desired model against the enabled catalog using a canonical fallback policy. */
+export function resolveEnabledModel(options: {
+  model?: string | null;
+  enabledModels?: readonly string[];
+  fallbackModel?: string | null;
+}): ValidModel {
+  const fallback = getValidModelOrDefault(options.fallbackModel);
+  const desired =
+    options.model && isValidModel(options.model)
+      ? (normalizeModelId(options.model) as ValidModel)
+      : fallback;
+  if (!options.enabledModels) return desired;
+
+  const enabledModels = normalizeValidModels(options.enabledModels);
+  const enabled = new Set(enabledModels);
+  if (enabled.has(desired)) return desired;
+  if (enabled.has(fallback)) return fallback;
+  return enabledModels[0] ?? fallback;
 }
 
 /**
@@ -637,7 +446,7 @@ export function isValidReasoningEffort(model: string, effort: string): boolean {
  * @example
  * extractProviderAndModel("anthropic/claude-haiku-4-5") // { provider: "anthropic", model: "claude-haiku-4-5" }
  * extractProviderAndModel("claude-haiku-4-5") // { provider: "anthropic", model: "claude-haiku-4-5" }
- * extractProviderAndModel("openai/gpt-5.2-codex") // { provider: "openai", model: "gpt-5.2-codex" }
+ * extractProviderAndModel("openai/gpt-5.3-codex") // { provider: "openai", model: "gpt-5.3-codex" }
  */
 export function extractProviderAndModel(modelId: string): { provider: string; model: string } {
   const normalized = normalizeModelId(modelId);
@@ -650,6 +459,22 @@ export function extractProviderAndModel(modelId: string): { provider: string; mo
 }
 
 /**
+ * Resolve the subscription billing provider for a canonical catalog model.
+ * Unlike general model compatibility helpers, this rejects legacy bare IDs,
+ * malformed routes, and models absent from the current catalog.
+ */
+export function getSubscriptionProviderForModel(modelId: string): SubscriptionProviderId | null {
+  if (!VALID_MODELS.includes(modelId as ValidModel)) {
+    throw new Error(`Invalid canonical model ID: ${modelId}`);
+  }
+
+  const provider = modelId.slice(0, modelId.indexOf("/"));
+  return SUBSCRIPTION_PROVIDER_IDS.includes(provider as SubscriptionProviderId)
+    ? (provider as SubscriptionProviderId)
+    : null;
+}
+
+/**
  * Get a valid model or fall back to default.
  * Accepts both prefixed and bare formats; always returns canonical prefixed format.
  */
@@ -658,8 +483,4 @@ export function getValidModelOrDefault(model: string | undefined | null): ValidM
     return normalizeModelId(model) as ValidModel;
   }
   return DEFAULT_MODEL;
-}
-
-export function isSupportedClassifierModel(model: string): model is SupportedClassifierModel {
-  return SUPPORTED_CLASSIFIER_MODELS.includes(normalizeModelId(model) as SupportedClassifierModel);
 }

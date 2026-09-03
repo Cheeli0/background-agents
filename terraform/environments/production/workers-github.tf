@@ -2,32 +2,42 @@
 # GitHub Bot Worker
 # =============================================================================
 
-# Build github-bot worker bundle during plan so cloudflare_worker_version reads
-# stable module content during apply.
-data "external" "github_bot_build" {
+resource "cloudflare_queue" "github_autofix" {
   count = var.enable_github_bot ? 1 : 0
 
-  program = ["bash", "-c", <<-EOF
-    cd ${var.project_root}
-    npm run build -w @open-inspect/shared >&2
-    npm run build -w @open-inspect/github-bot >&2
-    if command -v sha256sum >/dev/null 2>&1; then
-      hash=$(sha256sum packages/github-bot/dist/index.js | cut -d' ' -f1)
-    else
-      hash=$(shasum -a 256 packages/github-bot/dist/index.js | cut -d' ' -f1)
-    fi
-    echo "{\"hash\": \"$hash\"}"
-  EOF
-  ]
+  account_id = var.cloudflare_account_id
+  queue_name = "open-inspect-github-autofix-${local.name_suffix}"
+}
+
+resource "cloudflare_queue" "github_autofix_dlq" {
+  count = var.enable_github_bot ? 1 : 0
+
+  account_id = var.cloudflare_account_id
+  queue_name = "open-inspect-github-autofix-dlq-${local.name_suffix}"
+}
+
+# Build github-bot worker bundle (only runs during apply, not plan)
+resource "null_resource" "github_bot_build" {
+  count = var.enable_github_bot ? 1 : 0
+
+  triggers = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    command     = "npm run build"
+    working_dir = "${var.project_root}/packages/github-bot"
+  }
 }
 
 module "github_bot_worker" {
   count  = var.enable_github_bot ? 1 : 0
   source = "../../modules/cloudflare-worker"
 
-  account_id  = var.cloudflare_account_id
-  worker_name = "open-inspect-github-bot-${local.name_suffix}"
-  script_path = local.github_bot_script_path
+  account_id       = var.cloudflare_account_id
+  worker_name      = "open-inspect-github-bot-${local.name_suffix}"
+  worker_subdomain = var.cloudflare_worker_subdomain
+  script_path      = local.github_bot_script_path
 
   kv_namespaces = [
     {
@@ -45,8 +55,16 @@ module "github_bot_worker" {
 
   enable_service_bindings = var.enable_service_bindings
 
+  queue_bindings = [
+    {
+      binding_name = "AUTOFIX_QUEUE"
+      queue_name   = cloudflare_queue.github_autofix[0].queue_name
+    }
+  ]
+
   plain_text_bindings = [
     { name = "DEPLOYMENT_NAME", value = var.deployment_name },
+    { name = "APP_NAME", value = var.app_name },
     { name = "DEFAULT_MODEL", value = "anthropic/claude-haiku-4-5" },
     { name = "GITHUB_BOT_USERNAME", value = var.github_bot_username },
   ]
@@ -56,11 +74,30 @@ module "github_bot_worker" {
     { name = "GITHUB_APP_PRIVATE_KEY", value = var.github_app_private_key },
     { name = "GITHUB_APP_INSTALLATION_ID", value = var.github_app_installation_id },
     { name = "GITHUB_WEBHOOK_SECRET", value = var.github_webhook_secret },
-    { name = "INTERNAL_CALLBACK_SECRET", value = var.internal_callback_secret },
+    { name = "SERVICE_AUTH_SECRET", value = random_password.service_auth_secret_github_bot.result },
   ]
 
   compatibility_date  = "2024-09-23"
   compatibility_flags = ["nodejs_compat"]
 
-  depends_on = [data.external.github_bot_build[0], module.control_plane_worker, module.github_kv[0]]
+  depends_on = [null_resource.github_bot_build[0], module.control_plane_worker, module.github_kv[0]]
+}
+
+resource "cloudflare_queue_consumer" "github_autofix" {
+  count = var.enable_github_bot ? 1 : 0
+
+  account_id        = var.cloudflare_account_id
+  queue_id          = cloudflare_queue.github_autofix[0].queue_id
+  type              = "worker"
+  script_name       = module.control_plane_worker.worker_name
+  dead_letter_queue = cloudflare_queue.github_autofix_dlq[0].queue_name
+  settings = {
+    batch_size       = 1
+    max_wait_time_ms = 1000
+    max_concurrency  = 5
+    max_retries      = 4
+    retry_delay      = 30
+  }
+
+  depends_on = [module.github_bot_worker, module.control_plane_worker]
 }

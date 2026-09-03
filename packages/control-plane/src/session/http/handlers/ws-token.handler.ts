@@ -1,107 +1,116 @@
 import type { Logger } from "../../../logger";
-import type { SessionRepository } from "../../repository";
-import type { ParticipantRow } from "../../types";
+import type { ParticipantRepository } from "../../participant-repository";
+import { sessionScmDisplayFieldsSchema } from "../../contracts";
+import { z } from "zod";
 
-interface GenerateWsTokenRequest {
-  userId: string;
-  scmUserId?: string;
-  scmLogin?: string;
-  scmName?: string;
-  scmEmail?: string;
-  scmTokenEncrypted?: string | null;
-  scmRefreshTokenEncrypted?: string | null;
-  scmTokenExpiresAt?: number | null;
-}
+const nullableOptionalString = z.string().nullable().optional();
 
-export interface WsTokenHandlerDeps {
-  repository: Pick<
-    SessionRepository,
-    "createParticipant" | "updateParticipantCoalesce" | "updateParticipantWsToken"
-  >;
-  getParticipantByUserId: (userId: string) => ParticipantRow | null;
-  generateId: (bytes?: number) => string;
-  hashToken: (token: string) => Promise<string>;
-  now: () => number;
-  getLog: () => Logger;
-}
+const generateWsTokenRequestSchema = sessionScmDisplayFieldsSchema.extend({
+  userId: z.string().optional(),
+  canonicalUserId: z.string().min(1),
+  scmUserId: nullableOptionalString,
+  scmTokenEncrypted: nullableOptionalString,
+  scmRefreshTokenEncrypted: nullableOptionalString,
+  scmTokenExpiresAt: z.number().nullable().optional(),
+});
 
-export interface WsTokenHandler {
-  generateWsToken: (request: Request) => Promise<Response>;
-}
+type GenerateWsTokenRequest = z.infer<typeof generateWsTokenRequestSchema>;
 
-export function createWsTokenHandler(deps: WsTokenHandlerDeps): WsTokenHandler {
-  return {
-    async generateWsToken(request: Request): Promise<Response> {
-      const body = (await request.json()) as GenerateWsTokenRequest;
+/**
+ * HTTP boundary for WS-token minting: upserts the requesting participant
+ * (coalescing SCM tokens against server-side refreshes) and rotates their
+ * WebSocket token.
+ */
+export class WsTokenHandler {
+  constructor(
+    private readonly repository: ParticipantRepository,
+    private readonly generateId: (bytes?: number) => string,
+    private readonly hashToken: (token: string) => Promise<string>,
+    private readonly now: () => number = Date.now
+  ) {}
 
-      if (!body.userId) {
-        return Response.json({ error: "userId is required" }, { status: 400 });
-      }
+  /** Mint a token for a participant bound to the authenticated canonical user. */
+  async generateWsToken(request: Request, log: Logger): Promise<Response> {
+    let raw: unknown;
+    try {
+      raw = await request.json();
+    } catch {
+      return Response.json({ error: "Invalid request body" }, { status: 400 });
+    }
 
-      const now = deps.now();
-      let participant = deps.getParticipantByUserId(body.userId);
+    const parsed = generateWsTokenRequestSchema.safeParse(raw);
+    if (!parsed.success) {
+      return Response.json({ error: "Invalid request body" }, { status: 400 });
+    }
+    const body: GenerateWsTokenRequest = parsed.data;
 
-      if (participant) {
-        // Only accept client tokens if they're newer than what we have in the DB.
-        // The server-side refresh may have rotated tokens, and the client could
-        // be sending stale values from an old session cookie.
-        const clientExpiresAt = body.scmTokenExpiresAt ?? null;
-        const dbExpiresAt = participant.scm_token_expires_at;
-        const clientSentAnyToken =
-          body.scmTokenEncrypted != null || body.scmRefreshTokenEncrypted != null;
+    if (!body.userId) {
+      return Response.json({ error: "userId is required" }, { status: 400 });
+    }
 
-        const shouldUpdateTokens =
-          clientSentAnyToken &&
-          (dbExpiresAt == null || (clientExpiresAt != null && clientExpiresAt > dbExpiresAt));
+    const now = this.now();
+    let participant = this.repository.getParticipantByUserId(body.userId);
 
-        // If we already have a refresh token (server-side refresh may rotate it),
-        // only accept an incoming refresh token when we're also accepting the
-        // access token update, or when we don't have one yet.
-        const shouldUpdateRefreshToken =
-          body.scmRefreshTokenEncrypted != null &&
-          (participant.scm_refresh_token_encrypted == null || shouldUpdateTokens);
+    if (participant) {
+      // Only accept client tokens if they're newer than what we have in the DB.
+      // The server-side refresh may have rotated tokens, and the client could
+      // be sending stale values from an old session cookie.
+      const clientExpiresAt = body.scmTokenExpiresAt ?? null;
+      const dbExpiresAt = participant.scm_token_expires_at;
+      const clientSentAnyToken =
+        body.scmTokenEncrypted != null || body.scmRefreshTokenEncrypted != null;
 
-        deps.repository.updateParticipantCoalesce(participant.id, {
-          scmUserId: body.scmUserId ?? null,
-          scmLogin: body.scmLogin ?? null,
-          scmName: body.scmName ?? null,
-          scmEmail: body.scmEmail ?? null,
-          scmAccessTokenEncrypted: shouldUpdateTokens ? (body.scmTokenEncrypted ?? null) : null,
-          scmRefreshTokenEncrypted: shouldUpdateRefreshToken
-            ? (body.scmRefreshTokenEncrypted ?? null)
-            : null,
-          scmTokenExpiresAt: shouldUpdateTokens ? clientExpiresAt : null,
-        });
-      } else {
-        const id = deps.generateId();
-        deps.repository.createParticipant({
-          id,
-          userId: body.userId,
-          scmUserId: body.scmUserId ?? null,
-          scmLogin: body.scmLogin ?? null,
-          scmName: body.scmName ?? null,
-          scmEmail: body.scmEmail ?? null,
-          scmAccessTokenEncrypted: body.scmTokenEncrypted ?? null,
-          scmRefreshTokenEncrypted: body.scmRefreshTokenEncrypted ?? null,
-          scmTokenExpiresAt: body.scmTokenExpiresAt ?? null,
-          role: "member",
-          joinedAt: now,
-        });
-        participant = deps.getParticipantByUserId(body.userId)!;
-      }
+      const shouldUpdateTokens =
+        clientSentAnyToken &&
+        (dbExpiresAt == null || (clientExpiresAt != null && clientExpiresAt > dbExpiresAt));
 
-      const plainToken = deps.generateId(32);
-      const tokenHash = await deps.hashToken(plainToken);
+      // If we already have a refresh token (server-side refresh may rotate it),
+      // only accept an incoming refresh token when we're also accepting the
+      // access token update, or when we don't have one yet.
+      const shouldUpdateRefreshToken =
+        body.scmRefreshTokenEncrypted != null &&
+        (participant.scm_refresh_token_encrypted == null || shouldUpdateTokens);
 
-      deps.repository.updateParticipantWsToken(participant.id, tokenHash, now);
-      deps
-        .getLog()
-        .info("Generated WS token", { participant_id: participant.id, user_id: body.userId });
-
-      return Response.json({
-        token: plainToken,
-        participantId: participant.id,
+      this.repository.updateParticipantCoalesce(participant.id, {
+        canonicalUserId: body.canonicalUserId,
+        scmUserId: body.scmUserId ?? null,
+        scmLogin: body.scmLogin ?? null,
+        scmName: body.scmName ?? null,
+        scmEmail: body.scmEmail ?? null,
+        scmAccessTokenEncrypted: shouldUpdateTokens ? (body.scmTokenEncrypted ?? null) : null,
+        scmRefreshTokenEncrypted: shouldUpdateRefreshToken
+          ? (body.scmRefreshTokenEncrypted ?? null)
+          : null,
+        scmTokenExpiresAt: shouldUpdateTokens ? clientExpiresAt : null,
       });
-    },
-  };
+    } else {
+      const id = this.generateId();
+      this.repository.createParticipant({
+        id,
+        userId: body.userId,
+        canonicalUserId: body.canonicalUserId,
+        scmUserId: body.scmUserId ?? null,
+        scmLogin: body.scmLogin ?? null,
+        scmName: body.scmName ?? null,
+        scmEmail: body.scmEmail ?? null,
+        scmAccessTokenEncrypted: body.scmTokenEncrypted ?? null,
+        scmRefreshTokenEncrypted: body.scmRefreshTokenEncrypted ?? null,
+        scmTokenExpiresAt: body.scmTokenExpiresAt ?? null,
+        role: "member",
+        joinedAt: now,
+      });
+      participant = this.repository.getParticipantByUserId(body.userId)!;
+    }
+
+    const plainToken = this.generateId(32);
+    const tokenHash = await this.hashToken(plainToken);
+
+    this.repository.updateParticipantWsToken(participant.id, tokenHash, now);
+    log.info("Generated WS token", { participant_id: participant.id, user_id: body.userId });
+
+    return Response.json({
+      token: plainToken,
+      participantId: participant.id,
+    });
+  }
 }

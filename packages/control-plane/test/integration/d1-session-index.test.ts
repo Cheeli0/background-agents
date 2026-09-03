@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { env } from "cloudflare:test";
 import { SessionIndexStore } from "../../src/db/session-index";
+import { SessionPullRequestStore } from "../../src/db/session-pull-request-store";
+import type { SessionStatus } from "@open-inspect/shared/types/sessions";
 import { cleanD1Tables } from "./cleanup";
 
 describe("D1 SessionIndexStore", () => {
@@ -31,6 +33,276 @@ describe("D1 SessionIndexStore", () => {
     expect(session!.repoName).toBe("web-app");
     expect(session!.reasoningEffort).toBe("max");
     expect(session!.status).toBe("created");
+  });
+
+  it("atomically snapshots provider auth with the session", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const now = Date.now();
+    const providerAuth = [
+      {
+        provider: "openai" as const,
+        authMode: "api_key" as const,
+        selectionSource: "fallback_api_key",
+      },
+      {
+        provider: "xai" as const,
+        authMode: "api_key" as const,
+        selectionSource: "unattended_policy",
+      },
+    ];
+
+    await store.create({
+      id: "session-provider-auth",
+      title: null,
+      repoOwner: null,
+      repoName: null,
+      model: "anthropic/claude-haiku-4-5",
+      reasoningEffort: null,
+      baseBranch: null,
+      status: "created",
+      providerAuth,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const authRows = await env.DB.prepare(
+      "SELECT * FROM session_model_provider_auth WHERE session_id = ? ORDER BY provider"
+    )
+      .bind("session-provider-auth")
+      .all();
+    expect(authRows.results).toEqual([
+      {
+        session_id: "session-provider-auth",
+        provider: "openai",
+        auth_mode: "api_key",
+        provider_account_id: null,
+        selection_source: "fallback_api_key",
+        inherited_from_session_id: null,
+        created_at: now,
+      },
+      {
+        session_id: "session-provider-auth",
+        provider: "xai",
+        auth_mode: "api_key",
+        provider_account_id: null,
+        selection_source: "unattended_policy",
+        inherited_from_session_id: null,
+        created_at: now,
+      },
+    ]);
+    await expect(store.getCompleteProviderAuth("session-provider-auth")).resolves.toEqual(
+      providerAuth
+    );
+    await expect(store.getProviderAuthForProvider("session-provider-auth", "xai")).resolves.toEqual(
+      providerAuth[1]
+    );
+    await expect(
+      store.getProviderAuthForProvider("session-provider-auth", "openai")
+    ).resolves.toEqual(providerAuth[0]);
+    await expect(store.getCompleteProviderAuth("missing-session")).rejects.toThrow(/incomplete/);
+  });
+
+  it("atomically admits only one concurrent terminal-child resume for one remaining slot", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const now = Date.now();
+    const create = (id: string, status: "active" | "completed") =>
+      store.create({
+        id,
+        title: null,
+        repoOwner: "acme",
+        repoName: "repo",
+        model: "anthropic/claude-haiku-4-5",
+        reasoningEffort: null,
+        baseBranch: "main",
+        status,
+        parentSessionId: id === "parent" ? null : "parent",
+        createdAt: now,
+        updatedAt: now,
+      });
+    await create("parent", "active");
+    await create("active-child", "active");
+    await create("terminal-child-1", "completed");
+    await create("terminal-child-2", "completed");
+
+    const results = await Promise.all([
+      store.acquireChildAdmissionLease("parent", "terminal-child-1", 2),
+      store.acquireChildAdmissionLease("parent", "terminal-child-2", 2),
+    ]);
+
+    expect(results.filter((result) => result !== null)).toHaveLength(1);
+    expect(results.filter((result) => result === null)).toHaveLength(1);
+  });
+
+  it("uses one admission authority for a concurrent spawn and resume", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const now = Date.now();
+    await store.create({
+      id: "parent",
+      title: null,
+      repoOwner: "acme",
+      repoName: "repo",
+      model: "anthropic/claude-haiku-4-5",
+      reasoningEffort: null,
+      baseBranch: "main",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const results = await Promise.all([
+      store.acquireChildAdmissionLease("parent", "new-spawn", 1),
+      store.acquireChildAdmissionLease("parent", "terminal-resume", 1),
+    ]);
+
+    expect(results.filter((result) => result !== null)).toHaveLength(1);
+    expect(results.filter((result) => result === null)).toHaveLength(1);
+  });
+
+  it("requires lease ownership to release child admission capacity", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const now = Date.now();
+    await store.create({
+      id: "parent",
+      title: null,
+      repoOwner: "acme",
+      repoName: "repo",
+      model: "anthropic/claude-haiku-4-5",
+      reasoningEffort: null,
+      baseBranch: "main",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const lease = await store.acquireChildAdmissionLease("parent", "child-1", 1);
+    expect(lease).not.toBeNull();
+    expect(await store.acquireChildAdmissionLease("parent", "child-1", 1)).toBeNull();
+
+    await store.releaseChildAdmissionLease({
+      ...lease!,
+      token: "not-the-owner",
+    });
+    expect(await store.acquireChildAdmissionLease("parent", "child-2", 1)).toBeNull();
+
+    await store.releaseChildAdmissionLease(lease!);
+    expect(await store.acquireChildAdmissionLease("parent", "child-2", 1)).not.toBeNull();
+  });
+
+  describe("isRepositoryAssociated", () => {
+    it("matches the scalar primary and session_repositories rows case-insensitively", async () => {
+      const store = new SessionIndexStore(env.DB);
+      const now = Date.now();
+
+      await store.create({
+        id: "assoc-session-1",
+        title: null,
+        repoOwner: "Acme",
+        repoName: "Web-App",
+        model: "anthropic/claude-haiku-4-5",
+        reasoningEffort: null,
+        baseBranch: "main",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+        repositories: [
+          { repoOwner: "Acme", repoName: "Web-App", repoId: 1, baseBranch: "main" },
+          { repoOwner: "Acme", repoName: "Backend", repoId: 2, baseBranch: "main" },
+        ],
+      });
+
+      expect(await store.isRepositoryAssociated("assoc-session-1", "acme", "web-app")).toBe(true);
+      expect(await store.isRepositoryAssociated("assoc-session-1", "ACME", "BACKEND")).toBe(true);
+      expect(await store.isRepositoryAssociated("assoc-session-1", "acme", "other-repo")).toBe(
+        false
+      );
+      expect(await store.isRepositoryAssociated("missing-session", "acme", "web-app")).toBe(false);
+    });
+
+    it("matches the scalar primary for pre-multi-repo sessions without session_repositories rows", async () => {
+      const store = new SessionIndexStore(env.DB);
+      const now = Date.now();
+
+      await store.create({
+        id: "assoc-session-2",
+        title: null,
+        repoOwner: "acme",
+        repoName: "solo",
+        model: "anthropic/claude-haiku-4-5",
+        reasoningEffort: null,
+        baseBranch: null,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      expect(await store.isRepositoryAssociated("assoc-session-2", "acme", "solo")).toBe(true);
+      expect(await store.isRepositoryAssociated("assoc-session-2", "acme", "web-app")).toBe(false);
+    });
+  });
+
+  it("attaches pullRequestSummary from session_pull_requests without reordering", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const prStore = new SessionPullRequestStore(env.DB);
+    const now = Date.now();
+
+    for (const [id, updatedAt] of [
+      ["summary-session-new", now],
+      ["summary-session-old", now - 10_000],
+    ] as const) {
+      await store.create({
+        id,
+        title: null,
+        repoOwner: "acme",
+        repoName: "web-app",
+        model: "anthropic/claude-haiku-4-5",
+        reasoningEffort: null,
+        baseBranch: null,
+        status: "active",
+        createdAt: now - 20_000,
+        updatedAt,
+      });
+    }
+
+    // Two PRs on the OLDER session — its list position must not change.
+    for (const [artifactId, prNumber, lifecycleState, isDraft] of [
+      ["summary-artifact-1", 1, "open", true],
+      ["summary-artifact-2", 2, "merged", false],
+    ] as const) {
+      await prStore.upsert({
+        artifactId,
+        sessionId: "summary-session-old",
+        repositoryExternalId: String(prNumber),
+        repoOwner: "acme",
+        repoName: "web-app",
+        prNumber,
+        url: `https://github.com/acme/web-app/pull/${prNumber}`,
+        lifecycleState,
+        isDraft,
+        headBranch: "open-inspect/summary-session-old",
+        baseBranch: "main",
+        headSha: null,
+        providerCreatedAt: null,
+        providerUpdatedAt: null,
+        mergedAt: null,
+        closedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const { sessions } = await store.list();
+
+    expect(sessions.map((session) => session.id)).toEqual([
+      "summary-session-new",
+      "summary-session-old",
+    ]);
+    expect(sessions[0].pullRequestSummary).toBeUndefined();
+    expect(sessions[1].pullRequestSummary).toEqual({
+      total: 2,
+      open: 0,
+      draft: 1,
+      merged: 1,
+      closed: 0,
+    });
   });
 
   it("lists sessions with status filter", async () => {
@@ -68,7 +340,7 @@ describe("D1 SessionIndexStore", () => {
     expect(activeResult.sessions[0].id).toBe("session-active-1");
 
     const allResult = await store.list({});
-    expect(allResult.total).toBe(2);
+    expect(allResult.sessions.length).toBe(2);
   });
 
   it("stores and returns reasoning effort", async () => {
@@ -373,30 +645,44 @@ describe("D1 SessionIndexStore", () => {
       expect(children[1].id).toBe(childId1); // older
     });
 
+    it("listByParent attaches pull request summaries to children", async () => {
+      const now = Date.now();
+      await new SessionPullRequestStore(env.DB).upsert({
+        artifactId: "child-pr-artifact",
+        sessionId: childId1,
+        repositoryExternalId: "1",
+        repoOwner: "owner",
+        repoName: "repo",
+        prNumber: 42,
+        url: "https://github.com/owner/repo/pull/42",
+        lifecycleState: "open",
+        isDraft: false,
+        headBranch: "open-inspect/child-session-1",
+        baseBranch: "main",
+        headSha: null,
+        providerCreatedAt: null,
+        providerUpdatedAt: null,
+        mergedAt: null,
+        closedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const children = await store.listByParent(parentId);
+
+      expect(children.find((child) => child.id === childId1)?.pullRequestSummary).toEqual({
+        total: 1,
+        open: 1,
+        draft: 0,
+        merged: 0,
+        closed: 0,
+      });
+      expect(children.find((child) => child.id === childId2)?.pullRequestSummary).toBeUndefined();
+    });
+
     it("listByParent returns empty array when no children exist", async () => {
       const children = await store.listByParent("nonexistent-parent");
       expect(children).toEqual([]);
-    });
-
-    it("countActiveChildren excludes completed/failed/archived/cancelled", async () => {
-      await store.create({
-        id: "child-session-failed",
-        title: "Child failed",
-        repoOwner: "owner",
-        repoName: "repo",
-        model: "anthropic/claude-sonnet-4-6",
-        reasoningEffort: null,
-        baseBranch: null,
-        status: "failed",
-        parentSessionId: parentId,
-        spawnSource: "agent",
-        spawnDepth: 1,
-        createdAt: Date.now() + 2,
-        updatedAt: Date.now() + 2,
-      });
-
-      const count = await store.countActiveChildren(parentId);
-      expect(count).toBe(1); // child1 is "created" (active), child2 is "completed" (excluded)
     });
 
     it("countTotalChildren counts all children regardless of status", async () => {
@@ -487,6 +773,244 @@ describe("D1 SessionIndexStore", () => {
       const session = await store.get("session-no-user");
       expect(session).not.toBeNull();
       expect(session!.userId).toBeNull();
+    });
+  });
+
+  it("excludes automation descendants after their root is deleted", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const now = Date.now();
+    const baseSession = {
+      title: null,
+      repoOwner: "acme",
+      repoName: "web-app",
+      model: "anthropic/claude-haiku-4-5",
+      reasoningEffort: null,
+      baseBranch: "main",
+      status: "completed" as const,
+      userId: "user-1",
+      createdAt: now,
+    };
+
+    await store.create({
+      ...baseSession,
+      id: "automation-root",
+      spawnSource: "automation",
+      automationId: "automation-1",
+      automationRunId: "run-1",
+      updatedAt: now - 1,
+    });
+    await store.create({
+      ...baseSession,
+      id: "automation-child",
+      parentSessionId: "automation-root",
+      spawnSource: "agent",
+      automationId: "automation-1",
+      automationRunId: "run-1",
+      updatedAt: now,
+    });
+    await store.create({
+      ...baseSession,
+      id: "manual-session",
+      spawnSource: "user",
+      updatedAt: now - 2,
+    });
+    await store.delete("automation-root");
+
+    const result = await store.list({
+      createdByUserIds: ["user-1"],
+      excludeAutomationLineage: true,
+    });
+
+    expect(result.sessions.map((session) => session.id)).toEqual(["manual-session"]);
+  });
+
+  it("excludes github-bot sessions attributed to the user from lineage-filtered lists", async () => {
+    const store = new SessionIndexStore(env.DB);
+    const now = Date.now();
+    const baseSession = {
+      title: null,
+      repoOwner: "acme",
+      repoName: "web-app",
+      model: "anthropic/claude-haiku-4-5",
+      reasoningEffort: null,
+      baseBranch: "main",
+      status: "completed" as const,
+      userId: "user-1",
+      createdAt: now,
+    };
+
+    await store.create({
+      ...baseSession,
+      id: "auto-review",
+      spawnSource: "github-bot",
+      updatedAt: now,
+    });
+    await store.create({
+      ...baseSession,
+      id: "manual-session",
+      spawnSource: "user",
+      updatedAt: now - 1,
+    });
+
+    const filtered = await store.list({
+      createdByUserIds: ["user-1"],
+      excludeAutomationLineage: true,
+    });
+    expect(filtered.sessions.map((session) => session.id)).toEqual(["manual-session"]);
+
+    const unfiltered = await store.list({ createdByUserIds: ["user-1"] });
+    expect(unfiltered.sessions.map((session) => session.id)).toEqual([
+      "auto-review",
+      "manual-session",
+    ]);
+  });
+
+  describe("listAbandonedDraftSessionIds", () => {
+    const HOUR_MS = 60 * 60 * 1000;
+
+    async function seedSession(
+      store: SessionIndexStore,
+      id: string,
+      status: SessionStatus,
+      updatedAt: number
+    ): Promise<void> {
+      await store.create({
+        id,
+        title: id,
+        repoOwner: "acme",
+        repoName: "web-app",
+        model: "anthropic/claude-haiku-4-5",
+        reasoningEffort: null,
+        baseBranch: null,
+        status,
+        createdAt: updatedAt,
+        updatedAt,
+      });
+    }
+
+    it("selects only drafts left untouched past the cutoff", async () => {
+      const store = new SessionIndexStore(env.DB);
+      const now = Date.now();
+      const cutoff = now - 24 * HOUR_MS;
+
+      await seedSession(store, "stale-draft", "created", now - 48 * HOUR_MS);
+      await seedSession(store, "fresh-draft", "created", now - HOUR_MS);
+      await seedSession(store, "stale-active", "active", now - 48 * HOUR_MS);
+      await seedSession(store, "stale-completed", "completed", now - 48 * HOUR_MS);
+      await seedSession(store, "stale-archived", "archived", now - 48 * HOUR_MS);
+
+      const ids = await store.listAbandonedDraftSessionIds(cutoff, 50);
+
+      expect(ids).toEqual(["stale-draft"]);
+    });
+
+    it("returns the oldest drafts first and honours the limit", async () => {
+      const store = new SessionIndexStore(env.DB);
+      const now = Date.now();
+
+      await seedSession(store, "middle", "created", now - 48 * HOUR_MS);
+      await seedSession(store, "oldest", "created", now - 72 * HOUR_MS);
+      await seedSession(store, "newest", "created", now - 25 * HOUR_MS);
+
+      const ids = await store.listAbandonedDraftSessionIds(now - 24 * HOUR_MS, 2);
+
+      expect(ids).toEqual(["oldest", "middle"]);
+    });
+
+    it("archives an orphaned draft so the batch advances past it", async () => {
+      // The end-to-end shape of the head-of-line bug. Reading oldest-first is
+      // only correct if a visited row leaves the candidate set; a row that could
+      // never be expired used to hold the head and starve everything behind it.
+      const store = new SessionIndexStore(env.DB);
+      const now = Date.now();
+      const cutoff = now - 24 * HOUR_MS;
+
+      await seedSession(store, "orphan", "created", now - 72 * HOUR_MS);
+      await seedSession(store, "behind-it", "created", now - 48 * HOUR_MS);
+      expect(await store.listAbandonedDraftSessionIds(cutoff, 1)).toEqual(["orphan"]);
+
+      expect(await store.archiveOrphanedDraft("orphan")).toBe(true);
+
+      expect((await store.get("orphan"))!.status).toBe("archived");
+      expect(await store.listAbandonedDraftSessionIds(cutoff, 1)).toEqual(["behind-it"]);
+    });
+
+    it("refuses to archive a row that has left the draft status", async () => {
+      const store = new SessionIndexStore(env.DB);
+      const now = Date.now();
+
+      await seedSession(store, "started", "active", now - 48 * HOUR_MS);
+
+      expect(await store.archiveOrphanedDraft("started")).toBe(false);
+      expect((await store.get("started"))!.status).toBe("active");
+    });
+  });
+
+  describe("repairStatus", () => {
+    const HOUR_MS = 60 * 60 * 1000;
+
+    async function seedDraft(store: SessionIndexStore, id: string, updatedAt: number) {
+      await store.create({
+        id,
+        title: id,
+        repoOwner: "acme",
+        repoName: "web-app",
+        model: "anthropic/claude-haiku-4-5",
+        reasoningEffort: null,
+        baseBranch: null,
+        status: "created",
+        createdAt: updatedAt,
+        updatedAt,
+      });
+    }
+
+    it("projects a diverged status without claiming new activity", async () => {
+      const store = new SessionIndexStore(env.DB);
+      const updatedAt = Date.now() - 48 * HOUR_MS;
+      await seedDraft(store, "diverged", updatedAt);
+
+      expect(await store.repairStatus("diverged", "completed")).toBe(true);
+
+      const session = await store.get("diverged");
+      expect(session!.status).toBe("completed");
+      // `updated_at` is user-visible recency, maintained by touchUpdatedAt on
+      // real activity. A repair is bookkeeping, so it must not reorder the list.
+      expect(session!.updatedAt).toBe(updatedAt);
+    });
+
+    it("lands even when the index is newer than the durable object", async () => {
+      // The regression this method exists for. updateStatus guards on
+      // `updated_at <= ?` to keep out-of-order async writes from winning, but a
+      // repair carries the durable object's own timestamp — which is older than
+      // D1 whenever touchUpdatedAt has run. The guard then drops the write and
+      // reports zero changes, leaving the row selectable forever.
+      const store = new SessionIndexStore(env.DB);
+      const durableObjectUpdatedAt = Date.now() - 48 * HOUR_MS;
+      await seedDraft(store, "index-ahead", durableObjectUpdatedAt);
+      await store.touchUpdatedAt("index-ahead");
+
+      expect(await store.updateStatus("index-ahead", "completed", durableObjectUpdatedAt)).toBe(
+        false
+      );
+
+      expect(await store.repairStatus("index-ahead", "completed")).toBe(true);
+      expect((await store.get("index-ahead"))!.status).toBe("completed");
+    });
+
+    it("reports no change when the index already agrees", async () => {
+      const store = new SessionIndexStore(env.DB);
+      await seedDraft(store, "agreed", Date.now() - 48 * HOUR_MS);
+
+      expect(await store.repairStatus("agreed", "created")).toBe(false);
+    });
+
+    it("does not overwrite a newer non-draft projection", async () => {
+      const store = new SessionIndexStore(env.DB);
+      await seedDraft(store, "advanced", Date.now() - 48 * HOUR_MS);
+      expect(await store.updateStatus("advanced", "active", Date.now())).toBe(true);
+
+      expect(await store.repairStatus("advanced", "completed")).toBe(false);
+      expect((await store.get("advanced"))!.status).toBe("active");
     });
   });
 });

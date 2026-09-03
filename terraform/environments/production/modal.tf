@@ -2,20 +2,21 @@
 # Modal Sandbox Infrastructure
 # =============================================================================
 
+# Calculate the Modal source hash with Terraform functions so the deployment
+# path works on Windows, macOS, and Linux without shell-specific utilities.
 locals {
-  modal_source_files = sort(concat(
-    [for file in fileset("${var.project_root}/packages/modal-infra/src", "**/*.py") : "${var.project_root}/packages/modal-infra/src/${file}"],
-    [for file in fileset("${var.project_root}/packages/modal-infra/src", "**/*.js") : "${var.project_root}/packages/modal-infra/src/${file}"],
-    [for file in fileset("${var.project_root}/packages/modal-infra/src", "**/*.ts") : "${var.project_root}/packages/modal-infra/src/${file}"],
-    [for file in fileset("${var.project_root}/packages/sandbox-runtime/src", "**/*.py") : "${var.project_root}/packages/sandbox-runtime/src/${file}"],
-    [for file in fileset("${var.project_root}/packages/sandbox-runtime/src", "**/*.js") : "${var.project_root}/packages/sandbox-runtime/src/${file}"],
-    [for file in fileset("${var.project_root}/packages/sandbox-runtime/src", "**/*.ts") : "${var.project_root}/packages/sandbox-runtime/src/${file}"],
-  ))
-
-  # Include both relative path and per-file hash so renames and content changes trigger redeploys.
-  modal_source_hash = sha256(join("\n", [
-    for file in local.modal_source_files :
-    "${trimprefix(file, "${var.project_root}/")}:${filesha256(file)}"
+  modal_source_files = concat(
+    [for file in fileset("${var.project_root}/packages/modal-infra/src", "**") : "${var.project_root}/packages/modal-infra/src/${file}"],
+    [for file in fileset("${var.project_root}/packages/sandbox-runtime/src", "**") : "${var.project_root}/packages/sandbox-runtime/src/${file}"],
+    [
+      "${var.project_root}/packages/modal-infra/deploy.py",
+      "${var.project_root}/packages/modal-infra/pyproject.toml",
+      "${var.project_root}/packages/modal-infra/uv.lock",
+      "${var.project_root}/terraform/modules/modal-app/scripts/modal-helper.mjs",
+    ]
+  )
+  modal_source_hash = sha256(join("", [
+    for file in sort(local.modal_source_files) : "${file}:${filesha256(file)}"
   ]))
 }
 
@@ -26,11 +27,13 @@ module "modal_app" {
   modal_token_id     = var.modal_token_id
   modal_token_secret = var.modal_token_secret
 
-  app_name      = "open-inspect"
-  workspace     = var.modal_workspace
-  deploy_path   = "${var.project_root}/packages/modal-infra"
-  deploy_module = "deploy"
-  source_hash   = local.modal_source_hash
+  app_name                     = "open-inspect"
+  workspace                    = var.modal_workspace
+  modal_environment            = var.modal_environment
+  modal_environment_web_suffix = var.modal_environment_web_suffix
+  deploy_path                  = "${var.project_root}/packages/modal-infra"
+  deploy_module                = "deploy"
+  source_hash                  = local.modal_source_hash
 
   secrets = [
     {
@@ -51,9 +54,7 @@ module "modal_app" {
       name = "internal-api"
       values = {
         MODAL_API_SECRET            = var.modal_api_secret
-        INTERNAL_CALLBACK_SECRET    = var.internal_callback_secret
         ALLOWED_CONTROL_PLANE_HOSTS = local.control_plane_host
-        CONTROL_PLANE_URL           = local.control_plane_url
       }
     }
   ]

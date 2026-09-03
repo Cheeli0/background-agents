@@ -1,8 +1,12 @@
 """Tests for bridge reconnection and error handling logic."""
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from sandbox_runtime.bridge import AgentBridge, SessionTerminatedError
+from sandbox_runtime.git_signing import GitSigningError
 
 
 class TestIsFatalConnectionError:
@@ -47,6 +51,165 @@ class TestIsFatalConnectionError:
 
     def test_empty_string_is_not_fatal(self, bridge):
         assert bridge._is_fatal_connection_error("") is False
+
+    def test_connection_aggregate_fields_track_lifetime_and_reconnects(self, bridge):
+        bridge._reconnect_attempt_count = 2
+
+        bridge._mark_connected(now_monotonic=10.0)
+        first = bridge._finalize_connection(now_monotonic=13.25)
+
+        bridge._mark_connected(now_monotonic=20.0)
+        second = bridge._finalize_connection(now_monotonic=21.5)
+
+        assert first == {
+            "connection_duration_seconds": 3.25,
+            "total_connected_duration_seconds": 3.25,
+            "connection_count": 1,
+            "reconnect_count": 0,
+            "reconnect_attempt_count": 2,
+        }
+        assert second == {
+            "connection_duration_seconds": 1.5,
+            "total_connected_duration_seconds": 4.75,
+            "connection_count": 2,
+            "reconnect_count": 1,
+            "reconnect_attempt_count": 2,
+        }
+
+    def test_finalize_connection_returns_none_without_active_connection(self, bridge):
+        assert bridge._finalize_connection(now_monotonic=5.0) is None
+
+    @pytest.mark.asyncio
+    async def test_pre_loop_cancellation_cleans_up_connection_state(self, bridge, monkeypatch):
+        class ConnectionContext:
+            def __init__(self, ws):
+                self.ws = ws
+
+            async def __aenter__(self):
+                return self.ws
+
+            async def __aexit__(self, *_args):
+                return False
+
+        ws = MagicMock(close_code=None)
+        monkeypatch.setattr(
+            "sandbox_runtime.bridge.websockets.connect",
+            lambda *_args, **_kwargs: ConnectionContext(ws),
+        )
+        bridge.log = MagicMock()
+        bridge._send_event = AsyncMock(side_effect=asyncio.CancelledError)
+
+        with pytest.raises(asyncio.CancelledError):
+            await bridge._connect_and_run()
+
+        assert bridge.ws is None
+        assert bridge._connected_at_monotonic is None
+        bridge.log.info.assert_any_call(
+            "bridge.disconnect",
+            reason="connection_closed",
+            connection_duration_seconds=pytest.approx(0, abs=0.1),
+            total_connected_duration_seconds=pytest.approx(0, abs=0.1),
+            connection_count=1,
+            reconnect_count=0,
+            reconnect_attempt_count=0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_complete_does_not_retain_transient_outcome(self, bridge, monkeypatch):
+        attempts = 0
+
+        async def connect_and_run():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("temporary failure")
+            bridge.shutdown_event.set()
+
+        bridge.log = MagicMock()
+        bridge.git_signing.initialize = AsyncMock()
+        bridge._load_session_id = AsyncMock()
+        bridge._connect_and_run = connect_and_run
+        monkeypatch.setattr("sandbox_runtime.bridge.asyncio.sleep", AsyncMock())
+
+        await bridge.run()
+
+        bridge.log.info.assert_any_call(
+            "bridge.run_complete",
+            outcome="shutdown",
+            connection_count=0,
+            reconnect_count=0,
+            reconnect_attempt_count=1,
+            total_connected_duration_seconds=0.0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_retries_signing_initialization_before_connecting(self, bridge, monkeypatch):
+        async def connect_and_run():
+            bridge.shutdown_event.set()
+
+        bridge.log = MagicMock()
+        bridge.git_signing.initialize = AsyncMock(
+            side_effect=[
+                GitSigningError("Commit signing configuration unavailable", retryable=True),
+                None,
+            ]
+        )
+        bridge._load_session_id = AsyncMock()
+        bridge._connect_and_run = AsyncMock(side_effect=connect_and_run)
+        sleep = AsyncMock()
+        monkeypatch.setattr("sandbox_runtime.bridge.asyncio.sleep", sleep)
+
+        await bridge.run()
+
+        assert bridge.git_signing.initialize.await_count == 2
+        bridge._connect_and_run.assert_awaited_once()
+        sleep.assert_awaited_once_with(bridge.RECONNECT_BACKOFF_BASE)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", [401, 403, 404, 410])
+    async def test_run_exits_on_terminal_signing_configuration_status(
+        self, bridge, monkeypatch, status
+    ):
+        bridge.log = MagicMock()
+        bridge.git_signing.initialize = AsyncMock(
+            side_effect=GitSigningError(
+                "Commit signing configuration unavailable", status_code=status
+            )
+        )
+        bridge._load_session_id = AsyncMock()
+        bridge._connect_and_run = AsyncMock()
+        sleep = AsyncMock()
+        monkeypatch.setattr("sandbox_runtime.bridge.asyncio.sleep", sleep)
+
+        await bridge.run()
+
+        bridge._connect_and_run.assert_not_awaited()
+        sleep.assert_not_awaited()
+        assert bridge.shutdown_event.is_set()
+        bridge.log.info.assert_any_call(
+            "bridge.run_complete",
+            outcome="fatal_error",
+            connection_count=0,
+            reconnect_count=0,
+            reconnect_attempt_count=0,
+            total_connected_duration_seconds=0.0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_exits_on_nonretryable_payload_failure(self, bridge, monkeypatch):
+        bridge.log = MagicMock()
+        bridge.git_signing.initialize = AsyncMock(
+            side_effect=GitSigningError("Invalid commit signing configuration")
+        )
+        bridge._load_session_id = AsyncMock()
+        bridge._connect_and_run = AsyncMock()
+        sleep = AsyncMock()
+        monkeypatch.setattr("sandbox_runtime.bridge.asyncio.sleep", sleep)
+
+        await bridge.run()
+
+        bridge._connect_and_run.assert_not_awaited()
+        sleep.assert_not_awaited()
 
 
 class TestSessionTerminatedError:

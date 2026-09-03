@@ -2,10 +2,80 @@ import { describe, expect, it } from "vitest";
 import {
   extractModelFromLabels,
   resolveSessionModelSettings,
-  resolveStaticRepo,
+  resolveStaticTarget,
 } from "../model-resolution";
-import { isValidPayload, verifyCallbackSignature } from "../callbacks";
-import type { CompletionCallback } from "../types";
+import { buildOAuthSuccessHtml } from "../index";
+import { matchExplicitRepo } from "../target-resolution";
+import type { RepoConfig } from "@open-inspect/shared/types/repository-catalog";
+
+describe("buildOAuthSuccessHtml", () => {
+  it("renders the configured app name in the heading", () => {
+    const html = buildOAuthSuccessHtml("Acme Bot", "My Workspace");
+    expect(html).toContain("<h1>Acme Bot Agent Installed!</h1>");
+    expect(html).toContain("<strong>My Workspace</strong>");
+  });
+
+  it("escapes the app name to prevent HTML injection", () => {
+    const html = buildOAuthSuccessHtml("<script>alert(1)</script>", "Acme");
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("escapes the workspace name to prevent HTML injection", () => {
+    const html = buildOAuthSuccessHtml("Open-Inspect", "Evil <img src=x>");
+    expect(html).toContain("Evil &lt;img src=x&gt;");
+  });
+});
+
+// ─── matchExplicitRepo ───────────────────────────────────────────────────────
+
+describe("matchExplicitRepo", () => {
+  const repo = (owner: string, name: string): RepoConfig => ({
+    id: `${owner}/${name}`,
+    owner,
+    name,
+    fullName: `${owner}/${name}`,
+    displayName: name,
+    description: name,
+    defaultBranch: "main",
+    private: true,
+  });
+  const repos = [repo("acme", "backend"), repo("acme", "frontend")];
+
+  it("finds the one repository a clarification reply names", () => {
+    expect(matchExplicitRepo("acme/backend", repos)?.fullName).toBe("acme/backend");
+  });
+
+  it("matches case-insensitively — repos are stored lowercase", () => {
+    expect(matchExplicitRepo("use Acme/Backend please", repos)?.fullName).toBe("acme/backend");
+  });
+
+  it("returns null when several repositories are named", () => {
+    expect(matchExplicitRepo("acme/backend or acme/frontend", repos)).toBeNull();
+  });
+
+  it("returns null when none are named", () => {
+    expect(matchExplicitRepo("the vault sorting bug", repos)).toBeNull();
+  });
+
+  it("does not match inside a longer repository path", () => {
+    expect(matchExplicitRepo("see acme/backend-legacy for context", repos)).toBeNull();
+    expect(matchExplicitRepo("see notacme/backend for context", repos)).toBeNull();
+  });
+
+  it("does not match inside a period-delimited repository path", () => {
+    expect(matchExplicitRepo("see acme/backend.docs for context", repos)).toBeNull();
+    expect(matchExplicitRepo("see acme/backend..docs for context", repos)).toBeNull();
+    expect(matchExplicitRepo("see not.acme/backend for context", repos)).toBeNull();
+    expect(matchExplicitRepo("see not..acme/backend for context", repos)).toBeNull();
+  });
+
+  it("accepts ordinary terminal punctuation", () => {
+    expect(matchExplicitRepo("use acme/backend.", repos)?.fullName).toBe("acme/backend");
+    expect(matchExplicitRepo("use acme/backend...", repos)?.fullName).toBe("acme/backend");
+    expect(matchExplicitRepo("acme/backend, please", repos)?.fullName).toBe("acme/backend");
+  });
+});
 
 // ─── extractModelFromLabels ──────────────────────────────────────────────────
 
@@ -26,134 +96,28 @@ describe("extractModelFromLabels", () => {
     expect(extractModelFromLabels([{ name: "model:gpt-5.5" }])).toBe("openai/gpt-5.5");
   });
 
-  it("returns GLM 5.1 for model:glm-5.1 label", () => {
-    expect(extractModelFromLabels([{ name: "model:glm-5.1" }])).toBe("zai-coding-plan/glm-5.1");
+  it.each(["gpt-5.2", "gpt-5.2-codex"])("returns null for unsupported model:%s label", (model) => {
+    expect(extractModelFromLabels([{ name: `model:${model}` }])).toBeNull();
   });
 
-  it("returns GLM 5 for model:glm-5 label", () => {
-    expect(extractModelFromLabels([{ name: "model:glm-5" }])).toBe("zai-coding-plan/glm-5");
-  });
-
-  it("returns GLM 4.7 for model:glm-4.7 label", () => {
-    expect(extractModelFromLabels([{ name: "model:glm-4.7" }])).toBe("zai-coding-plan/glm-4.7");
-  });
-
-  it("returns Kimi K2.5 Turbo for model:kimi-k2p5-turbo label", () => {
-    expect(extractModelFromLabels([{ name: "model:kimi-k2p5-turbo" }])).toBe(
-      "fireworks-ai/kimi-k2p5-turbo"
-    );
-  });
-
-  it("returns MiniMax M2.7 for model:minimax-m2.7 label", () => {
-    expect(extractModelFromLabels([{ name: "model:minimax-m2.7" }])).toBe(
-      "minimax-coding-plan/MiniMax-M2.7"
-    );
-  });
-
-  it("returns OpenCode Go-only models from model labels", () => {
-    expect(extractModelFromLabels([{ name: "model:kimi-k2.6" }])).toBe("opencode-go/kimi-k2.6");
-    expect(extractModelFromLabels([{ name: "model:qwen3.6-plus" }])).toBe(
-      "opencode-go/qwen3.6-plus"
-    );
-    expect(extractModelFromLabels([{ name: "model:mimo-v2-pro" }])).toBe("opencode-go/mimo-v2-pro");
-    expect(extractModelFromLabels([{ name: "model:mimo-v2-omni" }])).toBe(
-      "opencode-go/mimo-v2-omni"
-    );
-  });
-
-  it("resolves provider-only labels using the matching base model when available", () => {
-    expect(
-      extractModelFromLabels([{ name: "provider:github-copilot" }], "anthropic/claude-sonnet-4-6")
-    ).toBe("github-copilot/claude-sonnet-4-6");
-  });
-
-  it("falls back to the provider default when only a provider label is present", () => {
-    expect(extractModelFromLabels([{ name: "provider:openai" }], "anthropic/claude-opus-4-6")).toBe(
-      "openai/gpt-5.4"
-    );
-  });
-
-  it("uses Fireworks AI default when only provider:fireworks-ai is present", () => {
-    expect(
-      extractModelFromLabels([{ name: "provider:fireworks-ai" }], "anthropic/claude-opus-4-6")
-    ).toBe("fireworks-ai/kimi-k2p5-turbo");
-  });
-
-  it("uses GLM 5.1 when only provider:zai is present", () => {
-    expect(extractModelFromLabels([{ name: "provider:zai" }], "anthropic/claude-opus-4-6")).toBe(
-      "zai-coding-plan/glm-5.1"
-    );
-  });
-
-  it("accepts provider:z.ai as a Z.AI alias", () => {
-    expect(extractModelFromLabels([{ name: "provider:z.ai" }, { name: "model:glm-5.1" }])).toBe(
-      "zai-coding-plan/glm-5.1"
-    );
-  });
-
-  it("uses MiniMax M2.7 when only provider:minimax is present", () => {
-    expect(
-      extractModelFromLabels([{ name: "provider:minimax" }], "anthropic/claude-opus-4-6")
-    ).toBe("minimax-coding-plan/MiniMax-M2.7");
-  });
-
-  it("uses GLM 5.1 when only provider:opencode-go is present", () => {
-    expect(
-      extractModelFromLabels([{ name: "provider:opencode-go" }], "anthropic/claude-opus-4-6")
-    ).toBe("opencode-go/glm-5.1");
-  });
-
-  it("uses GLM 5.1 when only provider:ollama-cloud is present", () => {
-    expect(
-      extractModelFromLabels([{ name: "provider:ollama-cloud" }], "anthropic/claude-opus-4-6")
-    ).toBe("ollama-cloud/glm-5.1");
-  });
-
-  it("accepts provider:opencode go as an OpenCode Go alias", () => {
-    expect(extractModelFromLabels([{ name: "provider:opencode go" }])).toBe("opencode-go/glm-5.1");
-  });
-
-  it("accepts provider:ollama cloud as an Ollama Cloud alias", () => {
-    expect(extractModelFromLabels([{ name: "provider:ollama cloud" }])).toBe(
-      "ollama-cloud/glm-5.1"
-    );
-  });
-
-  it("combines provider and model labels when both are present", () => {
-    expect(
-      extractModelFromLabels([{ name: "provider:github-copilot" }, { name: "model:gpt-5.4" }])
-    ).toBe("github-copilot/gpt-5.4");
-  });
-
-  it("combines OpenCode Go provider labels with shared model names", () => {
-    expect(
-      extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:glm-5.1" }])
-    ).toBe("opencode-go/glm-5.1");
-    expect(
-      extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:kimi-k2.5" }])
-    ).toBe("opencode-go/kimi-k2.5");
-    expect(
-      extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:kimi-k2.6" }])
-    ).toBe("opencode-go/kimi-k2.6");
-    expect(
-      extractModelFromLabels([{ name: "provider:opencode-go" }, { name: "model:minimax-m2.7" }])
-    ).toBe("opencode-go/minimax-m2.7");
-  });
-
-  it("combines Ollama Cloud provider labels with shared model names", () => {
-    expect(
-      extractModelFromLabels([{ name: "provider:ollama-cloud" }, { name: "model:glm-5.1" }])
-    ).toBe("ollama-cloud/glm-5.1");
-    expect(
-      extractModelFromLabels([{ name: "provider:ollama-cloud" }, { name: "model:kimi-k2.5" }])
-    ).toBe("ollama-cloud/kimi-k2.5");
-    expect(
-      extractModelFromLabels([{ name: "provider:ollama-cloud" }, { name: "model:minimax-m2.7" }])
-    ).toBe("ollama-cloud/minimax-m2.7");
+  it.each([
+    ["sol", "openai/gpt-5.6-sol"],
+    ["terra", "openai/gpt-5.6-terra"],
+    ["luna", "openai/gpt-5.6-luna"],
+  ])("returns GPT 5.6 %s for its model label", (variant, expected) => {
+    expect(extractModelFromLabels([{ name: `model:gpt-5.6-${variant}` }])).toBe(expected);
   });
 
   it("returns Opus 4.7 for model:opus-4-7 label", () => {
     expect(extractModelFromLabels([{ name: "model:opus-4-7" }])).toBe("anthropic/claude-opus-4-7");
+  });
+
+  it("returns Opus 5 for model:opus-5 label", () => {
+    expect(extractModelFromLabels([{ name: "model:opus-5" }])).toBe("anthropic/claude-opus-5");
+  });
+
+  it("returns Sonnet 5 for model:sonnet-5 label", () => {
+    expect(extractModelFromLabels([{ name: "model:sonnet-5" }])).toBe("anthropic/claude-sonnet-5");
   });
 
   it("returns null for unknown model label", () => {
@@ -169,9 +133,9 @@ describe("extractModelFromLabels", () => {
   });
 });
 
-// ─── resolveStaticRepo ──────────────────────────────────────────────────────
+// ─── resolveStaticTarget ────────────────────────────────────────────────────
 
-describe("resolveStaticRepo", () => {
+describe("resolveStaticTarget", () => {
   const mapping = {
     "team-1": [
       { owner: "org", name: "frontend", label: "frontend" },
@@ -181,21 +145,44 @@ describe("resolveStaticRepo", () => {
   };
 
   it("matches by label", () => {
-    const result = resolveStaticRepo(mapping, "team-1", ["Frontend"]);
+    const result = resolveStaticTarget(mapping, "team-1", ["Frontend"]);
     expect(result).toEqual({ owner: "org", name: "frontend", label: "frontend" });
   });
 
   it("falls back to entry without label", () => {
-    const result = resolveStaticRepo(mapping, "team-1", ["unrelated"]);
+    const result = resolveStaticTarget(mapping, "team-1", ["unrelated"]);
     expect(result).toEqual({ owner: "org", name: "default-repo" });
   });
 
   it("returns null for empty mapping", () => {
-    expect(resolveStaticRepo({}, "team-1")).toBeNull();
+    expect(resolveStaticTarget({}, "team-1")).toBeNull();
   });
 
   it("returns null for unknown team", () => {
-    expect(resolveStaticRepo(mapping, "team-unknown")).toBeNull();
+    expect(resolveStaticTarget(mapping, "team-unknown")).toBeNull();
+  });
+
+  it("matches an environment entry by label", () => {
+    const mixed = {
+      "team-1": [
+        { environmentId: "env_fullstack", label: "fullstack" },
+        { owner: "org", name: "default-repo" },
+      ],
+    };
+    expect(resolveStaticTarget(mixed, "team-1", ["Fullstack"])).toEqual({
+      environmentId: "env_fullstack",
+      label: "fullstack",
+    });
+  });
+
+  it("falls back to a label-less environment entry", () => {
+    const mixed = {
+      "team-1": [
+        { owner: "org", name: "frontend", label: "frontend" },
+        { environmentId: "env_fullstack" },
+      ],
+    };
+    expect(resolveStaticTarget(mixed, "team-1", [])).toEqual({ environmentId: "env_fullstack" });
   });
 });
 
@@ -287,108 +274,5 @@ describe("resolveSessionModelSettings", () => {
 
     expect(result.model).toBe("anthropic/claude-opus-4-6");
     expect(result.reasoningEffort).toBe("max");
-  });
-});
-
-// ─── isValidPayload ─────────────────────────────────────────────────────────
-
-describe("isValidPayload", () => {
-  const validPayload: CompletionCallback = {
-    sessionId: "sess-1",
-    messageId: "msg-1",
-    success: true,
-    timestamp: Date.now(),
-    signature: "abc123",
-    context: {
-      source: "linear",
-      issueId: "issue-1",
-      issueIdentifier: "ENG-123",
-      issueUrl: "https://linear.app/issue/ENG-123",
-      repoFullName: "org/repo",
-      model: "claude-sonnet-4-5",
-    },
-  };
-
-  it("accepts a complete payload", () => {
-    expect(isValidPayload(validPayload)).toBe(true);
-  });
-
-  it("rejects null", () => {
-    expect(isValidPayload(null)).toBe(false);
-  });
-
-  it("rejects missing sessionId", () => {
-    const { sessionId: _sessionId, ...rest } = validPayload;
-    expect(isValidPayload(rest)).toBe(false);
-  });
-
-  it("rejects missing context.issueId", () => {
-    const bad = { ...validPayload, context: { ...validPayload.context, issueId: undefined } };
-    expect(isValidPayload(bad)).toBe(false);
-  });
-
-  it("rejects missing signature", () => {
-    const { signature: _signature, ...rest } = validPayload;
-    expect(isValidPayload(rest)).toBe(false);
-  });
-});
-
-// ─── verifyCallbackSignature ────────────────────────────────────────────────
-
-describe("verifyCallbackSignature", () => {
-  const secret = "test-secret-key";
-
-  async function signPayload(data: Record<string, unknown>): Promise<string> {
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-      "raw",
-      encoder.encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"]
-    );
-    const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(JSON.stringify(data)));
-    return Array.from(new Uint8Array(sig))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  }
-
-  it("returns true for valid signature", async () => {
-    const data = {
-      sessionId: "sess-1",
-      messageId: "msg-1",
-      success: true,
-      timestamp: 1234567890,
-      context: {
-        source: "linear" as const,
-        issueId: "issue-1",
-        issueIdentifier: "ENG-1",
-        issueUrl: "https://linear.app/issue/ENG-1",
-        repoFullName: "org/repo",
-        model: "claude-sonnet-4-5",
-      },
-    };
-    const signature = await signPayload(data);
-    const payload = { ...data, signature } as CompletionCallback;
-    expect(await verifyCallbackSignature(payload, secret)).toBe(true);
-  });
-
-  it("returns false for invalid signature", async () => {
-    const payload: CompletionCallback = {
-      sessionId: "sess-1",
-      messageId: "msg-1",
-      success: true,
-      timestamp: 1234567890,
-      signature: "invalid-hex-signature",
-      context: {
-        source: "linear",
-        issueId: "issue-1",
-        issueIdentifier: "ENG-1",
-        issueUrl: "https://linear.app/issue/ENG-1",
-        repoFullName: "org/repo",
-        model: "claude-sonnet-4-5",
-      },
-    };
-    expect(await verifyCallbackSignature(payload, secret)).toBe(false);
   });
 });

@@ -15,13 +15,6 @@ vi.mock("../src/github-auth", () => ({
   checkSenderPermission: vi.fn().mockResolvedValue({ hasPermission: true }),
 }));
 
-vi.mock("../src/utils/internal", () => ({
-  generateInternalToken: vi.fn().mockResolvedValue("test-internal-token"),
-  buildInternalAuthHeaders: vi.fn().mockResolvedValue({
-    Authorization: "Bearer test-internal-token",
-  }),
-}));
-
 vi.mock("../src/utils/integration-config", () => ({
   getGitHubConfig: vi.fn().mockResolvedValue({
     model: "anthropic/claude-haiku-4-5",
@@ -65,9 +58,16 @@ function createMockLogger(): Logger {
 
 function createMockEnv(): Env {
   const controlPlaneFetch = vi.fn().mockImplementation((url: string) => {
+    if (/\/repos\/[^/]+\/[^/]+\/metadata$/.test(url)) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ repo: "acme/widgets", metadata: null }), { status: 200 })
+      );
+    }
     if (url === "https://internal/sessions") {
       return Promise.resolve(
-        new Response(JSON.stringify({ sessionId: "session-123" }), { status: 200 })
+        new Response(JSON.stringify({ sessionId: "session-123", status: "created" }), {
+          status: 200,
+        })
       );
     }
     if (/\/sessions\/.+\/prompt$/.test(url)) {
@@ -88,13 +88,31 @@ function createMockEnv(): Env {
     GITHUB_APP_PRIVATE_KEY: "test-key",
     GITHUB_APP_INSTALLATION_ID: "67890",
     GITHUB_WEBHOOK_SECRET: "test-secret",
-    INTERNAL_CALLBACK_SECRET: "test-internal-secret",
+    SERVICE_AUTH_SECRET: "test-internal-secret",
     LOG_LEVEL: "error",
   } as unknown as Env;
 }
 
 function getControlPlaneFetch(env: Env) {
   return (env.CONTROL_PLANE as unknown as { fetch: ReturnType<typeof vi.fn> }).fetch;
+}
+
+/**
+ * Locate control-plane calls by URL rather than index — handlers make a
+ * session-target metadata lookup before creating the session.
+ */
+function findCallBody(cpFetch: ReturnType<typeof vi.fn>, urlPattern: RegExp) {
+  const call = cpFetch.mock.calls.find(([url]) => urlPattern.test(String(url)));
+  expect(call).toBeDefined();
+  return JSON.parse((call as [string, { body: string }])[1].body);
+}
+
+function sessionCreateBody(cpFetch: ReturnType<typeof vi.fn>) {
+  return findCallBody(cpFetch, /^https:\/\/internal\/sessions$/);
+}
+
+function promptSendBody(cpFetch: ReturnType<typeof vi.fn>) {
+  return findCallBody(cpFetch, /\/sessions\/.+\/prompt$/);
 }
 
 const pullRequestOpenedPayload: PullRequestOpenedPayload = {
@@ -188,31 +206,55 @@ describe("handlePullRequestOpened", () => {
     expect(postReaction).toHaveBeenCalledWith(
       "test-installation-token",
       "https://api.github.com/repos/acme/widgets/issues/42/reactions",
-      "eyes"
+      "eyes",
+      "Open-Inspect"
     );
 
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    expect(cpFetch).toHaveBeenCalledTimes(3);
 
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = sessionCreateBody(cpFetch);
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("Review PR #42");
-    expect(sessionBody.creationSource).toBe("github");
     expect(sessionBody.scmLogin).toBe("alice");
-    expect(sessionBody.scmUserId).toBe("1001");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
-    expect(sessionBody.spawnSource).toBe("github-bot");
+    // Identity travels via the signed actor assertion, never the body.
+    expect(sessionBody).not.toHaveProperty("scmUserId");
+    expect(sessionBody).not.toHaveProperty("spawnSource");
 
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = promptSendBody(cpFetch);
     expect(promptBody.source).toBe("github");
-    expect(promptBody.authorId).toBe("github:1001");
+    expect(promptBody).not.toHaveProperty("authorId");
     expect(promptBody.content).toContain("Pull Request #42");
 
     expect(log.info).toHaveBeenCalledWith(
       "session.created",
       expect.objectContaining({ action: "auto_review" })
     );
+  });
+
+  it("rejects a malformed session creation response before sending a prompt", async () => {
+    const env = createMockEnv();
+    const cpFetch = getControlPlaneFetch(env);
+    cpFetch.mockImplementation((url: string) => {
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+      }
+      if (/\/sessions\/.+\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+    const log = createMockLogger();
+
+    await expect(
+      handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-0")
+    ).rejects.toThrow("Session creation failed: invalid response");
+
+    expect(cpFetch).toHaveBeenCalledTimes(2);
   });
 
   it("returns early for draft PRs", async () => {
@@ -231,7 +273,11 @@ describe("handlePullRequestOpened", () => {
     expect(log.debug).toHaveBeenCalledWith("handler.draft_pr_skipped", expect.anything());
   });
 
-  it("returns early if PR is from the bot (loop prevention)", async () => {
+  it("reviews a bot-authored PR when the bot is an allowed trigger user", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      allowedTriggerUsers: ["test-bot[bot]"],
+    });
     const env = createMockEnv();
     const log = createMockLogger();
     const payload: PullRequestOpenedPayload = {
@@ -240,13 +286,50 @@ describe("handlePullRequestOpened", () => {
         ...pullRequestOpenedPayload.pull_request,
         user: { login: "test-bot[bot]" },
       },
+      sender: {
+        login: "test-bot[bot]",
+        id: 1004,
+        avatar_url: "https://avatars.githubusercontent.com/u/1004",
+      },
     };
 
     const result = await handlePullRequestOpened(env, log, payload, "trace-0");
 
-    expect(result).toEqual({ outcome: "skipped", skip_reason: "self_pr" });
+    expect(result).toEqual({
+      outcome: "processed",
+      session_id: "session-123",
+      message_id: "msg-456",
+      handler_action: "auto_review",
+    });
+    expect(sessionCreateBody(getControlPlaneFetch(env)).scmLogin).toBe("test-bot[bot]");
+    expect(promptSendBody(getControlPlaneFetch(env)).content).toContain('"event": "COMMENT"');
+  });
+
+  it("rejects a bot-authored PR when the bot is not an allowed trigger user", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      allowedTriggerUsers: ["alice"],
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: PullRequestOpenedPayload = {
+      ...pullRequestOpenedPayload,
+      pull_request: {
+        ...pullRequestOpenedPayload.pull_request,
+        user: { login: "test-bot[bot]" },
+      },
+      sender: {
+        login: "test-bot[bot]",
+        id: 1004,
+        avatar_url: "https://avatars.githubusercontent.com/u/1004",
+      },
+    };
+
+    const result = await handlePullRequestOpened(env, log, payload, "trace-0");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "sender_not_allowed" });
     expect(generateInstallationToken).not.toHaveBeenCalled();
-    expect(log.debug).toHaveBeenCalledWith("handler.self_pr_ignored", expect.anything());
+    expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
   });
 
   it("returns early when autoReviewOnOpen is false", async () => {
@@ -313,7 +396,7 @@ describe("handlePullRequestOpened", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-0");
 
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = sessionCreateBody(cpFetch);
     expect(sessionBody.model).toBe("anthropic/claude-opus-4-6");
   });
 
@@ -329,7 +412,7 @@ describe("handlePullRequestOpened", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-0");
 
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = sessionCreateBody(cpFetch);
     expect(sessionBody.reasoningEffort).toBe("high");
   });
 });
@@ -351,35 +434,34 @@ describe("handleReviewRequested", () => {
       appId: "12345",
       privateKey: "test-key",
       installationId: "67890",
+      userAgent: "Open-Inspect",
     });
 
     expect(postReaction).toHaveBeenCalledWith(
       "test-installation-token",
       "https://api.github.com/repos/acme/widgets/issues/42/reactions",
-      "eyes"
+      "eyes",
+      "Open-Inspect"
     );
 
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    expect(cpFetch).toHaveBeenCalledTimes(3);
 
     // Verify session creation
-    const sessionCall = cpFetch.mock.calls[0];
-    expect(sessionCall[0]).toBe("https://internal/sessions");
-    const sessionBody = JSON.parse(sessionCall[1].body);
+    const sessionBody = sessionCreateBody(cpFetch);
     expect(sessionBody.repoOwner).toBe("acme");
     expect(sessionBody.repoName).toBe("widgets");
     expect(sessionBody.title).toContain("Review PR #42");
     expect(sessionBody.scmLogin).toBe("alice");
-    expect(sessionBody.scmUserId).toBe("1001");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1001");
-    expect(sessionBody.spawnSource).toBe("github-bot");
+    // Identity travels via the signed actor assertion, never the body.
+    expect(sessionBody).not.toHaveProperty("scmUserId");
+    expect(sessionBody).not.toHaveProperty("spawnSource");
 
     // Verify prompt sending
-    const promptCall = cpFetch.mock.calls[1];
-    expect(promptCall[0]).toBe("https://internal/sessions/session-123/prompt");
-    const promptBody = JSON.parse(promptCall[1].body);
+    const promptBody = findCallBody(cpFetch, /^https:\/\/internal\/sessions\/session-123\/prompt$/);
     expect(promptBody.source).toBe("github");
-    expect(promptBody.authorId).toBe("github:1001");
+    expect(promptBody).not.toHaveProperty("authorId");
     expect(promptBody.content).toContain("Pull Request #42");
     expect(promptBody.content).toContain("acme/widgets");
     expect(promptBody.content).toContain("gh pr diff 42");
@@ -398,6 +480,27 @@ describe("handleReviewRequested", () => {
         session_id: "session-123",
         message_id: "msg-456",
       })
+    );
+  });
+
+  it("encodes nested repository owners in the reaction URL", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload = {
+      ...reviewRequestedPayload,
+      repository: {
+        ...reviewRequestedPayload.repository,
+        owner: { login: "group/platform" },
+      },
+    };
+
+    await handleReviewRequested(env, log, payload, "trace-nested-owner");
+
+    expect(postReaction).toHaveBeenCalledWith(
+      "test-installation-token",
+      "https://api.github.com/repos/group%2Fplatform/widgets/issues/42/reactions",
+      "eyes",
+      "Open-Inspect"
     );
   });
 
@@ -458,22 +561,24 @@ describe("handleIssueComment", () => {
     expect(postReaction).toHaveBeenCalledWith(
       "test-installation-token",
       "https://api.github.com/repos/acme/widgets/issues/comments/100/reactions",
-      "eyes"
+      "eyes",
+      "Open-Inspect"
     );
 
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    expect(cpFetch).toHaveBeenCalledTimes(3);
 
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = sessionCreateBody(cpFetch);
     expect(sessionBody.scmLogin).toBe("bob");
-    expect(sessionBody.scmUserId).toBe("1002");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1002");
-    expect(sessionBody.spawnSource).toBe("github-bot");
+    // Identity travels via the signed actor assertion, never the body.
+    expect(sessionBody).not.toHaveProperty("scmUserId");
+    expect(sessionBody).not.toHaveProperty("spawnSource");
 
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = promptSendBody(cpFetch);
     expect(promptBody.content).toContain("please fix the error handling");
     expect(promptBody.content).not.toContain("@test-bot[bot]");
-    expect(promptBody.authorId).toBe("github:1002");
+    expect(promptBody).not.toHaveProperty("authorId");
   });
 
   it("returns early if not a PR", async () => {
@@ -497,6 +602,23 @@ describe("handleIssueComment", () => {
     const payload: IssueCommentPayload = {
       ...issueCommentPayload,
       comment: { ...issueCommentPayload.comment, body: "just a regular comment" },
+    };
+
+    const result = await handleIssueComment(env, log, payload, "trace-2");
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "no_mention" });
+    expect(generateInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a longer username prefix as an @mention", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    const payload: IssueCommentPayload = {
+      ...issueCommentPayload,
+      comment: {
+        ...issueCommentPayload.comment,
+        body: "Please ask @test-bot[bot]-clone to handle this.",
+      },
     };
 
     const result = await handleIssueComment(env, log, payload, "trace-2");
@@ -556,22 +678,24 @@ describe("handleReviewComment", () => {
     expect(postReaction).toHaveBeenCalledWith(
       "test-installation-token",
       "https://api.github.com/repos/acme/widgets/pulls/comments/200/reactions",
-      "eyes"
+      "eyes",
+      "Open-Inspect"
     );
 
     const cpFetch = getControlPlaneFetch(env);
 
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = sessionCreateBody(cpFetch);
     expect(sessionBody.scmLogin).toBe("carol");
-    expect(sessionBody.scmUserId).toBe("1003");
     expect(sessionBody.scmAvatarUrl).toBe("https://avatars.githubusercontent.com/u/1003");
-    expect(sessionBody.spawnSource).toBe("github-bot");
+    // Identity travels via the signed actor assertion, never the body.
+    expect(sessionBody).not.toHaveProperty("scmUserId");
+    expect(sessionBody).not.toHaveProperty("spawnSource");
 
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = promptSendBody(cpFetch);
     expect(promptBody.content).toContain("src/cache.ts");
     expect(promptBody.content).toContain("const cache = new Map()");
     expect(promptBody.content).toContain("comments/200/replies");
-    expect(promptBody.authorId).toBe("github:1003");
+    expect(promptBody).not.toHaveProperty("authorId");
   });
 
   it("returns early if no @mention", async () => {
@@ -626,13 +750,28 @@ describe("error handling", () => {
   it("throws when session creation fails", async () => {
     const env = createMockEnv();
     const log = createMockLogger();
+    let finishReaction!: (ok: boolean) => void;
+    vi.mocked(postReaction).mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        finishReaction = resolve;
+      })
+    );
     getControlPlaneFetch(env).mockResolvedValue(
       new Response("Internal Server Error", { status: 500 })
     );
 
-    await expect(
-      handleReviewRequested(env, log, reviewRequestedPayload, "trace-err")
-    ).rejects.toThrow("Session creation failed: 500");
+    const handlerPromise = handleReviewRequested(env, log, reviewRequestedPayload, "trace-err");
+    let handlerSettled = false;
+    void handlerPromise
+      .finally(() => {
+        handlerSettled = true;
+      })
+      .catch(() => {});
+    await vi.waitFor(() => expect(getControlPlaneFetch(env)).toHaveBeenCalled());
+    expect(handlerSettled).toBe(false);
+
+    finishReaction(true);
+    await expect(handlerPromise).rejects.toThrow("Session creation failed: 500");
   });
 
   it("proceeds with session even if reaction fails", async () => {
@@ -643,7 +782,8 @@ describe("error handling", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-reaction");
 
     // Session should still be created despite reaction failure
-    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(3);
+    expect(log.warn).toHaveBeenCalledWith("acknowledgment.failed", expect.any(Object));
   });
 });
 
@@ -669,7 +809,7 @@ describe("integration config", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-model");
 
     const cpFetch = getControlPlaneFetch(env);
-    const sessionBody = JSON.parse(cpFetch.mock.calls[0][1].body);
+    const sessionBody = sessionCreateBody(cpFetch);
     expect(sessionBody.model).toBe("anthropic/claude-opus-4-6");
     expect(sessionBody.reasoningEffort).toBe("low");
   });
@@ -715,7 +855,7 @@ describe("integration config", () => {
 
     // Should proceed normally — null means all repos allowed
     const cpFetch = getControlPlaneFetch(env);
-    expect(cpFetch).toHaveBeenCalledTimes(2);
+    expect(cpFetch).toHaveBeenCalledTimes(3);
   });
 
   it("rejects sender not in allowedTriggerUsers (handleIssueComment)", async () => {
@@ -749,7 +889,7 @@ describe("integration config", () => {
     await handleIssueComment(env, log, issueCommentPayload, "trace-allowed");
 
     // bob matches → proceeds to session creation
-    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(2);
+    expect(getControlPlaneFetch(env)).toHaveBeenCalledTimes(3);
   });
 
   it("empty allowedTriggerUsers rejects all senders (handleReviewRequested)", async () => {
@@ -858,7 +998,7 @@ describe("integration config", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-review-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = promptSendBody(cpFetch);
     expect(promptBody.content).toContain("## Custom Instructions");
     expect(promptBody.content).toContain("Focus on security.");
   });
@@ -874,7 +1014,7 @@ describe("integration config", () => {
     await handleIssueComment(env, log, issueCommentPayload, "trace-comment-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = promptSendBody(cpFetch);
     expect(promptBody.content).toContain("## Custom Instructions");
     expect(promptBody.content).toContain("Run tests first.");
   });
@@ -890,7 +1030,7 @@ describe("integration config", () => {
     await handlePullRequestOpened(env, log, pullRequestOpenedPayload, "trace-pr-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = promptSendBody(cpFetch);
     expect(promptBody.content).toContain("## Custom Instructions");
     expect(promptBody.content).toContain("Check for SQL injection.");
   });
@@ -906,7 +1046,7 @@ describe("integration config", () => {
     await handleReviewComment(env, log, reviewCommentPayload, "trace-rc-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = promptSendBody(cpFetch);
     expect(promptBody.content).toContain("## Custom Instructions");
     expect(promptBody.content).toContain("Prefer minimal diffs.");
   });
@@ -919,7 +1059,248 @@ describe("integration config", () => {
     await handleReviewRequested(env, log, reviewRequestedPayload, "trace-null-instr");
 
     const cpFetch = getControlPlaneFetch(env);
-    const promptBody = JSON.parse(cpFetch.mock.calls[1][1].body);
+    const promptBody = promptSendBody(cpFetch);
     expect(promptBody.content).not.toContain("## Custom Instructions");
+  });
+});
+
+describe("default environment targets", () => {
+  const fullstackEnvironment = {
+    id: "env_abc",
+    name: "Fullstack",
+    repositories: [
+      { repoOwner: "acme", repoName: "widgets" },
+      { repoOwner: "acme", repoName: "gadgets" },
+    ],
+  };
+
+  /**
+   * Point the metadata lookup at a default environment and control what the
+   * environment fetch returns (null → 404, as for a deleted environment).
+   */
+  function mockSessionTarget(
+    env: Env,
+    opts: {
+      metadata?: { defaultEnvironmentId?: string } | null;
+      metadataStatus?: number;
+      environment?: typeof fullstackEnvironment | null;
+    }
+  ) {
+    getControlPlaneFetch(env).mockImplementation((url: string) => {
+      if (/\/repos\/[^/]+\/[^/]+\/metadata$/.test(url)) {
+        if (opts.metadataStatus) {
+          return Promise.resolve(new Response("Error", { status: opts.metadataStatus }));
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ repo: "acme/widgets", metadata: opts.metadata ?? null }), {
+            status: 200,
+          })
+        );
+      }
+      if (/^https:\/\/internal\/environments\//.test(url)) {
+        return opts.environment
+          ? Promise.resolve(
+              new Response(JSON.stringify({ environment: opts.environment }), { status: 200 })
+            )
+          : Promise.resolve(new Response("Not found", { status: 404 }));
+      }
+      if (url === "https://internal/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessionId: "session-123", status: "created" }), {
+            status: 200,
+          })
+        );
+      }
+      if (/\/sessions\/.+\/prompt$/.test(url)) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ messageId: "msg-456" }), { status: 200 })
+        );
+      }
+      return Promise.resolve(new Response("Not found", { status: 404 }));
+    });
+  }
+
+  it("launches the default environment when it contains the trigger repo", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    mockSessionTarget(env, {
+      metadata: { defaultEnvironmentId: "env_abc" },
+      environment: fullstackEnvironment,
+    });
+
+    const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-env");
+
+    expect(result).toMatchObject({ outcome: "processed", session_id: "session-123" });
+    const sessionBody = sessionCreateBody(getControlPlaneFetch(env));
+    expect(sessionBody.environmentId).toBe("env_abc");
+    expect(sessionBody.repoOwner).toBeUndefined();
+    expect(sessionBody.repoName).toBeUndefined();
+    expect(log.info).toHaveBeenCalledWith(
+      "target.environment_selected",
+      expect.objectContaining({ environment_id: "env_abc", repo: "acme/widgets" })
+    );
+    // Sender permission is verified on the environment's other repository
+    // (the trigger repo was already checked by caller gating).
+    expect(checkSenderPermission).toHaveBeenCalledWith(
+      "test-installation-token",
+      "acme",
+      "gadgets",
+      "alice",
+      expect.any(String)
+    );
+  });
+
+  it("falls back to the repo when the sender lacks permission on another environment repo", async () => {
+    vi.mocked(checkSenderPermission).mockImplementation(async (_token, _owner, repo) => ({
+      hasPermission: repo !== "gadgets",
+    }));
+    const env = createMockEnv();
+    const log = createMockLogger();
+    mockSessionTarget(env, {
+      metadata: { defaultEnvironmentId: "env_abc" },
+      environment: fullstackEnvironment,
+    });
+
+    const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-env-authz");
+
+    expect(result).toMatchObject({ outcome: "processed" });
+    const sessionBody = sessionCreateBody(getControlPlaneFetch(env));
+    expect(sessionBody.repoOwner).toBe("acme");
+    expect(sessionBody.environmentId).toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      "target.environment_sender_not_authorized",
+      expect.objectContaining({
+        environment_id: "env_abc",
+        denied_repo: "acme/gadgets",
+        sender: "alice",
+      })
+    );
+  });
+
+  it("falls back to the repo when a sender permission check errors", async () => {
+    vi.mocked(checkSenderPermission).mockImplementation(async (_token, _owner, repo) =>
+      repo === "gadgets" ? { hasPermission: false, error: true } : { hasPermission: true }
+    );
+    const env = createMockEnv();
+    const log = createMockLogger();
+    mockSessionTarget(env, {
+      metadata: { defaultEnvironmentId: "env_abc" },
+      environment: fullstackEnvironment,
+    });
+
+    const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-env-err");
+
+    expect(result).toMatchObject({ outcome: "processed" });
+    const sessionBody = sessionCreateBody(getControlPlaneFetch(env));
+    expect(sessionBody.environmentId).toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      "target.environment_sender_not_authorized",
+      expect.objectContaining({ denied_repo: "acme/gadgets", permission_check_error: true })
+    );
+  });
+
+  it("allowlisted senders launch environments without per-repo permission checks", async () => {
+    vi.mocked(getGitHubConfig).mockResolvedValue({
+      ...defaultConfig,
+      allowedTriggerUsers: ["alice"],
+    });
+    const env = createMockEnv();
+    const log = createMockLogger();
+    mockSessionTarget(env, {
+      metadata: { defaultEnvironmentId: "env_abc" },
+      environment: fullstackEnvironment,
+    });
+
+    const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-env-al");
+
+    expect(result).toMatchObject({ outcome: "processed" });
+    const sessionBody = sessionCreateBody(getControlPlaneFetch(env));
+    expect(sessionBody.environmentId).toBe("env_abc");
+    // Allowlist mode never consults GitHub repo permissions — for the trigger
+    // repo or the environment's repositories.
+    expect(checkSenderPermission).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the repo when the environment no longer exists", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    mockSessionTarget(env, {
+      metadata: { defaultEnvironmentId: "env_gone" },
+      environment: null,
+    });
+
+    const result = await handleReviewRequested(env, log, reviewRequestedPayload, "trace-env-gone");
+
+    expect(result).toMatchObject({ outcome: "processed" });
+    const sessionBody = sessionCreateBody(getControlPlaneFetch(env));
+    expect(sessionBody.repoOwner).toBe("acme");
+    expect(sessionBody.repoName).toBe("widgets");
+    expect(sessionBody.environmentId).toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      "target.environment_not_found",
+      expect.objectContaining({ environment_id: "env_gone" })
+    );
+  });
+
+  it("falls back to the repo when the environment lacks the trigger repo", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    mockSessionTarget(env, {
+      metadata: { defaultEnvironmentId: "env_abc" },
+      environment: {
+        ...fullstackEnvironment,
+        repositories: [{ repoOwner: "acme", repoName: "gadgets" }],
+      },
+    });
+
+    const result = await handlePullRequestOpened(
+      env,
+      log,
+      pullRequestOpenedPayload,
+      "trace-env-nm"
+    );
+
+    expect(result).toMatchObject({ outcome: "processed" });
+    const sessionBody = sessionCreateBody(getControlPlaneFetch(env));
+    expect(sessionBody.repoOwner).toBe("acme");
+    expect(sessionBody.environmentId).toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      "target.environment_missing_trigger_repo",
+      expect.objectContaining({ environment_id: "env_abc", repo: "acme/widgets" })
+    );
+  });
+
+  it("falls back to the repo when the metadata lookup fails", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    mockSessionTarget(env, { metadataStatus: 500 });
+
+    const result = await handleIssueComment(env, log, issueCommentPayload, "trace-env-meta");
+
+    expect(result).toMatchObject({ outcome: "processed" });
+    const sessionBody = sessionCreateBody(getControlPlaneFetch(env));
+    expect(sessionBody.repoOwner).toBe("acme");
+    expect(sessionBody.environmentId).toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      "target.metadata_fetch_failed",
+      expect.objectContaining({ repo: "acme/widgets", status: 500 })
+    );
+  });
+
+  it("membership check is case-insensitive", async () => {
+    const env = createMockEnv();
+    const log = createMockLogger();
+    mockSessionTarget(env, {
+      metadata: { defaultEnvironmentId: "env_abc" },
+      environment: {
+        ...fullstackEnvironment,
+        repositories: [{ repoOwner: "ACME", repoName: "Widgets" }],
+      },
+    });
+
+    await handleReviewComment(env, log, reviewCommentPayload, "trace-env-case");
+
+    const sessionBody = sessionCreateBody(getControlPlaneFetch(env));
+    expect(sessionBody.environmentId).toBe("env_abc");
   });
 });

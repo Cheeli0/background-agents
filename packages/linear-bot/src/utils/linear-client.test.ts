@@ -1,296 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LinearApiClient } from "./linear-client";
 import {
-  fetchAgentSessionPullRequests,
+  emitAgentActivity,
   fetchIssueDetails,
   fetchUser,
-  getFirstStartedWorkflowState,
   getRepoSuggestions,
-  moveIssueToStartedStateIfNeeded,
+  LINEAR_GRAPHQL_TIMEOUT_MS,
+  linearGraphQL,
+  postIssueComment,
 } from "./linear-client";
+import type { LinearApiClient } from "./linear-client";
 
-const client: LinearApiClient = { accessToken: "test-token" };
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-describe("linear-client workflow helpers", () => {
-  const originalFetch = globalThis.fetch;
-
-  beforeEach(() => {
-    globalThis.fetch = vi.fn();
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    vi.restoreAllMocks();
-  });
-
-  it("fetchIssueDetails returns workflow state metadata", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      jsonResponse({
-        data: {
-          issue: {
-            id: "issue-1",
-            identifier: "ENG-1",
-            title: "Test issue",
-            description: "Body",
-            url: "https://linear.app/acme/issue/ENG-1/test-issue",
-            priority: 0,
-            priorityLabel: "No priority",
-            labels: { nodes: [] },
-            project: null,
-            assignee: null,
-            state: { id: "state-backlog", name: "Backlog", type: "backlog" },
-            team: { id: "team-1", key: "ENG", name: "Engineering" },
-            comments: { nodes: [] },
-          },
-        },
-      })
-    );
-
-    const issue = await fetchIssueDetails(client, "issue-1");
-
-    expect(issue?.state).toEqual({ id: "state-backlog", name: "Backlog", type: "backlog" });
-  });
-
-  it("fetchAgentSessionPullRequests normalizes linked pull requests", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      jsonResponse({
-        data: {
-          agentSession: {
-            pullRequests: {
-              nodes: [
-                {
-                  pullRequest: {
-                    id: "pr-1",
-                    number: 42,
-                    title: "Fix session panel",
-                    url: "https://github.com/acme/repo/pull/42",
-                    status: "inReview",
-                  },
-                },
-                {
-                  pullRequest: {
-                    id: "pr-2",
-                    number: 43,
-                    title: "Follow-up",
-                    url: "https://github.com/acme/repo/pull/43",
-                    status: "merged",
-                  },
-                },
-              ],
-            },
-          },
-        },
-      })
-    );
-
-    const pullRequests = await fetchAgentSessionPullRequests(client, "agent-session-1");
-
-    expect(pullRequests).toEqual([
-      {
-        id: "pr-1",
-        number: 42,
-        title: "Fix session panel",
-        url: "https://github.com/acme/repo/pull/42",
-        status: "open",
-      },
-      {
-        id: "pr-2",
-        number: 43,
-        title: "Follow-up",
-        url: "https://github.com/acme/repo/pull/43",
-        status: "merged",
-      },
-    ]);
-  });
-
-  it("getFirstStartedWorkflowState picks the lowest position started state", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      jsonResponse({
-        data: {
-          team: {
-            states: {
-              nodes: [
-                { id: "state-2", name: "In Progress", type: "started", position: 20 },
-                { id: "state-1", name: "Todo", type: "started", position: 10 },
-              ],
-            },
-          },
-        },
-      })
-    );
-
-    const result = await getFirstStartedWorkflowState(client, "team-1");
-
-    expect(result).toEqual({
-      status: "found",
-      reason: "started_state_found",
-      state: { id: "state-1", name: "Todo", type: "started", position: 10 },
-    });
-  });
-
-  it("getFirstStartedWorkflowState reports GraphQL failures", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      jsonResponse({
-        errors: [{ message: "Bad query" }],
-      })
-    );
-
-    const result = await getFirstStartedWorkflowState(client, "team-1");
-
-    expect(result).toEqual({
-      status: "failed",
-      reason: "started_state_lookup_failed",
-      state: null,
-    });
-  });
-
-  it("moveIssueToStartedStateIfNeeded skips started/completed/canceled states", async () => {
-    for (const currentStateType of ["started", "completed", "canceled"]) {
-      vi.mocked(globalThis.fetch).mockClear();
-
-      const result = await moveIssueToStartedStateIfNeeded(client, {
-        issueId: "issue-1",
-        teamId: "team-1",
-        currentStateId: "state-1",
-        currentStateType,
-      });
-
-      expect(result.status).toBe("skipped");
-      expect(globalThis.fetch).not.toHaveBeenCalled();
-    }
-  });
-
-  it("moveIssueToStartedStateIfNeeded updates backlog issues to the first started state", async () => {
-    vi.mocked(globalThis.fetch)
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            team: {
-              states: {
-                nodes: [
-                  { id: "state-2", name: "Doing", type: "started", position: 30 },
-                  { id: "state-1", name: "In Progress", type: "started", position: 10 },
-                ],
-              },
-            },
-          },
-        })
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            issueUpdate: {
-              success: true,
-            },
-          },
-        })
-      );
-
-    const result = await moveIssueToStartedStateIfNeeded(client, {
-      issueId: "issue-1",
-      teamId: "team-1",
-      currentStateId: "state-backlog",
-      currentStateType: "backlog",
-    });
-
-    expect(result).toEqual({
-      status: "updated",
-      reason: "issue_moved_to_started",
-      targetState: { id: "state-1", name: "In Progress", type: "started", position: 10 },
-    });
-
-    const [, updateCall] = vi.mocked(globalThis.fetch).mock.calls;
-    const updateBody = JSON.parse(String(updateCall?.[1]?.body)) as {
-      variables: { input: { stateId: string } };
-    };
-    expect(updateBody.variables.input.stateId).toBe("state-1");
-  });
-
-  it("moveIssueToStartedStateIfNeeded is a no-op when no started states exist", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      jsonResponse({
-        data: {
-          team: {
-            states: {
-              nodes: [],
-            },
-          },
-        },
-      })
-    );
-
-    const result = await moveIssueToStartedStateIfNeeded(client, {
-      issueId: "issue-1",
-      teamId: "team-1",
-      currentStateId: "state-backlog",
-      currentStateType: "unstarted",
-    });
-
-    expect(result).toEqual({
-      status: "skipped",
-      reason: "no_started_state",
-      targetState: null,
-    });
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("moveIssueToStartedStateIfNeeded surfaces started-state lookup GraphQL errors as failures", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      jsonResponse({
-        errors: [{ message: "Lookup failed" }],
-      })
-    );
-
-    const result = await moveIssueToStartedStateIfNeeded(client, {
-      issueId: "issue-1",
-      teamId: "team-1",
-      currentStateId: "state-backlog",
-      currentStateType: "backlog",
-    });
-
-    expect(result).toEqual({
-      status: "failed",
-      reason: "started_state_lookup_failed",
-    });
-  });
-
-  it("getRepoSuggestions inlines candidate repositories instead of using a removed input type", async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(
-      jsonResponse({
-        data: {
-          issueRepositorySuggestions: {
-            suggestions: [{ repositoryFullName: "acme/api", confidence: 0.91 }],
-          },
-        },
-      })
-    );
-
-    const suggestions = await getRepoSuggestions(client, "issue-1", "session-1", [
-      { hostname: "github.com", repositoryFullName: "acme/api" },
-    ]);
-
-    expect(suggestions).toEqual([{ repositoryFullName: "acme/api", confidence: 0.91 }]);
-
-    const request = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
-    const body = JSON.parse(String(request?.body)) as {
-      query: string;
-      variables: Record<string, unknown>;
-    };
-
-    expect(body.query).not.toContain("IssueRepositorySuggestionInput");
-    expect(body.query).toContain(
-      'candidateRepositories: [{ hostname: "github.com", repositoryFullName: "acme/api" }]'
-    );
-    expect(body.variables).toEqual({ issueId: "issue-1", agentSessionId: "session-1" });
-  });
-});
+const client: LinearApiClient = {
+  accessToken: "test-token",
+  organizationId: "org-1",
+  renewAccessToken: vi.fn(async () => "renewed-token"),
+};
 
 function mockFetchResponse(data: unknown): void {
   vi.stubGlobal(
@@ -301,6 +25,109 @@ function mockFetchResponse(data: unknown): void {
     })
   );
 }
+
+describe("linearGraphQL", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("rejects a GraphQL response that is not an object", async () => {
+    mockFetchResponse([]);
+
+    await expect(linearGraphQL(client, "query { viewer { id } }", {})).rejects.toThrow(
+      "Linear GraphQL error: unexpected response shape"
+    );
+  });
+
+  it("rejects a null GraphQL response", async () => {
+    mockFetchResponse(null);
+
+    await expect(linearGraphQL(client, "query { viewer { id } }", {})).rejects.toThrow(
+      "Linear GraphQL error: unexpected response shape"
+    );
+  });
+
+  it("returns the envelope for a well-formed GraphQL response", async () => {
+    mockFetchResponse({ data: { viewer: { id: "user-1" } } });
+
+    await expect(linearGraphQL(client, "query { viewer { id } }", {})).resolves.toEqual({
+      data: { viewer: { id: "user-1" } },
+    });
+  });
+
+  it("times out the first GraphQL attempt", async () => {
+    const timeoutSignal = AbortSignal.abort(new DOMException("timed out", "TimeoutError"));
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutSignal);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input, init) => {
+        expect(init?.signal).toBe(timeoutSignal);
+        throw timeoutSignal.reason;
+      })
+    );
+
+    await expect(linearGraphQL(client, "query { viewer { id } }", {})).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+    expect(timeoutSpy).toHaveBeenCalledWith(LINEAR_GRAPHQL_TIMEOUT_MS);
+  });
+
+  it("uses the same deadline for a renewed-token retry", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const renewAccessToken = vi.fn(async () => "renewed-token");
+    const retryClient: LinearApiClient = {
+      accessToken: "expired-token",
+      organizationId: "org-1",
+      renewAccessToken,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(init?.signal).toBe(deadline.signal);
+      if (fetchMock.mock.calls.length === 1) return new Response(null, { status: 401 });
+      deadline.abort(new DOMException("timed out", "TimeoutError"));
+      throw deadline.signal.reason;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(linearGraphQL(retryClient, "query { viewer { id } }", {})).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+    expect(renewAccessToken).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves the aggregate timeout while token renewal is stalled", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    let renewalStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      renewalStarted = resolve;
+    });
+    const renewAccessToken = vi.fn(
+      () =>
+        new Promise<string>(() => {
+          renewalStarted?.();
+        })
+    );
+    const renewalClient: LinearApiClient = {
+      accessToken: "expired-token",
+      organizationId: "org-1",
+      renewAccessToken,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 }))
+    );
+
+    const request = linearGraphQL(renewalClient, "query { viewer { id } }", {});
+    await started;
+    deadline.abort(new DOMException("timed out", "TimeoutError"));
+
+    await expect(request).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(renewAccessToken).toHaveBeenCalledOnce();
+  });
+});
 
 describe("fetchUser", () => {
   beforeEach(() => {
@@ -369,5 +196,192 @@ describe("fetchUser", () => {
 
     const result = await fetchUser(client, "user-1");
     expect(result).toBeNull();
+  });
+
+  it("returns null when the user payload is malformed", async () => {
+    mockFetchResponse({ data: { user: { id: "user-1", email: "alice@example.com" } } });
+
+    const result = await fetchUser(client, "user-1");
+    expect(result).toBeNull();
+  });
+});
+
+describe("fetchIssueDetails", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns issue details with nullable fields", async () => {
+    mockFetchResponse({
+      data: {
+        issue: {
+          id: "issue-1",
+          identifier: "ENG-1",
+          title: "Fix bug",
+          description: null,
+          url: "https://linear.app/acme/issue/ENG-1",
+          priority: 2,
+          priorityLabel: "High",
+          labels: { nodes: [{ id: "label-1", name: "bug" }] },
+          project: null,
+          assignee: null,
+          team: { id: "team-1", key: "ENG", name: "Engineering" },
+          comments: { nodes: [{ body: "please fix", user: null }] },
+        },
+      },
+    });
+
+    await expect(fetchIssueDetails(client, "issue-1")).resolves.toEqual({
+      id: "issue-1",
+      identifier: "ENG-1",
+      title: "Fix bug",
+      description: null,
+      url: "https://linear.app/acme/issue/ENG-1",
+      priority: 2,
+      priorityLabel: "High",
+      labels: [{ id: "label-1", name: "bug" }],
+      project: null,
+      assignee: null,
+      team: { id: "team-1", key: "ENG", name: "Engineering" },
+      comments: [{ body: "please fix", user: null }],
+    });
+  });
+
+  it("returns null when the issue payload is malformed", async () => {
+    mockFetchResponse({ data: { issue: { id: "issue-1", title: "missing fields" } } });
+
+    await expect(fetchIssueDetails(client, "issue-1")).resolves.toBeNull();
+  });
+});
+
+describe("getRepoSuggestions", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns parsed repo suggestions", async () => {
+    mockFetchResponse({
+      data: {
+        issueRepositorySuggestions: {
+          suggestions: [{ repositoryFullName: "acme/api", confidence: 0.92 }],
+        },
+      },
+    });
+
+    await expect(getRepoSuggestions(client, "issue-1", "agent-1", [])).resolves.toEqual([
+      { repositoryFullName: "acme/api", confidence: 0.92 },
+    ]);
+  });
+
+  it("returns an empty list when suggestions are null", async () => {
+    mockFetchResponse({ data: { issueRepositorySuggestions: null } });
+
+    await expect(getRepoSuggestions(client, "issue-1", "agent-1", [])).resolves.toEqual([]);
+  });
+
+  it("returns an empty list when suggestions are malformed", async () => {
+    mockFetchResponse({
+      data: { issueRepositorySuggestions: { suggestions: [{ repositoryFullName: "acme/api" }] } },
+    });
+
+    await expect(getRepoSuggestions(client, "issue-1", "agent-1", [])).resolves.toEqual([]);
+  });
+});
+
+describe("emitAgentActivity", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("reports a failed terminal activity delivery", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 500 })));
+
+    await expect(
+      emitAgentActivity(client, "agent-session-1", {
+        type: "response",
+        body: "Finished",
+      })
+    ).resolves.toBe(false);
+  });
+});
+
+describe("postIssueComment", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("returns success from a valid comment mutation response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: { commentCreate: { success: true } } }),
+      })
+    );
+
+    await expect(postIssueComment("token", "issue-1", "hello")).resolves.toEqual({
+      success: true,
+    });
+  });
+
+  it("returns false when the nullable comment mutation result is absent", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: { commentCreate: null } }),
+      })
+    );
+
+    await expect(postIssueComment("token", "issue-1", "hello")).resolves.toEqual({
+      success: false,
+    });
+  });
+
+  it("returns false when the comment mutation response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: { commentCreate: { success: "yes" } } }),
+      })
+    );
+
+    await expect(postIssueComment("token", "issue-1", "hello")).resolves.toEqual({
+      success: false,
+    });
+  });
+
+  it("returns false when the comment mutation response is not valid JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.reject(new SyntaxError("Unexpected token")),
+      })
+    );
+
+    await expect(postIssueComment("token", "issue-1", "hello")).resolves.toEqual({
+      success: false,
+    });
+  });
+
+  it("returns false when the comment request times out", async () => {
+    const timeoutSignal = AbortSignal.abort(new DOMException("timed out", "TimeoutError"));
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutSignal);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input, init) => {
+        expect(init?.signal).toBe(timeoutSignal);
+        throw timeoutSignal.reason;
+      })
+    );
+
+    await expect(postIssueComment("token", "issue-1", "hello")).resolves.toEqual({
+      success: false,
+    });
   });
 });

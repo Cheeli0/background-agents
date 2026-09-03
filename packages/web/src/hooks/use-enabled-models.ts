@@ -3,9 +3,9 @@ import useSWR from "swr";
 import {
   MODEL_OPTIONS,
   DEFAULT_ENABLED_MODELS,
-  isValidModel,
+  normalizeValidModels,
   type ModelCategory,
-} from "@open-inspect/shared";
+} from "@open-inspect/shared/models";
 
 export const MODEL_PREFERENCES_KEY = "/api/model-preferences";
 
@@ -16,13 +16,13 @@ interface ModelPreferencesResponse {
 export function useEnabledModels() {
   const { data, isLoading } = useSWR<ModelPreferencesResponse>(MODEL_PREFERENCES_KEY);
 
-  const enabledModels = useMemo<string[]>(
-    () =>
-      (data?.enabledModels ?? (isLoading ? [] : (DEFAULT_ENABLED_MODELS as string[]))).filter(
-        (modelId) => isValidModel(modelId)
-      ),
-    [data?.enabledModels, isLoading]
-  );
+  const enabledModels = useMemo<string[]>(() => {
+    if (isLoading) return [];
+    const normalized = normalizeValidModels(
+      Array.isArray(data?.enabledModels) ? data.enabledModels : []
+    );
+    return normalized.length > 0 ? normalized : DEFAULT_ENABLED_MODELS;
+  }, [data?.enabledModels, isLoading]);
 
   const enabledModelOptions: ModelCategory[] = useMemo(() => {
     const enabledSet = new Set(enabledModels);

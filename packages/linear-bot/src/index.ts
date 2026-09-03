@@ -6,32 +6,17 @@
  */
 
 import { Hono } from "hono";
-import type { Env, UserPreferences, AgentSessionWebhook } from "./types";
+import type { Env, AgentSessionWebhook } from "./types";
 import {
   buildOAuthAuthorizeUrl,
-  exchangeCodeForToken,
-  fetchAgentSessionPullRequests,
-  getLinearClient,
+  completeLinearOAuthInstallation,
   verifyLinearWebhook,
 } from "./utils/linear-client";
 import { callbacksRouter } from "./callbacks";
 import { createLogger } from "./logger";
-import { verifyInternalToken } from "@open-inspect/shared";
+import { resolveAppName } from "@open-inspect/shared/app-name";
 import { handleAgentSessionEvent, escapeHtml } from "./webhook-handler";
-import {
-  getTeamRepoMapping,
-  getProjectRepoMapping,
-  getTriggerConfig,
-  getUserPreferences,
-  isDuplicateEvent,
-} from "./kv-store";
-
-// Re-export pure functions for existing test imports
-export {
-  resolveStaticRepo,
-  extractModelFromLabels,
-  resolveSessionModelSettings,
-} from "./model-resolution";
+import { isDuplicateEvent } from "./kv-store";
 
 const log = createLogger("handler");
 
@@ -44,16 +29,37 @@ function readStringField(record: Record<string, unknown>, key: string): string |
   return typeof value === "string" ? value : null;
 }
 
+export function buildOAuthSuccessHtml(appName: string, orgName: string): string {
+  return `
+      <html>
+        <head><title>OAuth Success</title></head>
+        <body>
+          <h1>${escapeHtml(appName)} Agent Installed!</h1>
+          <p>Successfully connected to workspace: <strong>${escapeHtml(orgName)}</strong></p>
+          <p>You can now @mention or assign the agent on Linear issues.</p>
+        </body>
+      </html>
+    `;
+}
+
 function isAgentSessionWebhookPayload(payload: unknown): payload is AgentSessionWebhook {
   if (!isObjectRecord(payload)) return false;
 
   const type = readStringField(payload, "type");
   const action = readStringField(payload, "action");
   const organizationId = readStringField(payload, "organizationId");
+  const appUserId = readStringField(payload, "appUserId");
   const webhookId = readStringField(payload, "webhookId");
   const agentSession = payload.agentSession;
 
-  if (!type || !action || !organizationId || !isObjectRecord(agentSession) || !webhookId) {
+  if (
+    !type ||
+    !action ||
+    !organizationId ||
+    !appUserId ||
+    !isObjectRecord(agentSession) ||
+    !webhookId
+  ) {
     return false;
   }
 
@@ -82,21 +88,13 @@ app.get("/oauth/callback", async (c) => {
   if (!code) return c.text("Missing required OAuth parameters", 400);
 
   try {
-    const { orgName } = await exchangeCodeForToken(c.env, code);
-    return c.html(`
-      <html>
-        <head><title>OAuth Success</title></head>
-        <body>
-          <h1>Open-Inspect Agent Installed!</h1>
-          <p>Successfully connected to workspace: <strong>${escapeHtml(orgName)}</strong></p>
-          <p>You can now @mention or assign the agent on Linear issues.</p>
-        </body>
-      </html>
-    `);
+    const { orgName } = await completeLinearOAuthInstallation(c.env, code);
+    return c.html(buildOAuthSuccessHtml(resolveAppName(c.env), orgName));
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error("oauth.callback_error", { error: err instanceof Error ? err : new Error(msg) });
-    return c.text(`Token exchange error: ${msg}`, 500);
+    log.error("oauth.callback_error", {
+      error: err instanceof Error ? err : new Error(String(err)),
+    });
+    return c.text("Linear authentication setup failed", 500);
   }
 });
 
@@ -131,21 +129,25 @@ app.post("/webhook", async (c) => {
   const action = readStringField(payload, "action") ?? "unknown";
 
   if (eventType === "AgentSessionEvent") {
-    const deliveryId = c.req.header("linear-delivery");
-    if (!deliveryId) {
-      log.warn("webhook.invalid_payload", {
-        trace_id: traceId,
-        reason: "missing_linear_delivery",
-      });
-      return c.json({ error: "Invalid payload" }, 400);
-    }
-
     if (!isAgentSessionWebhookPayload(payload)) {
       log.warn("webhook.invalid_payload", {
         trace_id: traceId,
         reason: "invalid_agent_session_event_shape",
       });
       return c.json({ error: "Invalid payload" }, 400);
+    }
+
+    // Linear's `Linear-Delivery` header is a UUID v4 that uniquely identifies
+    // each delivery. The `webhookId` field in the body is the registered-webhook
+    // configuration ID and is constant across deliveries, so we must not dedup
+    // on it. https://linear.app/developers/webhooks#webhook-payload-details
+    const deliveryId = c.req.header("linear-delivery");
+    if (!deliveryId) {
+      log.warn("webhook.invalid_payload", {
+        trace_id: traceId,
+        reason: "missing_linear_delivery_header",
+      });
+      return c.json({ error: "Missing Linear-Delivery header" }, 400);
     }
 
     const isDuplicate = await isDuplicateEvent(c.env, deliveryId);
@@ -169,93 +171,6 @@ app.post("/webhook", async (c) => {
 
   log.debug("webhook.skipped", { trace_id: traceId, type: eventType, action });
   return c.json({ ok: true, skipped: true, reason: `unhandled event type: ${eventType}` });
-});
-
-// ─── Config Auth Middleware ───────────────────────────────────────────────────
-
-app.use("/internal/*", async (c, next) => {
-  const secret = c.env.INTERNAL_CALLBACK_SECRET;
-  if (!secret) return c.json({ error: "Auth not configured" }, 500);
-  const isValid = await verifyInternalToken(c.req.header("Authorization") ?? null, secret);
-  if (!isValid) return c.json({ error: "Unauthorized" }, 401);
-  return next();
-});
-
-app.use("/config/*", async (c, next) => {
-  const secret = c.env.INTERNAL_CALLBACK_SECRET;
-  if (!secret) return c.json({ error: "Auth not configured" }, 500);
-  const isValid = await verifyInternalToken(c.req.header("Authorization") ?? null, secret);
-  if (!isValid) return c.json({ error: "Unauthorized" }, 401);
-  return next();
-});
-
-// ─── Config Endpoints ────────────────────────────────────────────────────────
-
-app.get("/internal/agent-sessions/:id/pull-requests", async (c) => {
-  const agentSessionId = c.req.param("id");
-  const organizationId = c.req.query("organizationId");
-
-  if (!organizationId) {
-    return c.json({ error: "organizationId is required" }, 400);
-  }
-
-  const client = await getLinearClient(c.env, organizationId);
-  if (!client) {
-    return c.json({ error: "Linear workspace token unavailable" }, 404);
-  }
-
-  const pullRequests = await fetchAgentSessionPullRequests(client, agentSessionId);
-  return c.json({ pullRequests });
-});
-
-app.get("/config/team-repos", async (c) => {
-  return c.json(await getTeamRepoMapping(c.env));
-});
-
-app.put("/config/team-repos", async (c) => {
-  const body = await c.req.json();
-  await c.env.LINEAR_KV.put("config:team-repos", JSON.stringify(body));
-  return c.json({ ok: true });
-});
-
-app.get("/config/triggers", async (c) => {
-  return c.json(await getTriggerConfig(c.env));
-});
-
-app.put("/config/triggers", async (c) => {
-  const body = await c.req.json();
-  await c.env.LINEAR_KV.put("config:triggers", JSON.stringify(body));
-  return c.json({ ok: true });
-});
-
-app.get("/config/project-repos", async (c) => {
-  return c.json(await getProjectRepoMapping(c.env));
-});
-
-app.put("/config/project-repos", async (c) => {
-  const body = await c.req.json();
-  await c.env.LINEAR_KV.put("config:project-repos", JSON.stringify(body));
-  return c.json({ ok: true });
-});
-
-app.get("/config/user-prefs/:userId", async (c) => {
-  const userId = c.req.param("userId");
-  const prefs = await getUserPreferences(c.env, userId);
-  if (!prefs) return c.json({ error: "not found" }, 404);
-  return c.json(prefs);
-});
-
-app.put("/config/user-prefs/:userId", async (c) => {
-  const userId = c.req.param("userId");
-  const body = (await c.req.json()) as Partial<UserPreferences>;
-  const prefs: UserPreferences = {
-    userId,
-    model: body.model || c.env.DEFAULT_MODEL,
-    reasoningEffort: body.reasoningEffort,
-    updatedAt: Date.now(),
-  };
-  await c.env.LINEAR_KV.put(`user_prefs:${userId}`, JSON.stringify(prefs));
-  return c.json({ ok: true });
 });
 
 // Mount callbacks router

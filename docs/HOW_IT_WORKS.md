@@ -38,10 +38,40 @@ This enables workflows that aren't possible with interactive tools:
 
 A **session** is the core unit of work in Open-Inspect. Each session is:
 
-- **Tied to a repository**: The agent works in a clone of your repo
+- **Tied to a workspace**: The agent works in clones of the repositories you selected — a single
+  repository, an ad-hoc set of up to 10, a saved [environment](#environments), or no repository at
+  all
 - **Persistent**: State survives across connections—close the browser, come back later
 - **Multiplayer**: Multiple users can join, send prompts, and see events in real-time
 - **Stateful**: Contains messages, events, artifacts, and sandbox state
+
+### Session Targets
+
+When creating a session from the web picker you choose what the sandbox works on:
+
+| Target                    | What you get                                                                 |
+| ------------------------- | ---------------------------------------------------------------------------- |
+| **A single repository**   | Today's classic flow: one clone, one branch selector                         |
+| **Multiple repositories** | An ad-hoc ordered set (up to 10) cloned side by side                         |
+| **An environment**        | A saved, reusable repository set — with optional prebuilt images and secrets |
+| **No repository**         | An empty sandbox for scratch work                                            |
+
+In multi-repository sessions each repository is cloned into its own directory under `/workspace`
+(named after the repository), and the **first repository is the primary** — it drives defaults like
+which settings apply. The agent sees all clones side by side and can make coordinated changes across
+them; pushes and pull requests are per-repository, so one session can produce PRs in several
+repositories. The session sidebar lists every repository with its branch and any PR created for it.
+
+GitHub-bot sessions open the webhook's repository, unless that repository's metadata names a default
+environment (`defaultEnvironmentId` via the repo-metadata API) — then a PR review or @mention opens
+that environment's full workspace, provided the environment still contains the trigger repository.
+Slack sessions can target an environment three ways: a routing rule (Settings › Integrations ›
+Slack) launches it from a keyword; a channel association (`channelAssociations` on the environments
+API, like repository metadata) routes messages in that channel to it automatically; and the LLM
+classifier considers environments alongside repositories, using their names and descriptions as
+signals — its clarification picker lists both kinds when it has to ask. Linear sessions can target
+an environment through the team and project mappings (`{"environmentId": "env_…"}` entries alongside
+repository entries).
 
 ### Session Lifecycle
 
@@ -57,16 +87,41 @@ if needed.
 
 ### What's Stored in a Session
 
-| Data          | Description                                       |
-| ------------- | ------------------------------------------------- |
-| Messages      | Prompts you've sent and their metadata            |
-| Events        | Tool calls, token streams, status updates         |
-| Artifacts     | PRs created, screenshots captured                 |
-| Participants  | Users who have joined the session                 |
-| Sandbox state | Reference to the current sandbox and its snapshot |
+| Data               | Description                                       |
+| ------------------ | ------------------------------------------------- |
+| Messages           | Prompts you've sent and their metadata            |
+| Prompt attachments | Images uploaded with web or Slack prompts         |
+| Events             | Tool calls, token streams, status updates         |
+| Artifacts          | PRs created, screenshots captured                 |
+| Participants       | Users who have joined the session                 |
+| Sandbox state      | Reference to the current sandbox and its snapshot |
 
 Each session gets its own SQLite database in a Cloudflare Durable Object, ensuring isolation and
 high performance even with hundreds of concurrent sessions.
+
+---
+
+## Environments
+
+An **environment** is a named, reusable set of repositories — the thing you reach for when the same
+multi-repository workspace comes up again and again (a frontend + its API, a service + its shared
+library). Environments are managed under **Settings > Environments** and appear at the top of the
+new-session picker.
+
+An environment defines:
+
+- **An ordered repository list** (up to 10) with a base branch per repository; the first repository
+  is the primary
+- **Environment secrets** — sessions launched from the environment receive global secrets plus the
+  environment's secrets (repository secrets do not flow in; see
+  [Secrets Management](./SECRETS.md#which-secrets-a-session-receives))
+- **Optional prebuilt images** — the whole environment (all clones + all setup scripts) is built
+  ahead of time so sessions boot in seconds (see [Pre-Built Images](./IMAGE_PREBUILD.md))
+
+Sessions snapshot the environment at creation time: editing or deleting an environment never changes
+what an existing session works on (the session page shows "Environment deleted" if the source is
+gone). Ad-hoc "Multiple repositories" selections are the unsaved counterpart — same workspace shape,
+but no environment-scoped secrets or prebuilds; the picker offers to save the set as an environment.
 
 ---
 
@@ -101,7 +156,7 @@ Open-Inspect uses a three-tier architecture spanning multiple cloud providers:
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                       Data Plane (Modal)                                 │
+│                 Data Plane (Sandbox Backend)                              │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
 │  │                        Session Sandbox                              │ │
 │  │  ┌────────────┐    ┌────────────┐    ┌────────────┐               │ │
@@ -131,6 +186,11 @@ gets its own lightweight database that can handle hundreds of events per second 
 other sessions. The WebSocket Hibernation API keeps connections alive during idle periods without
 incurring compute costs.
 
+Sandbox lifecycle state is authoritative across WebSocket reconnects. Losing the sandbox WebSocket
+does not stop the sandbox: the bridge reconnects while the control plane schedules a heartbeat check
+in case the process is actually gone. Explicit lifecycle paths such as inactivity and stale
+heartbeat persist `stopped` or `stale` before closing the connection, which prevents reconnection.
+
 ### Data Plane (Sandbox Backends)
 
 The data plane is where code actually runs. Each session gets an isolated sandbox with a full
@@ -144,14 +204,20 @@ development environment.
 - agent-browser CLI + headless Chrome (for browser automation)
 - OpenCode (the coding agent)
 
-Open-Inspect supports two backend patterns:
+Open-Inspect supports these sandbox backends:
 
 - **Modal**: near-instant startup plus filesystem snapshot restore
 - **Daytona**: persistent stop/start sandboxes via direct REST API calls
+- **Vercel Sandboxes**: filesystem snapshot restore and prebuilt-image builds via the Vercel Sandbox
+  API
+- **OpenComputer**: template-based sandboxes with checkpoint-backed prebuilt-image builds via the
+  OpenComputer REST API
+- **E2B**: template-based sandboxes with persistent pause/resume via direct E2B REST API calls
 
-Modal is still the only backend with repo-image builds and live filesystem snapshot restore. Daytona
-uses persistent sandboxes instead: the control plane stops the sandbox on inactivity or stale
-heartbeat, then resumes that same sandbox later with the same logical sandbox ID and auth token.
+Prebuilt-image builds are supported on Modal, Vercel, and OpenComputer. Saved filesystem state can
+be restored on those same providers for session resumes; Daytona and E2B use persistent sandboxes
+instead. For Daytona and E2B, the control plane stops or pauses the sandbox on inactivity or stale
+heartbeat, then resumes that same sandbox later.
 
 ### Clients
 
@@ -161,10 +227,13 @@ can make HTTP requests and maintain WebSocket connections can participate.
 **Current clients:**
 
 - **Web**: Next.js app with real-time streaming, session management, and settings
-- **Slack**: Bot that responds to @mentions and direct messages, classifies repos, and posts results
+- **Slack**: Bot that responds to @mentions and direct messages, forwards supported image
+  attachments, classifies repos, and posts results
+- **GitHub**: Bot that reviews PRs and responds to PR `@mentions`
+- **Linear**: Agent workflow that starts sessions from Linear issue activity
 
-All clients see the same session state. Send a prompt from Slack, watch the results on web. This
-works because state lives in the control plane, not the client.
+All clients see the same session state. Send a prompt from Slack or GitHub, watch the results on
+web. This works because state lives in the control plane, not the client.
 
 ---
 
@@ -187,12 +256,17 @@ When you create a session for a repo without an existing snapshot:
                             .openinspect/setup.sh   .openinspect/start.sh
 ```
 
-1. **Sandbox created**: Modal spins up a new container from the base image
-2. **Git sync**: Clones your repository using GitHub App credentials
+1. **Sandbox created**: The selected backend creates a fresh sandbox from its base runtime
+2. **Git sync**: Clones your repository using brokered SCM credentials from the git credential
+   helper
 3. **Setup script**: Runs `.openinspect/setup.sh` for provisioning (if present)
 4. **Start script**: Runs `.openinspect/start.sh` for runtime startup (if present)
 5. **Agent start**: OpenCode server starts and connects back to the control plane
 6. **Ready**: Sandbox accepts prompts
+
+For multi-repository sessions, steps 2–4 run per repository in position order: every repository is
+cloned into its own `/workspace` directory and each repository's setup and start scripts run in
+sequence.
 
 ### Restore (From Snapshot)
 
@@ -205,7 +279,8 @@ When restoring from a previous snapshot:
 └─────────────┘    └────────────┘    └─────────────┘    └───────┘
 ```
 
-1. **Restore snapshot**: Modal restores the filesystem from a saved image
+1. **Restore snapshot**: The selected snapshot-capable provider restores the filesystem from a saved
+   snapshot or checkpoint
 2. **Quick sync**: Pulls latest changes (usually just a few commits)
 3. **Start script**: Runs `.openinspect/start.sh` for runtime startup (if present)
 4. **Ready**: Sandbox is ready almost instantly
@@ -213,11 +288,13 @@ When restoring from a previous snapshot:
 Snapshots include installed dependencies, built artifacts, and workspace state. This is why
 follow-up prompts in an existing session are much faster than the first prompt.
 
-### Repo Image Start
+### Prebuilt Image Start
 
-When starting from a pre-built repo image:
+When starting from a pre-built image (built for the session's repository or, for sessions launched
+from a prebuild-enabled environment, the environment's whole repository set):
 
-1. **Incremental git sync**: Fast fetch + hard reset to latest branch head
+1. **Incremental git sync**: Fast fetch + hard reset to latest branch head (per repository for
+   multi-repository sets)
 2. **Setup skipped**: `.openinspect/setup.sh` already ran when the image was built
 3. **Start script runs**: `.openinspect/start.sh` executes for per-session runtime startup
 4. **Ready**: Agent starts once runtime hook succeeds
@@ -237,6 +314,37 @@ To minimize perceived latency, sandboxes warm proactively:
 - When you start typing a prompt, the control plane begins warming a sandbox
 - By the time you hit enter, the sandbox may already be ready
 - If restore is fast enough, you won't notice any delay
+
+### Tunnel URLs Inside the Sandbox
+
+When a session uses the `tunnelPorts` sandbox setting, the resolved tunnel URLs are written to
+`/workspace/.tunnels.env` so processes started by `.openinspect/start.sh` (or by the agent later)
+can read them locally.
+
+```dotenv
+# /workspace/.tunnels.env
+TUNNEL_SANDBOX_ID=sandbox-acme-app-1783614336426
+TUNNEL_3000=https://abc123-3000.modal.host
+TUNNEL_5173=https://abc123-5173.modal.host
+```
+
+This dotenv shape works directly with tools that accept an env-file path — `node --env-file=...`,
+`bun --env-file=...`, `docker compose --env-file=...`. The format is plain `KEY=value`, so any other
+dotenv consumer can read it without parsing. The `TUNNEL_SANDBOX_ID` line names the sandbox the URLs
+were resolved for; the supervisor uses it to tell a fresh write from a snapshot leftover.
+
+**Boot ordering.** On every non-build boot, the supervisor:
+
+1. Clears a file left by a previous sandbox (its `TUNNEL_SANDBOX_ID` doesn't match), such as one
+   inherited from a snapshot. A file already written for _this_ sandbox is kept — the backend's
+   write can land before the supervisor starts.
+2. Waits up to `TUNNEL_WAIT_TIMEOUT_SECONDS` (default `30`) for fresh URLs.
+3. Runs `.openinspect/start.sh`.
+
+If the wait times out (for example, because the backend has not resolved tunnel URLs yet),
+`start.sh` proceeds without fresh local URLs and the supervisor logs `tunnel.env_file_wait_timeout`.
+The control plane still receives and broadcasts the URLs to clients on a separate path. The file is
+not written when `tunnelPorts` is empty or in build mode.
 
 ---
 
@@ -291,6 +399,31 @@ This lets you send follow-up thoughts while the agent works. Prompts are process
 
 You can also stop the current execution if the agent is going down the wrong path.
 
+### Parent-to-Child Follow-Ups
+
+An agent that created a child with `spawn-child` can continue that same child session with
+`send-child-prompt`. The follow-up enters the child's normal durable queue:
+
+```text
+Child prompt 1 (processing) ──▶ Parent follow-up (queued) ──▶ Child continues
+```
+
+The follow-up does not interrupt active work. Completed and failed children can resume, restoring
+their compatible sandbox snapshot when available. Cancelled children remain terminal, and archived
+children must be explicitly unarchived before they can accept prompts.
+
+The parent token is never exchanged for the child's sandbox token. The control plane authenticates
+the parent session, verifies the direct parent-child relationship in D1, verifies it again in the
+child Durable Object, and attributes the queued prompt to the child owner with source `agent`.
+
+`send-child-prompt` returns after the prompt is durably queued. The parent calls `get-child-status`
+when it needs the follow-up result. An earlier completed response is labeled as such while newer
+child work is still running.
+
+The runtime tool is installed when a sandbox starts from a runtime image that includes it. A parent
+restored from a snapshot created before this capability shipped keeps the older captured runtime and
+will not see `send-child-prompt` until it starts in a fresh sandbox built from the newer runtime.
+
 ---
 
 ## The Agent
@@ -324,10 +457,14 @@ This ensures your contributions are properly credited in git history.
 
 When you ask the agent to create a PR:
 
-1. Agent pushes the branch using GitHub App credentials
+1. Agent pushes the branch using brokered SCM credentials from the sandbox credential helper
 2. Control plane receives the branch name
-3. Control plane creates the PR using _your_ GitHub OAuth token
+3. Control plane creates the PR using _your_ GitHub OAuth token (GitHub logins)
 4. PR appears as created by you, not a bot
+
+If you signed in another way (e.g. Google) you have no GitHub OAuth token, so the control plane
+pushes the branch with the shared GitHub App credentials and returns a manual `pull/new` URL — the
+PR is attributed to the App bot rather than to you.
 
 This maintains proper code review workflows—you can't approve your own PRs.
 
@@ -378,7 +515,7 @@ That's potentially minutes before the agent can start working.
 
 ### How Snapshots Solve This
 
-Modal's filesystem snapshots let us capture a sandbox's state after setup:
+Provider snapshots and checkpoints let us capture a sandbox's state after setup:
 
 ```
 First session:  Clone ─▶ Install/Build ─▶ Start Runtime ─▶ [Snapshot] ─▶ Work
@@ -388,17 +525,28 @@ Later sessions: [Restore Snapshot] ─▶ Quick sync ─▶ Start Runtime ─▶
                      (fast)
 ```
 
-The first session for a repo pays the setup cost. Subsequent sessions restore in seconds.
+The first session for a repo pays the setup cost. Subsequent sessions restore in seconds when the
+active provider supports saved filesystem state.
+
+For Vercel, Terraform builds a base-runtime snapshot from the local checkout and wires a
+deterministic snapshot name into `VERCEL_BASE_SNAPSHOT_NAME`. Fresh Vercel sandboxes resolve that
+name to the newest created snapshot instead of cloning and installing the sandbox runtime on every
+session. OpenComputer uses a managed template plus checkpoints for the same prebuilt-image
+lifecycle. See [Vercel Sandbox Provider](VERCEL_SANDBOX_PROVIDER.md) and
+[OpenComputer Sandbox Provider](OPENCOMPUTER_PROVIDER.md) for provider-specific details.
 
 ### Image Prebuilding
 
-For frequently-used repositories, images can be prebuilt on a schedule:
+For frequently-used repositories — and for [environments](#environments) — images can be prebuilt on
+a schedule:
 
-- Clone repo, install dependencies, run initial build
-- Save as a snapshot
-- Sessions start from this snapshot, only syncing recent changes
+- Clone the repository (or every repository of the environment), install dependencies, run initial
+  build
+- Save as a provider image artifact
+- Sessions start from this artifact, only syncing recent changes
 
-This means even "cold" sessions (no previous snapshot) start from a recent baseline.
+This means even "cold" sessions (no previous snapshot) start from a recent baseline. See
+[Pre-Built Images](./IMAGE_PREBUILD.md) for details.
 
 ---
 
@@ -421,25 +569,76 @@ was built for internal use where all employees have access to company repositori
 
 ### Token Architecture
 
-| Token              | Purpose                              | Scope                            |
-| ------------------ | ------------------------------------ | -------------------------------- |
-| GitHub App Token   | Clone repos, push commits            | All repos where App is installed |
-| User OAuth Token   | Create PRs, identify users           | Repos the user has access to     |
-| Sandbox Auth Token | Authenticate sandbox → control plane | Single session                   |
-| WebSocket Token    | Authenticate client connections      | Single session                   |
+| Token              | Purpose                                    | Scope                            |
+| ------------------ | ------------------------------------------ | -------------------------------- |
+| GitHub App Token   | Mint brokered git credentials              | All repos where App is installed |
+| User OAuth Token   | Create PRs, identify users                 | Repos the user has access to     |
+| Sandbox Auth Token | Authenticate sandbox → control plane calls | Single session                   |
+| WebSocket Token    | Authenticate client connections            | Single session                   |
+| Managed LLM Token  | Short-lived OpenAI or xAI model access     | Pinned session provider account  |
+
+Fresh and prebuilt-image sandboxes fetch git credentials on demand through the control plane instead
+of relying on a token embedded in the environment or remote URL. Snapshot restores may still receive
+env-token fallbacks so legacy snapshots can boot through the credential-helper migration. The helper
+authorizes HTTPS requests for the configured SCM host, preserving existing setup/start hooks that
+clone other private repositories available to the installation. This primarily protects continuously
+running sessions and Daytona persistent resumes from expired embedded credentials; Modal snapshot
+restores still mint a fresh fallback token on restore.
 
 ### Secrets
 
-You can configure environment variables (API keys, credentials) at global or per-repository scope:
+You can configure environment variables (API keys, credentials) at global, per-repository, or
+per-environment scope. A session receives global secrets plus its **session target's** secrets:
 
-- **Global secrets** apply to all repositories (e.g., `ANTHROPIC_API_KEY`)
-- **Repository secrets** apply to a single repo and override global secrets with the same key
+- **Global secrets** apply to all sessions (for example, model-provider API keys)
+- **Repository secrets** apply to sessions launched from that repo (including all bot-created
+  sessions) and override global secrets with the same key; ad-hoc multi-repository sessions receive
+  each selected repository's secrets, with the primary winning collisions
+- **Environment secrets** apply to sessions launched from that environment — its repositories'
+  repository secrets do not flow in
 - Stored encrypted (AES-256-GCM) in D1 database
 - Injected into sandboxes at startup
 - Never exposed to clients (only key names are visible)
 
-> **Daytona users**: LLM API keys (e.g., `ANTHROPIC_API_KEY` for Claude models) must be added as
-> global secrets. Modal injects these automatically via its own secrets mechanism.
+OpenAI and xAI subscription credentials are installation-wide provider accounts. Account rows store
+display, status, and optional external identity separately from credentials encrypted with
+`PROVIDER_ACCOUNTS_ENCRYPTION_KEY`. Each provider has an optional default account and an unattended
+mode that chooses the default account or API-key mode for Slack, GitHub, Linear, and unpinned
+automation runs.
+
+The web groups OpenAI and xAI accounts from shared static provider IDs and display metadata; there
+is no provider-catalog endpoint. The control-plane adapter registry remains authoritative when an
+account is connected, selected, defaulted, or consumed.
+
+Session creation resolves every subscription provider once and persists an immutable provider
+account, API-key, or legacy scoped-OAuth auth row in D1, the sole authority for session provider
+auth. The session Durable Object remains authoritative for lifecycle and sandbox-token
+authentication but does not replicate provider-account bindings. An interactive session can follow
+provider policy, select an active account, or choose API-key mode. Automations can pin the same
+choices or resolve current defaults each run. Child sessions copy their parent's D1 auth rows, and
+later default changes do not move existing sessions between accounts.
+
+In account mode, the sandbox receives only a managed marker. Provider API keys and legacy OAuth
+fields for that provider are suppressed. The runtime plugin calls the sandbox-authenticated
+`POST /sessions/:id/provider-auth/:provider/access-token` endpoint; the control plane reads the
+trusted D1 session binding using the sandbox-authenticated session ID, refreshes the encrypted
+account credential, and returns short-lived access with `Cache-Control: no-store`. Sandbox startup
+also reads the complete D1 auth snapshot and fails closed if it is unavailable or incomplete.
+
+Legacy scoped OAuth and provider accounts can coexist. Existing sessions remain pinned to legacy
+scoped OAuth. New sessions use an explicit choice, then a provider-account default, and otherwise
+retain legacy scoped OAuth or API-key behavior. Setting a default affects only future sessions;
+operators may remove legacy keys after legacy-bound sessions are no longer needed. See
+[Using OpenAI Models](./OPENAI_MODELS.md) and
+[Using Grok with a SuperGrok Subscription](./GROK_MODELS.md).
+
+> **Daytona and Vercel users**: LLM API keys (e.g., `ANTHROPIC_API_KEY` for Claude models) must be
+> added as global secrets. Modal injects these automatically via its own secrets mechanism.
+>
+> **Opt-in model providers**: Add the provider key listed in
+> [Available Models](./AVAILABLE_MODELS.md) to the session's secret scope. SuperGrok models require
+> an xAI provider account or `XAI_API_KEY` mode. Opt-in providers must also be enabled under
+> **Settings > Models**.
 
 See [Secrets Management](./SECRETS.md) for setup instructions.
 
@@ -454,4 +653,5 @@ See [Secrets Management](./SECRETS.md) for setup instructions.
 ## What's Next
 
 - **[Getting Started](./GETTING_STARTED.md)**: Deploy your own instance
+- **[Managed Skills](./MANAGED_SKILLS.md)**: Create and select reusable agent instructions
 - **[Debugging Playbook](./DEBUGGING_PLAYBOOK.md)**: Troubleshoot issues with structured logs

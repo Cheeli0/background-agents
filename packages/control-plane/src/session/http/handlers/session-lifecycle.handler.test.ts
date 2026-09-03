@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ArtifactRow, ParticipantRow, SandboxRow, SessionRow } from "../../types";
-import { createSessionLifecycleHandler } from "./session-lifecycle.handler";
-import { getValidModelOrDefault } from "../../../utils/models";
+import type { SandboxRow, SessionRow } from "../../types";
+import { SessionLifecycleHandler } from "./session-lifecycle.handler";
+import type { SessionTitleService } from "../../title-service";
+import type { WebSocketManager } from "../../../sandbox/lifecycle/manager";
+import type { SessionStatusService } from "../../session-status-service";
+import type { MessageRepository } from "../../message-repository";
+import type { SandboxRepository } from "../../sandbox-repository";
+import type { SessionCoreRepository } from "../../session-core-repository";
 
 function createSession(overrides: Partial<SessionRow> = {}): SessionRow {
   return {
@@ -23,8 +28,10 @@ function createSession(overrides: Partial<SessionRow> = {}): SessionRow {
     spawn_source: "user",
     spawn_depth: 0,
     code_server_enabled: 0,
+    vnc_enabled: 0,
     total_cost: 0,
     sandbox_settings: null,
+    environment_id: null,
     created_at: 1000,
     updated_at: 2000,
     ...overrides,
@@ -38,9 +45,11 @@ function createSandbox(overrides: Partial<SandboxRow> = {}): SandboxRow {
     modal_object_id: null,
     snapshot_id: null,
     snapshot_image_id: null,
+    snapshot_runtime_version: null,
+    runtime_version: null,
     auth_token: null,
     auth_token_hash: null,
-    status: "running",
+    status: "ready",
     git_sync_status: "pending",
     last_heartbeat: 999,
     last_activity: null,
@@ -48,6 +57,8 @@ function createSandbox(overrides: Partial<SandboxRow> = {}): SandboxRow {
     last_spawn_error_at: null,
     code_server_url: null,
     code_server_password: null,
+    vnc_url: null,
+    vnc_password: null,
     tunnel_urls: null,
     ttyd_url: null,
     ttyd_token: null,
@@ -56,383 +67,75 @@ function createSandbox(overrides: Partial<SandboxRow> = {}): SandboxRow {
   };
 }
 
-function createParticipant(overrides: Partial<ParticipantRow> = {}): ParticipantRow {
-  return {
-    id: "participant-1",
-    user_id: "user-1",
-    scm_user_id: null,
-    scm_login: "octocat",
-    scm_email: "octocat@example.com",
-    scm_name: "The Octocat",
-    role: "member",
-    scm_access_token_encrypted: null,
-    scm_refresh_token_encrypted: null,
-    scm_token_expires_at: null,
-    ws_auth_token: null,
-    ws_token_created_at: null,
-    joined_at: 1,
-    ...overrides,
-  };
-}
-
 function createHandler() {
-  const repository = {
-    upsertSession: vi.fn(),
-    createSandbox: vi.fn(),
-    createParticipant: vi.fn(),
-    updateSessionTitle: vi.fn(),
-    getLatestLinearCallbackContext: vi.fn(),
-    listArtifacts: vi.fn<() => ArtifactRow[]>(() => []),
-  };
-  const getDurableObjectId = vi.fn(() => "session-do-id");
-  const encryptToken = vi.fn();
-  const validateReasoningEffort = vi.fn();
-  const generateId = vi.fn();
-  const now = vi.fn(() => 1234);
-  const scheduleWarmSandbox = vi.fn();
-  const log = {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    child: vi.fn(),
-  };
   const getSession = vi.fn<() => SessionRow | null>();
+  const repository = {
+    getPendingOrProcessingCount: vi.fn(() => 0),
+    getMessageCount: vi.fn(() => 0),
+    getSession,
+  };
   const getSandbox = vi.fn<() => SandboxRow | null>();
-  const getPublicSessionId = vi.fn<(session: SessionRow) => string>();
-  const getParticipantByUserId = vi.fn<(userId: string) => ParticipantRow | null>();
-  const transitionSessionStatus = vi.fn<(status: SessionRow["status"]) => Promise<boolean>>();
-  const syncSessionIndexTitle = vi.fn();
-  const stopExecution = vi.fn();
+  const updateSandboxStatus = vi.fn();
+  const sandboxRepository = {
+    getSandbox,
+    updateSandboxStatus,
+  } as unknown as SandboxRepository;
+  const transition = vi.fn<(status: SessionRow["status"]) => Promise<boolean>>();
+  const repairIndexStatus = vi.fn<() => Promise<void>>();
+  const settleFromMessageState = vi.fn<() => Promise<SessionRow["status"]>>();
+  const statusService = {
+    transition,
+    repairIndexStatus,
+    settleFromMessageState,
+  } as unknown as SessionStatusService;
+  const applySessionTitleUpdate = vi.fn((title: string) => ({ ok: true as const, title }));
+  const cancelSession = vi.fn();
   const getSandboxSocket = vi.fn<() => WebSocket | null>();
   const sendToSandbox = vi.fn();
-  const updateSandboxStatus = vi.fn();
-  const broadcast = vi.fn();
-  const linearBot = { fetch: vi.fn() };
-  const sourceControlProvider = { getPullRequestStatus: vi.fn() };
 
-  const handler = createSessionLifecycleHandler({
-    repository,
-    getDurableObjectId,
-    tokenEncryptionKey: "encryption-key",
-    encryptToken,
-    validateReasoningEffort,
-    generateId,
-    now,
-    scheduleWarmSandbox,
-    getLog: () => log,
-    getSession,
-    getSandbox,
-    getPublicSessionId,
-    getParticipantByUserId,
-    transitionSessionStatus,
-    syncSessionIndexTitle,
-    stopExecution,
-    getSandboxSocket,
-    sendToSandbox,
-    updateSandboxStatus,
-    broadcast,
-    linearBot,
-    internalCallbackSecret: "internal-secret",
-    sourceControlProvider: sourceControlProvider as never,
-  });
+  const lifecycleHandler = new SessionLifecycleHandler(
+    repository as unknown as SessionCoreRepository,
+    sandboxRepository,
+    repository as unknown as MessageRepository,
+    statusService,
+    { applySessionTitleUpdate } as unknown as SessionTitleService,
+    {
+      getSandboxWebSocket: getSandboxSocket,
+      detachSandboxWebSocket: vi.fn(),
+      sendToSandbox,
+      getConnectedClientCount: vi.fn(() => 0),
+    } as unknown as WebSocketManager,
+    "session-do-id",
+    cancelSession
+  );
+
+  const handler = {
+    getState: () => lifecycleHandler.getState(),
+    updateTitle: (request: Request) => lifecycleHandler.updateTitle(request),
+    archive: (_request?: Request) => lifecycleHandler.archive(),
+    unarchive: (_request?: Request) => lifecycleHandler.unarchive(),
+    expireDraft: () => lifecycleHandler.expireDraft(),
+    cancel: () => lifecycleHandler.cancel(),
+  };
 
   return {
     handler,
     repository,
-    getDurableObjectId,
-    encryptToken,
-    validateReasoningEffort,
-    generateId,
-    now,
-    scheduleWarmSandbox,
-    log,
+    sandboxRepository,
     getSession,
     getSandbox,
-    getPublicSessionId,
-    getParticipantByUserId,
-    transitionSessionStatus,
-    syncSessionIndexTitle,
-    stopExecution,
+    transition,
+    repairIndexStatus,
+    settleFromMessageState,
+    applySessionTitleUpdate,
+    cancelSession,
     getSandboxSocket,
     sendToSandbox,
     updateSandboxStatus,
-    broadcast,
-    linearBot,
-    sourceControlProvider,
   };
 }
 
-describe("createSessionLifecycleHandler", () => {
-  it("initializes session, sandbox, and owner participant", async () => {
-    const {
-      handler,
-      repository,
-      getDurableObjectId,
-      encryptToken,
-      validateReasoningEffort,
-      generateId,
-      scheduleWarmSandbox,
-      log,
-    } = createHandler();
-    getDurableObjectId.mockReturnValue("session-do-id");
-    encryptToken.mockResolvedValue("encrypted-scm-token");
-    validateReasoningEffort.mockReturnValue("high");
-    generateId.mockReturnValueOnce("sandbox-1").mockReturnValueOnce("participant-1");
-
-    const response = await handler.init(
-      new Request("http://internal/internal/init", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sessionName: "session-public-id",
-          repoOwner: "acme",
-          repoName: "repo",
-          repoId: 123,
-          defaultBranch: "main",
-          branch: "feature/work",
-          title: "Session title",
-          model: "anthropic/claude-haiku-4-5",
-          reasoningEffort: "high",
-          userId: "user-1",
-          scmLogin: "octocat",
-          scmName: "The Octocat",
-          scmEmail: "octocat@example.com",
-          scmToken: "plain-scm-token",
-          scmRefreshTokenEncrypted: "encrypted-refresh-token",
-          scmTokenExpiresAt: 9999999,
-          scmUserId: "github-user-123",
-          parentSessionId: "parent-1",
-          spawnSource: "agent",
-          spawnDepth: 1,
-        }),
-      })
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ sessionId: "session-do-id", status: "created" });
-    expect(repository.upsertSession).toHaveBeenCalledWith({
-      id: "session-do-id",
-      sessionName: "session-public-id",
-      title: "Session title",
-      repoOwner: "acme",
-      repoName: "repo",
-      repoId: 123,
-      baseBranch: "feature/work",
-      model: "anthropic/claude-haiku-4-5",
-      reasoningEffort: "high",
-      status: "created",
-      parentSessionId: "parent-1",
-      spawnSource: "agent",
-      spawnDepth: 1,
-      codeServerEnabled: false,
-      sandboxSettings: null,
-      createdAt: 1234,
-      updatedAt: 1234,
-    });
-    expect(repository.createSandbox).toHaveBeenCalledWith({
-      id: "sandbox-1",
-      status: "pending",
-      gitSyncStatus: "pending",
-      createdAt: 0,
-    });
-    expect(repository.createParticipant).toHaveBeenCalledWith({
-      id: "participant-1",
-      userId: "user-1",
-      scmUserId: "github-user-123",
-      scmLogin: "octocat",
-      scmName: "The Octocat",
-      scmEmail: "octocat@example.com",
-      scmAccessTokenEncrypted: "encrypted-scm-token",
-      scmRefreshTokenEncrypted: "encrypted-refresh-token",
-      scmTokenExpiresAt: 9999999,
-      role: "owner",
-      joinedAt: 1234,
-    });
-    expect(scheduleWarmSandbox).toHaveBeenCalled();
-    expect(log.info).toHaveBeenCalledWith("Triggering sandbox spawn for new session");
-  });
-
-  it("falls back to pre-encrypted token when plain-token encryption fails", async () => {
-    const { handler, repository, encryptToken, validateReasoningEffort, generateId, log } =
-      createHandler();
-    encryptToken.mockRejectedValue(new Error("encrypt failed"));
-    validateReasoningEffort.mockReturnValue(null);
-    generateId.mockReturnValueOnce("sandbox-1").mockReturnValueOnce("participant-1");
-
-    const response = await handler.init(
-      new Request("http://internal/internal/init", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sessionName: "session-public-id",
-          repoOwner: "acme",
-          repoName: "repo",
-          userId: "user-1",
-          scmToken: "plain-scm-token",
-          scmTokenEncrypted: "existing-encrypted-token",
-        }),
-      })
-    );
-
-    expect(response.status).toBe(200);
-    expect(repository.createParticipant).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scmAccessTokenEncrypted: "existing-encrypted-token",
-      })
-    );
-    expect(log.error).toHaveBeenCalledWith(
-      "Failed to encrypt SCM token",
-      expect.objectContaining({ error: expect.any(Error) })
-    );
-  });
-
-  it("returns the first associated PR for linear sessions", async () => {
-    const { handler, repository, linearBot } = createHandler();
-    repository.getLatestLinearCallbackContext.mockReturnValue({
-      callback_context: JSON.stringify({
-        agentSessionId: "agent-session-1",
-        organizationId: "org-1",
-      }),
-    });
-    linearBot.fetch.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          pullRequests: [
-            {
-              number: 42,
-              title: "Display associated PR",
-              url: "https://github.com/acme/repo/pull/42",
-              status: "open",
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      )
-    );
-
-    const response = await handler.getAssociatedPr();
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      pullRequest: {
-        number: 42,
-        title: "Display associated PR",
-        url: "https://github.com/acme/repo/pull/42",
-        status: "open",
-      },
-    });
-    expect(linearBot.fetch).toHaveBeenCalledWith(
-      "https://internal/internal/agent-sessions/agent-session-1/pull-requests?organizationId=org-1",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: expect.stringMatching(/^Bearer /),
-        }),
-      })
-    );
-  });
-
-  it("returns null when no linear callback context exists", async () => {
-    const { handler, repository, linearBot } = createHandler();
-    repository.getLatestLinearCallbackContext.mockReturnValue(null);
-
-    const response = await handler.getAssociatedPr();
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ pullRequest: null });
-    expect(linearBot.fetch).not.toHaveBeenCalled();
-  });
-
-  it("returns artifact PR with live merged status when linear context is unavailable", async () => {
-    const { handler, repository, getSession, sourceControlProvider, linearBot } = createHandler();
-    getSession.mockReturnValue(createSession());
-    repository.getLatestLinearCallbackContext.mockReturnValue(null);
-    repository.listArtifacts.mockReturnValue([
-      {
-        id: "artifact-1",
-        type: "pr",
-        url: "https://github.com/acme/repo/pull/15",
-        metadata: JSON.stringify({ number: 15, state: "open" }),
-        created_at: 100,
-      },
-    ]);
-    sourceControlProvider.getPullRequestStatus.mockResolvedValue({
-      number: 15,
-      title: "CHE-65: Add sidebar status icons",
-      url: "https://github.com/acme/repo/pull/15",
-      status: "merged",
-    });
-
-    const response = await handler.getAssociatedPr();
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      pullRequest: {
-        number: 15,
-        title: "CHE-65: Add sidebar status icons",
-        url: "https://github.com/acme/repo/pull/15",
-        status: "merged",
-      },
-    });
-    expect(sourceControlProvider.getPullRequestStatus).toHaveBeenCalledWith({
-      owner: "acme",
-      name: "repo",
-      pullRequestNumber: 15,
-    });
-    expect(linearBot.fetch).not.toHaveBeenCalled();
-  });
-
-  it("returns null when the Linear pull request lookup throws", async () => {
-    const { handler, repository, linearBot, log } = createHandler();
-    repository.getLatestLinearCallbackContext.mockReturnValue({
-      callback_context: JSON.stringify({
-        agentSessionId: "agent-session-1",
-        organizationId: "org-1",
-      }),
-    });
-    linearBot.fetch.mockRejectedValue(new Error("service unavailable"));
-
-    const response = await handler.getAssociatedPr();
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ pullRequest: null });
-    expect(log.warn).toHaveBeenCalledWith("Failed to fetch associated Linear pull requests", {
-      agent_session_id: "agent-session-1",
-      error: "service unavailable",
-    });
-  });
-
-  it("logs invalid model warning and stores normalized model", async () => {
-    const { handler, repository, validateReasoningEffort, generateId, log } = createHandler();
-    validateReasoningEffort.mockReturnValue(null);
-    generateId.mockReturnValueOnce("sandbox-1").mockReturnValueOnce("participant-1");
-
-    const response = await handler.init(
-      new Request("http://internal/internal/init", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sessionName: "session-public-id",
-          repoOwner: "acme",
-          repoName: "repo",
-          model: "invalid/model-name",
-          userId: "user-1",
-        }),
-      })
-    );
-
-    expect(response.status).toBe(200);
-    expect(repository.upsertSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: getValidModelOrDefault("invalid/model-name"),
-      })
-    );
-    expect(log.warn).toHaveBeenCalledWith("Invalid model name, using default", {
-      requested_model: "invalid/model-name",
-      default_model: getValidModelOrDefault("invalid/model-name"),
-    });
-  });
-
+describe("SessionLifecycleHandler", () => {
   it("returns 404 state response when session is missing", async () => {
     const { handler, getSession } = createHandler();
     getSession.mockReturnValue(null);
@@ -444,10 +147,9 @@ describe("createSessionLifecycleHandler", () => {
   });
 
   it("maps state response with sandbox details", async () => {
-    const { handler, getSession, getSandbox, getPublicSessionId } = createHandler();
+    const { handler, getSession, getSandbox } = createHandler();
     getSession.mockReturnValue(createSession());
     getSandbox.mockReturnValue(createSandbox());
-    getPublicSessionId.mockReturnValue("public-session-1");
 
     const response = handler.getState();
 
@@ -470,7 +172,7 @@ describe("createSessionLifecycleHandler", () => {
       sandbox: {
         id: "sandbox-1",
         modalSandboxId: "modal-1",
-        status: "running",
+        status: "ready",
         gitSyncStatus: "pending",
         lastHeartbeat: 999,
       },
@@ -507,6 +209,23 @@ describe("createSessionLifecycleHandler", () => {
     expect(response.status).toBe(400);
   });
 
+  it("returns 400 for malformed updateTitle fields", async () => {
+    const { handler, getSession, applySessionTitleUpdate } = createHandler();
+    getSession.mockReturnValue(createSession());
+
+    const response = await handler.updateTitle(
+      new Request("http://internal/internal/update-title", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: "user-1", title: 123 }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid request body" });
+    expect(applySessionTitleUpdate).not.toHaveBeenCalled();
+  });
+
   it("returns 400 for empty title", async () => {
     const { handler, getSession } = createHandler();
     getSession.mockReturnValue(createSession());
@@ -539,90 +258,27 @@ describe("createSessionLifecycleHandler", () => {
     expect(await response.json()).toEqual({ error: "title must be 200 characters or fewer" });
   });
 
-  it("returns 403 when non-participant tries to update title", async () => {
-    const { handler, getSession, getParticipantByUserId } = createHandler();
+  it("applies a manual title update and returns the normalized title", async () => {
+    const { handler, getSession, applySessionTitleUpdate } = createHandler();
     getSession.mockReturnValue(createSession());
-    getParticipantByUserId.mockReturnValue(null);
 
     const response = await handler.updateTitle(
       new Request("http://internal/internal/update-title", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ userId: "user-1", title: "New Title" }),
-      })
-    );
-
-    expect(response.status).toBe(403);
-  });
-
-  it("updates title, broadcasts, syncs to D1 index, and returns new title", async () => {
-    const {
-      handler,
-      getSession,
-      getPublicSessionId,
-      getParticipantByUserId,
-      repository,
-      syncSessionIndexTitle,
-      broadcast,
-    } = createHandler();
-    getSession.mockReturnValue(createSession());
-    getPublicSessionId.mockReturnValue("public-session-1");
-    getParticipantByUserId.mockReturnValue(createParticipant());
-
-    const response = await handler.updateTitle(
-      new Request("http://internal/internal/update-title", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ userId: "user-1", title: "New Title" }),
+        body: JSON.stringify({ title: " New Title " }),
       })
     );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ title: "New Title" });
-    expect(repository.updateSessionTitle).toHaveBeenCalledWith("session-1", "New Title", 1234);
-    expect(syncSessionIndexTitle).toHaveBeenCalledWith("public-session-1", "New Title");
-    expect(broadcast).toHaveBeenCalledWith({ type: "session_title", title: "New Title" });
+    expect(applySessionTitleUpdate).toHaveBeenCalledWith("New Title", { onlyIfUnset: false });
   });
 
-  it("returns 400 for invalid archive body", async () => {
-    const { handler, getSession } = createHandler();
+  it("archives successfully without participant authorization", async () => {
+    const { handler, getSession, transition } = createHandler();
     getSession.mockReturnValue(createSession());
-
-    const response = await handler.archive(
-      new Request("http://internal/internal/archive", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{invalid",
-      })
-    );
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "Invalid request body" });
-  });
-
-  it("returns 403 when archive user is not a participant", async () => {
-    const { handler, getSession, getParticipantByUserId } = createHandler();
-    getSession.mockReturnValue(createSession());
-    getParticipantByUserId.mockReturnValue(null);
-
-    const response = await handler.archive(
-      new Request("http://internal/internal/archive", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ userId: "user-1" }),
-      })
-    );
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "Not authorized to archive this session" });
-  });
-
-  it("archives successfully for participant", async () => {
-    const { handler, getSession, getParticipantByUserId, transitionSessionStatus } =
-      createHandler();
-    getSession.mockReturnValue(createSession());
-    getParticipantByUserId.mockReturnValue(createParticipant());
-    transitionSessionStatus.mockResolvedValue(true);
+    transition.mockResolvedValue(true);
 
     const response = await handler.archive(
       new Request("http://internal/internal/archive", {
@@ -634,15 +290,156 @@ describe("createSessionLifecycleHandler", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "archived" });
-    expect(transitionSessionStatus).toHaveBeenCalledWith("archived");
+    expect(transition).toHaveBeenCalledWith("archived");
   });
 
-  it("unarchives successfully for participant", async () => {
-    const { handler, getSession, getParticipantByUserId, transitionSessionStatus } =
-      createHandler();
+  it("archives a draft that was never prompted", async () => {
+    const { handler, getSession, transition } = createHandler();
+    getSession.mockReturnValue(createSession({ status: "created" }));
+    transition.mockResolvedValue(true);
+
+    const response = await handler.expireDraft();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ outcome: "archived", status: "archived" });
+    expect(transition).toHaveBeenCalledWith("archived");
+  });
+
+  // `created` with messages is unreachable under current code: enqueuePromptCore
+  // inserts the message and transitions to `active` in the same durable object
+  // turn. Returning the session unchanged is what let legacy rows in that shape
+  // pin the head of the sweep's oldest-first batch forever, so the invariant
+  // under test is that every one of these branches leaves `created` behind.
+  it("settles a draft that still holds queued work", async () => {
+    const { handler, getSession, repository, transition, settleFromMessageState } = createHandler();
+    getSession.mockReturnValue(createSession({ status: "created" }));
+    repository.getPendingOrProcessingCount.mockReturnValue(1);
+    settleFromMessageState.mockResolvedValue("active");
+
+    const response = await handler.expireDraft();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ outcome: "has_work", status: "active" });
+    expect(settleFromMessageState).toHaveBeenCalled();
+    expect(transition).not.toHaveBeenCalledWith("archived");
+  });
+
+  it("settles a draft whose latest terminal message failed", async () => {
+    const { handler, getSession, repository, settleFromMessageState } = createHandler();
+    getSession.mockReturnValue(createSession({ status: "created" }));
+    repository.getMessageCount.mockReturnValue(2);
+    repository.getPendingOrProcessingCount.mockReturnValue(0);
+    settleFromMessageState.mockResolvedValue("failed");
+
+    const response = await handler.expireDraft();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ outcome: "has_work", status: "failed" });
+    expect(settleFromMessageState).toHaveBeenCalled();
+  });
+
+  it("never archives a draft that holds work", async () => {
+    // Archiving would discard a real queued request, and `archived` is not
+    // promptable, so the request could not even be resumed afterwards.
+    const { handler, getSession, repository, transition } = createHandler();
+    getSession.mockReturnValue(createSession({ status: "created" }));
+    repository.getPendingOrProcessingCount.mockReturnValue(1);
+
+    await handler.expireDraft();
+
+    expect(transition).not.toHaveBeenCalledWith("archived");
+  });
+
+  it("reports failure when stale index repair fails", async () => {
+    const { handler, getSession, repairIndexStatus } = createHandler();
     getSession.mockReturnValue(createSession({ status: "archived" }));
-    getParticipantByUserId.mockReturnValue(createParticipant());
-    transitionSessionStatus.mockResolvedValue(true);
+    repairIndexStatus.mockRejectedValue(new Error("d1 down"));
+
+    await expect(handler.expireDraft()).rejects.toThrow(/d1 down/);
+  });
+
+  it("does not expire a session that has left the draft status", async () => {
+    const { handler, getSession, transition } = createHandler();
+    getSession.mockReturnValue(createSession({ status: "active" }));
+
+    const response = await handler.expireDraft();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ outcome: "not_draft", status: "active" });
+    expect(transition).not.toHaveBeenCalledWith("archived");
+  });
+
+  it("repairs a stale index without claiming new activity", async () => {
+    // A session reaches this branch when the index still reads `created` while
+    // the durable object has moved on. Repairing through `transition` would send
+    // the durable object's own `updated_at`, which the index rejects whenever D1
+    // is the newer of the two — a silent no-op that leaves the row selectable
+    // forever. The repair projects status alone instead.
+    const { handler, getSession, transition, repairIndexStatus } = createHandler();
+    getSession.mockReturnValue(createSession({ status: "archived" }));
+
+    const response = await handler.expireDraft();
+
+    expect(await response.json()).toEqual({ outcome: "not_draft", status: "archived" });
+    expect(repairIndexStatus).toHaveBeenCalled();
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when expiring a missing session", async () => {
+    const { handler, getSession, transition } = createHandler();
+    getSession.mockReturnValue(null);
+
+    const response = await handler.expireDraft();
+
+    expect(response.status).toBe(404);
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when archiving a session with queued work", async () => {
+    const { handler, getSession, repository, transition } = createHandler();
+    getSession.mockReturnValue(createSession());
+    repository.getPendingOrProcessingCount.mockReturnValue(1);
+
+    const response = await handler.archive(
+      new Request("http://internal/internal/archive", {
+        method: "POST",
+        body: JSON.stringify({ userId: "user-1" }),
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when archiving a cancelled session", async () => {
+    const { handler, getSession, transition } = createHandler();
+    getSession.mockReturnValue(createSession({ status: "cancelled" }));
+
+    const response = await handler.archive(
+      new Request("http://internal/internal/archive", {
+        method: "POST",
+        body: JSON.stringify({ userId: "user-1" }),
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  // Unarchive must not assert a status of its own. Forcing "active" left a
+  // session with no queued work claiming to be working: nothing settles an idle
+  // `active` session, because every settle path is driven by execution events,
+  // so it stayed in the sidebar's in-progress group until the next prompt.
+  // Deriving the status from message state is what makes the restore honest.
+  //
+  // The settle service is mocked here, so this asserts delegation and
+  // pass-through only -- one behaviour, not four. Which status each message
+  // state actually produces is covered against real DO storage in
+  // test/integration/session-lifecycle.test.ts.
+  it("delegates to the settle service and returns whatever it decides", async () => {
+    const { handler, getSession, transition, settleFromMessageState } = createHandler();
+    getSession.mockReturnValue(createSession({ status: "archived" }));
+    settleFromMessageState.mockResolvedValue("completed");
 
     const response = await handler.unarchive(
       new Request("http://internal/internal/unarchive", {
@@ -653,8 +450,24 @@ describe("createSessionLifecycleHandler", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "active" });
-    expect(transitionSessionStatus).toHaveBeenCalledWith("active");
+    expect(await response.json()).toEqual({ status: "completed" });
+    expect(settleFromMessageState).toHaveBeenCalled();
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when unarchiving a session that is not archived", async () => {
+    const { handler, getSession, transition } = createHandler();
+    getSession.mockReturnValue(createSession({ status: "cancelled" }));
+
+    const response = await handler.unarchive(
+      new Request("http://internal/internal/unarchive", {
+        method: "POST",
+        body: JSON.stringify({ userId: "user-1" }),
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(transition).not.toHaveBeenCalled();
   });
 
   it("returns 409 when cancelling terminal session", async () => {
@@ -672,26 +485,23 @@ describe("createSessionLifecycleHandler", () => {
       handler,
       getSession,
       getSandbox,
-      stopExecution,
-      transitionSessionStatus,
+      cancelSession,
       getSandboxSocket,
       sendToSandbox,
       updateSandboxStatus,
     } = createHandler();
     const ws = {} as WebSocket;
     getSession.mockReturnValue(createSession({ status: "active" }));
-    getSandbox.mockReturnValue(createSandbox({ status: "running" }));
-    stopExecution.mockResolvedValue(undefined);
-    transitionSessionStatus.mockResolvedValue(true);
+    getSandbox.mockReturnValue(createSandbox({ status: "ready" }));
+    cancelSession.mockResolvedValue(undefined);
     getSandboxSocket.mockReturnValue(ws);
 
     const response = await handler.cancel();
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "cancelled" });
-    expect(stopExecution).toHaveBeenCalledWith({ suppressStatusReconcile: true });
-    expect(transitionSessionStatus).toHaveBeenCalledWith("cancelled");
-    expect(sendToSandbox).toHaveBeenCalledWith(ws, { type: "shutdown" });
+    expect(cancelSession).toHaveBeenCalledOnce();
+    expect(sendToSandbox).toHaveBeenCalledWith({ type: "shutdown" });
     expect(updateSandboxStatus).toHaveBeenCalledWith("stopped");
   });
 });

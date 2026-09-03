@@ -1,15 +1,24 @@
 /**
  * Environment bindings for the GitHub Bot Cloudflare Worker.
  */
+import type { ControlPlaneFetcher } from "@open-inspect/shared/service-auth";
+import type { GitHubAutofixEnvelope } from "@open-inspect/shared";
+
 export interface Env {
   /** KV namespace for deduplicating webhook deliveries. */
   GITHUB_KV: KVNamespace;
 
+  /** Durable handoff for pull request feedback that may trigger Autofix. */
+  AUTOFIX_QUEUE: Queue<GitHubAutofixEnvelope>;
+
   /** Service binding to the control plane worker. */
-  CONTROL_PLANE: Fetcher;
+  CONTROL_PLANE: ControlPlaneFetcher;
 
   /** Deployment name for logging/identification. */
   DEPLOYMENT_NAME: string;
+
+  /** Display name shown in user-visible bot messages and HTTP User-Agent headers. */
+  APP_NAME?: string;
 
   /** Default model ID for new sessions. */
   DEFAULT_MODEL: string;
@@ -29,80 +38,16 @@ export interface Env {
   /** Webhook secret for verifying GitHub webhook signatures. */
   GITHUB_WEBHOOK_SECRET: string;
 
-  /** Shared secret for HMAC auth to the control plane. */
-  INTERNAL_CALLBACK_SECRET: string;
+  /** Per-service sig1 signing secret. */
+  SERVICE_AUTH_SECRET?: string;
 
   /** Optional log level override. */
   LOG_LEVEL?: string;
 }
 
-/**
- * Webhook payload types — narrow types extracted from the GitHub webhook
- * event schema containing only the fields the bot reads.
- */
-
-export interface PullRequestOpenedPayload {
-  action: "opened";
-  pull_request: {
-    number: number;
-    title: string;
-    body: string | null;
-    user: { login: string };
-    head: { ref: string; sha: string };
-    base: { ref: string };
-    draft: boolean;
-  };
-  repository: { owner: { login: string }; name: string; private: boolean };
-  sender: { login: string; id: number; avatar_url: string };
-}
-
-export interface ReviewRequestedPayload {
-  action: "review_requested";
-  pull_request: {
-    number: number;
-    title: string;
-    body: string | null;
-    user: { login: string };
-    head: { ref: string; sha: string };
-    base: { ref: string };
-  };
-  requested_reviewer?: { login: string };
-  repository: { owner: { login: string }; name: string; private: boolean };
-  sender: { login: string; id: number; avatar_url: string };
-}
-
-export interface IssueCommentPayload {
-  action: "created";
-  issue: {
-    number: number;
-    title: string;
-    pull_request?: { url: string };
-  };
-  comment: {
-    id: number;
-    body: string;
-    user: { login: string };
-  };
-  repository: { owner: { login: string }; name: string; private: boolean };
-  sender: { login: string; id: number; avatar_url: string };
-}
-
-export interface ReviewCommentPayload {
-  action: "created";
-  pull_request: {
-    number: number;
-    title: string;
-    head: { ref: string; sha: string };
-    base: { ref: string };
-  };
-  comment: {
-    id: number;
-    body: string;
-    path: string;
-    diff_hunk: string;
-    position: number | null;
-    user: { login: string };
-  };
-  repository: { owner: { login: string }; name: string; private: boolean };
-  sender: { login: string; id: number; avatar_url: string };
-}
+export type {
+  IssueCommentPayload,
+  PullRequestOpenedPayload,
+  ReviewCommentPayload,
+  ReviewRequestedPayload,
+} from "./payload-schemas";

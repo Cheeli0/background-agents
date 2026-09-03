@@ -5,16 +5,58 @@
  * This ensures high performance even with hundreds of concurrent sessions.
  */
 
+// Shared between SCHEMA_SQL (fresh DOs) and migration 31 (existing DOs) so
+// the two paths can never diverge.
+const SESSION_REPOSITORIES_TABLE_SQL = `CREATE TABLE IF NOT EXISTS session_repositories (
+  position INTEGER NOT NULL,
+  repo_owner TEXT NOT NULL,
+  repo_name TEXT NOT NULL,
+  repo_id INTEGER,
+  base_branch TEXT NOT NULL,
+  branch_name TEXT,                                 -- Working branch (set after first push to this repo)
+  base_sha TEXT,
+  current_sha TEXT,
+  PRIMARY KEY (repo_owner, repo_name)
+)`;
+
+const ATTACHMENTS_TABLE_SQL = `CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  object_key TEXT NOT NULL,
+  message_id TEXT,
+  cleanup_claimed_at INTEGER,
+  created_at INTEGER NOT NULL
+)`;
+
+const SESSION_DIFF_TABLE_SQL = `CREATE TABLE IF NOT EXISTS session_diff (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  revision_id TEXT,
+  trigger_message_id TEXT,
+  bundle_json TEXT,
+  captured_at INTEGER,
+  last_error TEXT,
+  error_at INTEGER,
+  updated_at INTEGER NOT NULL
+);`;
+
+const SESSION_ALARM_STATE_TABLE_SQL = `CREATE TABLE IF NOT EXISTS session_alarm_state (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  pending_deadline INTEGER,
+  in_flight_deadline INTEGER,
+  cancelled INTEGER NOT NULL DEFAULT 0
+);`;
+
 export const SCHEMA_SQL = `
 -- Core session state
 CREATE TABLE IF NOT EXISTS session (
   id TEXT PRIMARY KEY,                              -- Same as DO ID
   session_name TEXT,                                -- External session name for WebSocket routing
   title TEXT,                                       -- Session/PR title
-  repo_owner TEXT NOT NULL,                         -- e.g., "acme-corp"
-  repo_name TEXT NOT NULL,                          -- e.g., "web-app"
+  repo_owner TEXT,                                  -- e.g., "acme-corp"; NULL for no-repo sessions
+  repo_name TEXT,                                   -- e.g., "web-app"; NULL for no-repo sessions
   repo_id INTEGER,                                  -- GitHub repository ID (stable)
-  base_branch TEXT NOT NULL DEFAULT 'main',          -- Base branch for PRs
+  base_branch TEXT,                                 -- Base branch for PRs; NULL for no-repo sessions
   branch_name TEXT,                                 -- Working branch (set after first commit)
   base_sha TEXT,                                    -- SHA of base branch at session start
   current_sha TEXT,                                 -- Current HEAD SHA
@@ -26,20 +68,31 @@ CREATE TABLE IF NOT EXISTS session (
   spawn_source TEXT NOT NULL DEFAULT 'user',        -- 'user' or 'agent'
   spawn_depth INTEGER NOT NULL DEFAULT 0,           -- 0 for top-level, parent.depth + 1 for children
   code_server_enabled INTEGER NOT NULL DEFAULT 0,   -- 0 = disabled, 1 = enabled (opt-in)
+  vnc_enabled INTEGER NOT NULL DEFAULT 0,           -- 0 = disabled, 1 = enabled (opt-in)
   total_cost REAL NOT NULL DEFAULT 0,              -- Running session cost from step_finish events
   sandbox_settings TEXT DEFAULT NULL,               -- JSON blob of SandboxSettings (resolved at session creation)
+  environment_id TEXT,                              -- Launch environment provenance; NULL for repo-launched/ad-hoc sessions
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  CHECK (
+    (repo_owner IS NULL) = (repo_name IS NULL)
+    AND (
+      repo_owner IS NOT NULL
+      OR (repo_id IS NULL AND base_branch IS NULL)
+    )
+  )
 );
 
 -- Participants in the session
 CREATE TABLE IF NOT EXISTS participants (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
+  canonical_user_id TEXT,                           -- D1 users.id for cosmetic profile joins only
   scm_user_id TEXT,                                 -- SCM numeric ID
   scm_login TEXT,                                   -- SCM username
   scm_email TEXT,                                   -- For git commit attribution
   scm_name TEXT,                                    -- Display name for git commits
+  auth_name TEXT,                                   -- Dormant legacy profile snapshot; retained for schema compatibility
   role TEXT NOT NULL DEFAULT 'member',              -- 'owner', 'member'
   -- Token storage (AES-GCM encrypted)
   scm_access_token_encrypted TEXT,
@@ -61,8 +114,14 @@ CREATE TABLE IF NOT EXISTS messages (
   reasoning_effort TEXT,                            -- Per-message reasoning effort override
   attachments TEXT,                                 -- JSON array
   callback_context TEXT,                            -- JSON callback context for Slack follow-up notifications
+  client_request_id TEXT,                           -- Web-client idempotency key
+  request_fingerprint TEXT,                         -- Participant-scoped canonical request hash
+  autofix_feedback_key TEXT,                        -- Stable provider feedback identity for idempotency
+  autofix_pr_key TEXT,                              -- Stable provider PR identity for rolling attempt limits
+  origin_context TEXT,                              -- Typed JSON describing the external feedback origin
   status TEXT DEFAULT 'pending',                    -- 'pending', 'processing', 'completed', 'failed'
   error_message TEXT,                               -- If status='failed'
+  stop_confirmation_deadline INTEGER,               -- Blocks dispatch until stop is confirmed or times out
   created_at INTEGER NOT NULL,
   started_at INTEGER,                               -- When processing began
   completed_at INTEGER,                             -- When processing finished
@@ -75,17 +134,24 @@ CREATE TABLE IF NOT EXISTS events (
   type TEXT NOT NULL,                               -- 'tool_call', 'tool_result', 'token', 'error', 'git_sync'
   data TEXT NOT NULL,                               -- JSON payload
   message_id TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  timeline_sequence INTEGER NOT NULL UNIQUE
 );
 
--- Artifacts (PRs, screenshots, preview URLs)
+-- Artifacts (PRs, screenshots, video recordings, preview URLs)
 CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY,
-  type TEXT NOT NULL,                               -- 'pr', 'screenshot', 'preview', 'branch'
+  type TEXT NOT NULL,                               -- 'pr', 'screenshot', 'video', 'preview', 'branch'
   url TEXT,
   metadata TEXT,                                    -- JSON
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL                       -- last content change (PR lifecycle updates)
 );
+
+-- User session attachments stored in the media bucket (chat composer attachments).
+-- message_id is set once a message references the attachment; unreferenced rows are
+-- pruned (with their R2 objects) after a TTL.
+${ATTACHMENTS_TABLE_SQL};
 
 -- Sandbox state
 CREATE TABLE IF NOT EXISTS sandbox (
@@ -94,9 +160,12 @@ CREATE TABLE IF NOT EXISTS sandbox (
   modal_object_id TEXT,                             -- Legacy provider object ID (Modal object ID or Daytona handle)
   snapshot_id TEXT,
   snapshot_image_id TEXT,                           -- Modal Image ID for filesystem snapshot restoration
+  snapshot_runtime_version TEXT,                    -- SANDBOX_VERSION that produced snapshot_image_id (restore compatibility floor)
+  runtime_version TEXT,                             -- SANDBOX_VERSION reported by the running sandbox
   auth_token TEXT,                                  -- Token for sandbox to authenticate back to control plane
   auth_token_hash TEXT,                             -- SHA-256 hash of sandbox auth token (preferred)
-  status TEXT DEFAULT 'pending',                    -- 'pending', 'spawning', 'connecting', 'warming', 'syncing', 'ready', 'running', 'stale', 'snapshotting', 'stopped', 'failed'
+  -- Default must match DEFAULT_SANDBOX_STATUS (sandbox/sandbox-status.ts).
+  status TEXT DEFAULT 'pending',                    -- 'pending', 'spawning', 'connecting', 'warming', 'ready', 'stale', 'snapshotting', 'stopped', 'failed'
   git_sync_status TEXT DEFAULT 'pending',           -- 'pending', 'in_progress', 'completed', 'failed'
   last_heartbeat INTEGER,
   last_activity INTEGER,                            -- Last activity timestamp for inactivity-based snapshot
@@ -106,11 +175,27 @@ CREATE TABLE IF NOT EXISTS sandbox (
   last_spawn_failure INTEGER,                       -- Timestamp of last spawn failure
   code_server_url TEXT,                             -- Code-server tunnel URL (rotates on wake/restore)
   code_server_password TEXT,                        -- Code-server password (rotates on each wake/restore)
+  vnc_url TEXT,                                     -- noVNC tunnel URL (rotates on wake/restore)
+  vnc_password TEXT,                                -- VNC password (rotates on each wake/restore)
   tunnel_urls TEXT,                                 -- JSON mapping of port -> tunnel URL for extra ports
   ttyd_url TEXT,                                    -- ttyd proxy tunnel URL
   ttyd_token TEXT,                                  -- Encrypted JWT token for ttyd auth
   created_at INTEGER NOT NULL
 );
+
+-- Member repositories for multi-repo sessions, in position order
+-- (position 0 = primary, mirrored into session.repo_owner/repo_name).
+-- Pre-feature sessions have no rows; readers synthesize a one-entry list
+-- from the session scalar columns. Per-repo git state columns are written
+-- by push handling from PR-5 onward; until then the position-0 row is
+-- overlaid with the session scalar branch/sha columns at read time.
+${SESSION_REPOSITORIES_TABLE_SQL};
+
+-- Latest durable checkout diff bundle. Source patches live only in this bounded row.
+${SESSION_DIFF_TABLE_SQL}
+
+-- Runtime alarm recovery source for hosts that can be adopted by another process.
+${SESSION_ALARM_STATE_TABLE_SQL}
 
 -- WebSocket client mapping for hibernation recovery
 CREATE TABLE IF NOT EXISTS ws_client_mapping (
@@ -118,20 +203,34 @@ CREATE TABLE IF NOT EXISTS ws_client_mapping (
   participant_id TEXT NOT NULL,
   client_id TEXT,
   created_at INTEGER NOT NULL,
+  authorization_expires_at INTEGER NOT NULL,
   FOREIGN KEY (participant_id) REFERENCES participants(id)
 );
+`;
 
--- Indexes for common queries
+// Indexes run only after migrations so they can safely reference columns that
+// do not exist in legacy tables. Migration-specific index creation remains in
+// the relevant migration so partially applied upgrades stay idempotent.
+const INDEXES_SQL = `
 CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status);
 CREATE INDEX IF NOT EXISTS idx_messages_author ON messages(author_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_request_id
+ON messages(client_request_id) WHERE client_request_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_one_processing
+ON messages(status) WHERE status = 'processing';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_autofix_feedback
+ON messages(autofix_feedback_key) WHERE autofix_feedback_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_autofix_pr_created
+ON messages(autofix_pr_key, created_at) WHERE autofix_pr_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_message ON events(message_id);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_timeline_sequence ON events(timeline_sequence);
 CREATE INDEX IF NOT EXISTS idx_participants_user ON participants(user_id);
 `;
 
 import { createLogger } from "../logger";
-import type { SqlStorage } from "./repository";
+import type { SqlStorage } from "./sql-storage";
 
 const schemaLog = createLogger("schema");
 
@@ -147,6 +246,21 @@ export interface SchemaMigration {
   readonly id: number;
   readonly description: string;
   readonly run: string | ((sql: SqlStorage) => void);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseSqlColumnNames(rows: unknown[]): string[] {
+  return rows.map((row, index) => {
+    if (!isRecord(row) || typeof row.name !== "string") {
+      throw new TypeError(
+        `Invalid SQLite column metadata at row ${index}: expected an object with a string name`
+      );
+    }
+    return row.name;
+  });
 }
 
 /**
@@ -192,10 +306,9 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     id: 7,
     description: "Add refresh_token_encrypted to participants",
     run: (sql) => {
-      const columns = sql.exec("PRAGMA table_info(participants)").toArray() as Array<{
-        name: string;
-      }>;
-      const names = new Set(columns.map((c) => c.name));
+      const names = new Set(
+        parseSqlColumnNames(sql.exec("PRAGMA table_info(participants)").toArray())
+      );
       // Fresh DOs (post-rename) already have scm_refresh_token_encrypted from SCHEMA_SQL.
       // Only add the old column name on pre-rename DOs that need migration 20 to rename it.
       if (
@@ -280,10 +393,9 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     id: 20,
     description: "Rename github_* columns to scm_* in participants",
     run: (sql) => {
-      const columns = sql.exec("PRAGMA table_info(participants)").toArray() as Array<{
-        name: string;
-      }>;
-      const columnNames = new Set(columns.map((c) => c.name));
+      const columnNames = new Set(
+        parseSqlColumnNames(sql.exec("PRAGMA table_info(participants)").toArray())
+      );
 
       const renames: [string, string][] = [
         ["github_user_id", "scm_user_id"],
@@ -316,10 +428,11 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     description: "Drop scm_provider from session and participants (now deployment-level)",
     run: (sql) => {
       for (const table of ["session", "participants"] as const) {
-        const columns = sql.exec(`PRAGMA table_info(${table})`).toArray() as Array<{
-          name: string;
-        }>;
-        if (columns.some((c) => c.name === "scm_provider")) {
+        if (
+          parseSqlColumnNames(sql.exec(`PRAGMA table_info(${table})`).toArray()).includes(
+            "scm_provider"
+          )
+        ) {
           sql.exec(`ALTER TABLE ${table} DROP COLUMN scm_provider`);
         }
       }
@@ -329,10 +442,9 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     id: 24,
     description: "Rename repo_default_branch to base_branch in session",
     run: (sql) => {
-      const columns = sql.exec("PRAGMA table_info(session)").toArray() as Array<{
-        name: string;
-      }>;
-      const columnNames = new Set(columns.map((c) => c.name));
+      const columnNames = new Set(
+        parseSqlColumnNames(sql.exec("PRAGMA table_info(session)").toArray())
+      );
       if (columnNames.has("repo_default_branch") && !columnNames.has("base_branch")) {
         sql.exec(`ALTER TABLE session RENAME COLUMN repo_default_branch TO base_branch`);
       }
@@ -382,6 +494,141 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     id: 30,
     description: "Add total_cost to session",
     run: `ALTER TABLE session ADD COLUMN total_cost REAL NOT NULL DEFAULT 0`,
+  },
+  {
+    id: 31,
+    description: "Add session_repositories table for multi-repo sessions",
+    run: SESSION_REPOSITORIES_TABLE_SQL,
+  },
+  {
+    id: 32,
+    description: "Add environment_id to session (launch environment provenance)",
+    run: `ALTER TABLE session ADD COLUMN environment_id TEXT`,
+  },
+  {
+    id: 33,
+    description: "Add auth_name to participants (provider-agnostic presence display name)",
+    run: `ALTER TABLE participants ADD COLUMN auth_name TEXT`,
+  },
+  {
+    id: 34,
+    description: "Add updated_at to artifacts (PR lifecycle tracking)",
+    // SQLite cannot ADD COLUMN with NOT NULL and no default, so migrated DOs
+    // get a nullable column plus a backfill; fresh DOs get NOT NULL from
+    // SCHEMA_SQL and createArtifact always writes it.
+    run: (sql) => {
+      runMigration(sql, `ALTER TABLE artifacts ADD COLUMN updated_at INTEGER`);
+      sql.exec(`UPDATE artifacts SET updated_at = created_at WHERE updated_at IS NULL`);
+    },
+  },
+  {
+    id: 35,
+    description: "Create attachments table",
+    run: ATTACHMENTS_TABLE_SQL,
+  },
+  {
+    id: 36,
+    description: "Add durable latest session diff bundle",
+    run: SESSION_DIFF_TABLE_SQL,
+  },
+  {
+    id: 37,
+    description: "Add canonical D1 user reference to participants",
+    run: `ALTER TABLE participants ADD COLUMN canonical_user_id TEXT`,
+  },
+  {
+    id: 38,
+    description: "Add stable event timeline sequence",
+    run: (sql) => {
+      runMigration(sql, `ALTER TABLE events ADD COLUMN timeline_sequence INTEGER`);
+      sql.exec(`UPDATE events SET timeline_sequence = rowid WHERE timeline_sequence IS NULL`);
+      sql.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_events_timeline_sequence ON events(timeline_sequence)`
+      );
+    },
+  },
+  {
+    id: 39,
+    description: "Add VNC fields",
+    run: (sql) => {
+      runMigration(sql, `ALTER TABLE sandbox ADD COLUMN vnc_url TEXT`);
+      runMigration(sql, `ALTER TABLE sandbox ADD COLUMN vnc_password TEXT`);
+      runMigration(sql, `ALTER TABLE session ADD COLUMN vnc_enabled INTEGER NOT NULL DEFAULT 0`);
+    },
+  },
+  {
+    id: 40,
+    description: "Add web prompt idempotency fields",
+    run: (sql) => {
+      runMigration(sql, `ALTER TABLE messages ADD COLUMN client_request_id TEXT`);
+      runMigration(sql, `ALTER TABLE messages ADD COLUMN request_fingerprint TEXT`);
+      sql.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_request_id
+        ON messages(client_request_id) WHERE client_request_id IS NOT NULL`);
+    },
+  },
+  {
+    id: 41,
+    description: "Add dedicated stop confirmation deadline",
+    run: `ALTER TABLE messages ADD COLUMN stop_confirmation_deadline INTEGER`,
+  },
+  {
+    id: 42,
+    description: "Allow only one processing message per session",
+    run: (sql) => {
+      // Preserve the oldest claim as the likely active execution and requeue later claims.
+      const duplicateProcessingMessages = `SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            ORDER BY COALESCE(started_at, created_at), created_at, rowid
+          ) AS processing_order
+          FROM messages
+          WHERE status = 'processing'
+        ) WHERE processing_order > 1`;
+      sql.exec(`DELETE FROM events
+        WHERE type = 'user_message'
+          AND id = 'user_message:' || message_id
+          AND message_id IN (${duplicateProcessingMessages})`);
+      sql.exec(`UPDATE messages
+        SET status = 'pending', started_at = NULL
+        WHERE id IN (${duplicateProcessingMessages})`);
+      sql.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_one_processing
+        ON messages(status) WHERE status = 'processing'`);
+    },
+  },
+  {
+    id: 43,
+    description: "Persist session alarm scheduling state",
+    run: SESSION_ALARM_STATE_TABLE_SQL,
+  },
+  {
+    id: 44,
+    description: "Record sandbox runtime version and stamp it on snapshots",
+    run: (sql) => {
+      runMigration(sql, `ALTER TABLE sandbox ADD COLUMN runtime_version TEXT`);
+      runMigration(sql, `ALTER TABLE sandbox ADD COLUMN snapshot_runtime_version TEXT`);
+    },
+  },
+  {
+    id: 45,
+    description: "Add Autofix message admission metadata",
+    run: (sql) => {
+      runMigration(sql, `ALTER TABLE messages ADD COLUMN autofix_feedback_key TEXT`);
+      runMigration(sql, `ALTER TABLE messages ADD COLUMN autofix_pr_key TEXT`);
+      runMigration(sql, `ALTER TABLE messages ADD COLUMN origin_context TEXT`);
+      sql.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_autofix_feedback
+        ON messages(autofix_feedback_key) WHERE autofix_feedback_key IS NOT NULL`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_messages_autofix_pr_created
+        ON messages(autofix_pr_key, created_at) WHERE autofix_pr_key IS NOT NULL`);
+    },
+  },
+  {
+    id: 46,
+    description: "Add WebSocket authorization leases",
+    run: (sql) => {
+      runMigration(
+        sql,
+        `ALTER TABLE ws_client_mapping ADD COLUMN authorization_expires_at INTEGER NOT NULL DEFAULT 0`
+      );
+    },
   },
 ];
 
@@ -437,4 +684,5 @@ export function applyMigrations(sql: SqlStorage): void {
 export function initSchema(sql: SqlStorage): void {
   sql.exec(SCHEMA_SQL);
   applyMigrations(sql);
+  sql.exec(INDEXES_SQL);
 }

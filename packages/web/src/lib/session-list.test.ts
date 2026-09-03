@@ -1,6 +1,22 @@
-import { describe, expect, it } from "vitest";
-import { applyTitleUpdate, type SessionListResponse } from "./session-list";
-import type { Session } from "@open-inspect/shared";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  applyTitleUpdate,
+  applySessionReadState,
+  buildSessionSearchValue,
+  buildSessionsPageKey,
+  CURRENT_USER_CREATED_BY,
+  fetchSessionListPage,
+  isArchivedSessionListKey,
+  isSessionListKey,
+  isUnarchivedSessionListKey,
+  type SessionListResponse,
+} from "./session-list";
+import type { Session } from "@open-inspect/shared/types/sessions";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 function session(id: string, overrides: Partial<Session> = {}): Session {
   return {
@@ -23,18 +39,170 @@ function session(id: string, overrides: Partial<Session> = {}): Session {
   };
 }
 
+describe("buildSessionsPageKey", () => {
+  it("adds the current-user creator filter", () => {
+    expect(
+      buildSessionsPageKey({
+        excludeStatus: "archived",
+        excludeAutomationLineage: true,
+        createdBy: [CURRENT_USER_CREATED_BY],
+      })
+    ).toBe(
+      "/api/sessions?limit=50&offset=0&excludeStatus=archived&excludeAutomationLineage=true&createdBy=me"
+    );
+  });
+
+  it("adds repeated creator filters", () => {
+    expect(
+      buildSessionsPageKey({
+        excludeStatus: "archived",
+        createdBy: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+      })
+    ).toBe(
+      "/api/sessions?limit=50&offset=0&excludeStatus=archived&createdBy=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&createdBy=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    );
+  });
+});
+
+describe("fetchSessionListPage", () => {
+  it("parses the session-list boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          sessions: [session("session-1")],
+          hasMore: false,
+        })
+      )
+    );
+
+    await expect(fetchSessionListPage(buildSessionsPageKey())).resolves.toMatchObject({
+      sessions: [{ id: "session-1", status: "active" }],
+      hasMore: false,
+    });
+  });
+
+  it("rejects malformed pages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ sessions: [{ id: "session-1" }], hasMore: false }))
+    );
+
+    await expect(fetchSessionListPage(buildSessionsPageKey())).rejects.toThrow();
+  });
+});
+
+describe("applySessionReadState", () => {
+  it("does not let an older mutation response overwrite a newer terminal message", () => {
+    const data: SessionListResponse = {
+      sessions: [
+        session("session-1", {
+          readState: {
+            unread: true,
+            latestMessageId: "message-b",
+          },
+        }),
+      ],
+      hasMore: false,
+    };
+
+    expect(
+      applySessionReadState(data, "session-1", {
+        unread: false,
+        latestMessageId: "message-a",
+      })?.sessions[0].readState
+    ).toEqual({
+      unread: true,
+      latestMessageId: "message-b",
+    });
+    expect(
+      applySessionReadState(data, "session-1", {
+        unread: false,
+        latestMessageId: "message-b",
+      })?.sessions[0].readState
+    ).toEqual({
+      unread: false,
+      latestMessageId: "message-b",
+    });
+  });
+});
+
+describe("buildSessionSearchValue", () => {
+  it("includes every repository attached to a multi-repository session", () => {
+    const value = buildSessionSearchValue(
+      session("multi", {
+        title: "Update services",
+        repositories: [
+          {
+            repoOwner: "open-inspect",
+            repoName: "background-agents",
+            repoId: 1,
+            baseBranch: "main",
+          },
+          { repoOwner: "acme", repoName: "api", repoId: 2, baseBranch: "main" },
+        ],
+      })
+    );
+
+    expect(value).toContain("Update services");
+    expect(value).toContain("open-inspect/background-agents");
+    expect(value).toContain("acme/api");
+  });
+
+  it("falls back to the scalar repository fields", () => {
+    expect(buildSessionSearchValue(session("legacy"))).toContain("open-inspect/background-agents");
+  });
+});
+
+describe("isSessionListKey", () => {
+  it("matches all session list cache keys", () => {
+    expect(isSessionListKey("/api/sessions")).toBe(true);
+    expect(isSessionListKey("/api/sessions?limit=50&offset=0")).toBe(true);
+  });
+
+  it("ignores other cache keys", () => {
+    expect(isSessionListKey("/api/sessions/session-1")).toBe(false);
+    expect(isSessionListKey(["/api/sessions"])).toBe(false);
+  });
+});
+
+describe("isUnarchivedSessionListKey", () => {
+  it("matches active session list variants", () => {
+    expect(isUnarchivedSessionListKey("/api/sessions")).toBe(true);
+    expect(isUnarchivedSessionListKey("/api/sessions?excludeStatus=archived")).toBe(true);
+    expect(isUnarchivedSessionListKey("/api/sessions?status=active")).toBe(true);
+  });
+
+  it("ignores archived session lists", () => {
+    expect(isUnarchivedSessionListKey("/api/sessions?status=archived&limit=20")).toBe(false);
+  });
+});
+
+describe("isArchivedSessionListKey", () => {
+  it("matches archived session lists", () => {
+    expect(isArchivedSessionListKey("/api/sessions?status=archived")).toBe(true);
+    expect(isArchivedSessionListKey("/api/sessions?status=archived&limit=20")).toBe(true);
+  });
+
+  it("ignores unarchived session lists", () => {
+    expect(isArchivedSessionListKey("/api/sessions")).toBe(false);
+    expect(isArchivedSessionListKey("/api/sessions?excludeStatus=archived")).toBe(false);
+    expect(isArchivedSessionListKey("/api/sessions?status=active")).toBe(false);
+  });
+});
+
 describe("applyTitleUpdate", () => {
-  it("replaces the title and updatedAt of the matching session", () => {
+  it("replaces only the title of the matching session", () => {
     const before: SessionListResponse = {
       sessions: [session("a"), session("b"), session("c")],
       hasMore: false,
     };
 
-    const after = applyTitleUpdate(before, "b", "Renamed", 9999);
+    const after = applyTitleUpdate(before, "b", "Renamed");
 
     expect(after?.sessions).toEqual([
       session("a"),
-      session("b", { title: "Renamed", updatedAt: 9999 }),
+      session("b", { title: "Renamed" }),
       session("c"),
     ]);
   });
@@ -45,13 +213,13 @@ describe("applyTitleUpdate", () => {
       hasMore: true,
     };
 
-    const after = applyTitleUpdate(before, "a", "New", 1);
+    const after = applyTitleUpdate(before, "a", "New");
 
     expect(after?.hasMore).toBe(true);
   });
 
   it("returns undefined when data is undefined (cache miss)", () => {
-    expect(applyTitleUpdate(undefined, "a", "New", 1)).toBeUndefined();
+    expect(applyTitleUpdate(undefined, "a", "New")).toBeUndefined();
   });
 
   it("leaves the list unchanged when sessionId does not match", () => {
@@ -60,7 +228,7 @@ describe("applyTitleUpdate", () => {
       hasMore: false,
     };
 
-    const after = applyTitleUpdate(before, "missing", "New", 9999);
+    const after = applyTitleUpdate(before, "missing", "New");
 
     expect(after?.sessions).toEqual(before.sessions);
   });
@@ -70,9 +238,9 @@ describe("applyTitleUpdate", () => {
       sessions: [session("a")],
       hasMore: false,
     };
-    const beforeSnapshot = JSON.parse(JSON.stringify(before));
+    const beforeSnapshot = structuredClone(before);
 
-    applyTitleUpdate(before, "a", "Mutated", 9999);
+    applyTitleUpdate(before, "a", "Mutated");
 
     expect(before).toEqual(beforeSnapshot);
   });

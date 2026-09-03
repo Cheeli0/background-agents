@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { INTEGRATION_DEFINITIONS } from "@open-inspect/shared";
 import { ChevronRightIcon } from "@/components/ui/icons";
+import { visibleIntegrationDefinitions } from "./integrations/integration-settings-registry";
 
 export function IntegrationsSettings() {
   return (
@@ -14,7 +14,7 @@ export function IntegrationsSettings() {
 
       <div className="border border-border-muted rounded-md bg-background">
         <ul className="divide-y divide-border-muted">
-          {INTEGRATION_DEFINITIONS.map((integration) => (
+          {visibleIntegrationDefinitions.map((integration) => (
             <li key={integration.id}>
               <Link
                 href={`/settings/integrations/${integration.id}`}
@@ -24,7 +24,7 @@ export function IntegrationsSettings() {
                   <p className="text-sm font-medium">{integration.name}</p>
                   <p className="text-xs mt-1">{integration.description}</p>
                 </div>
-                <ChevronRightIcon className="w-4 h-4 mt-0.5 text-muted-foreground" />
+                <ChevronRightIcon className="w-4 h-4 shrink-0 self-center text-muted-foreground" />
               </Link>
             </li>
           ))}

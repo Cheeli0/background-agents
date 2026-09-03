@@ -4,6 +4,8 @@
  * Error classes and types for source control operations.
  */
 
+import type { z } from "zod";
+
 /**
  * Error classification for source control operations.
  *
@@ -36,8 +38,8 @@ export class SourceControlProviderError extends Error {
    * Check if an HTTP status code indicates a transient error.
    */
   static isTransientStatus(status: number): boolean {
-    // 429 = Rate Limited, 502/503/504 = Gateway errors
-    return status === 429 || status === 502 || status === 503 || status === 504;
+    // 429 = Rate Limited; 5xx = upstream/server errors.
+    return status === 429 || (status >= 500 && status <= 599);
   }
 
   /**
@@ -91,4 +93,89 @@ export class SourceControlProviderError extends Error {
       error instanceof Error ? error : undefined
     );
   }
+}
+
+function blobLimitError(
+  blobId: string,
+  actualBytes: number,
+  maxBytes: number
+): SourceControlProviderError {
+  return new SourceControlProviderError(
+    `Blob ${blobId} is ${actualBytes} bytes, over the ${maxBytes}-byte limit`,
+    "permanent",
+    413
+  );
+}
+
+/** Read a response body without ever retaining more than the caller's byte budget. */
+export async function readResponseBytesWithinLimit(
+  response: Response,
+  maxBytes: number,
+  blobId: string
+): Promise<Uint8Array> {
+  const contentLength = response.headers.get("content-length");
+  const declared = contentLength === null ? null : Number(contentLength);
+  if (declared !== null && Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw blobLimitError(blobId, declared, maxBytes);
+  }
+  if (!response.body) return new Uint8Array();
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw blobLimitError(blobId, totalBytes, maxBytes);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+/**
+ * Parse a provider API response body against its wire schema.
+ *
+ * A body that is not JSON or does not match the schema throws a permanent
+ * SourceControlProviderError naming the offending fields — provider/schema
+ * drift must fail loudly rather than flow onward as apparently-valid state.
+ */
+export async function parseProviderResponse<Schema extends z.ZodType>(
+  response: Response,
+  schema: Schema,
+  context: string
+): Promise<z.output<Schema>> {
+  let raw: unknown;
+  try {
+    raw = await response.json();
+  } catch {
+    throw new SourceControlProviderError(`${context}: response body is not JSON`, "permanent");
+  }
+
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    const fields = [
+      ...new Set(parsed.error.issues.map((issue) => issue.path.join(".") || "(root)")),
+    ].join(", ");
+    throw new SourceControlProviderError(
+      `${context}: unexpected response shape (${fields})`,
+      "permanent"
+    );
+  }
+  return parsed.data;
 }

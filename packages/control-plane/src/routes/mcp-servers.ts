@@ -1,8 +1,26 @@
-import type { McpServerConfig } from "@open-inspect/shared";
-import { McpServerStore, McpServerValidationError } from "../db/mcp-servers";
+import {
+  createMcpServerInputSchema,
+  updateMcpServerInputSchema,
+} from "@open-inspect/shared/types/integrations";
+import {
+  McpServerConflictError,
+  McpServerStore,
+  McpServerValidationError,
+} from "../db/mcp-servers";
 import type { Env } from "../types";
 import { createLogger } from "../logger";
-import { type Route, type RequestContext, parsePattern, json, error } from "./shared";
+import { requireRepoSecretsEncryptionKey } from "../env-validation";
+import {
+  type Route,
+  GITHUB_USER_OR_SERVICE_ROUTE,
+  defineRoutes,
+  type RequestContext,
+  parsePattern,
+  json,
+  error,
+  parseJsonBody,
+  requirePermission,
+} from "./shared";
 
 const logger = createLogger("router:mcp-servers");
 
@@ -12,12 +30,12 @@ async function handleListMcpServers(
   _match: RegExpMatchArray,
   ctx: RequestContext
 ): Promise<Response> {
-  if (!env.DB) return error("Database not configured", 503);
+  if (!ctx.db) return error("Database not configured", 503);
 
   const url = new URL(request.url);
   const repo = url.searchParams.get("repo") ?? undefined;
 
-  const store = new McpServerStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
+  const store = new McpServerStore(ctx.db, requireRepoSecretsEncryptionKey(env));
   const servers = await store.list(repo);
   logger.info("MCP servers listed", {
     event: "mcp_server.list",
@@ -36,9 +54,9 @@ async function handleGetMcpServer(
 ): Promise<Response> {
   const id = match.groups?.id;
   if (!id) return error("Missing server ID", 400);
-  if (!env.DB) return error("Database not configured", 503);
+  if (!ctx.db) return error("Database not configured", 503);
 
-  const store = new McpServerStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
+  const store = new McpServerStore(ctx.db, requireRepoSecretsEncryptionKey(env));
   const server = await store.get(id);
   if (!server) return error("MCP server not found", 404);
   logger.info("MCP server retrieved", {
@@ -56,51 +74,17 @@ async function handleCreateMcpServer(
   _match: RegExpMatchArray,
   ctx: RequestContext
 ): Promise<Response> {
-  if (!env.DB) return error("Database not configured", 503);
+  if (!ctx.db) return error("Database not configured", 503);
 
-  let body: Partial<McpServerConfig>;
+  const body = await parseJsonBody<unknown>(request);
+  if (body instanceof Response) return body;
+  const parsed = createMcpServerInputSchema.safeParse(body);
+  if (!parsed.success) return error("Invalid MCP server configuration", 400);
+
+  const encryptionKey = requireRepoSecretsEncryptionKey(env);
   try {
-    body = await request.json();
-  } catch {
-    return error("Invalid JSON body", 400);
-  }
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return error("Request body must be a JSON object", 400);
-  }
-
-  if (!body.name || typeof body.name !== "string") {
-    return error("name is required", 400);
-  }
-  if (body.type !== "local" && body.type !== "remote") {
-    return error("type must be 'local' or 'remote'", 400);
-  }
-  if (
-    body.command !== undefined &&
-    (!Array.isArray(body.command) || !body.command.every((c: unknown) => typeof c === "string"))
-  ) {
-    return error("command must be an array of strings", 400);
-  }
-  if (
-    body.repoScopes !== undefined &&
-    body.repoScopes !== null &&
-    (!Array.isArray(body.repoScopes) ||
-      !body.repoScopes.every((s: unknown) => typeof s === "string"))
-  ) {
-    return error("repoScopes must be an array of strings", 400);
-  }
-
-  try {
-    const store = new McpServerStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
-    const server = await store.create({
-      name: body.name,
-      type: body.type,
-      command: body.command,
-      url: body.url,
-      env: body.env,
-      headers: body.headers,
-      repoScopes: body.repoScopes ?? null,
-      enabled: body.enabled !== false,
-    });
+    const store = new McpServerStore(ctx.db, encryptionKey);
+    const server = await store.create(parsed.data);
     logger.info("MCP server created", {
       event: "mcp_server.created",
       request_id: ctx.request_id,
@@ -125,43 +109,18 @@ async function handleUpdateMcpServer(
 ): Promise<Response> {
   const id = match.groups?.id;
   if (!id) return error("Missing server ID", 400);
-  if (!env.DB) return error("Database not configured", 503);
+  if (!ctx.db) return error("Database not configured", 503);
 
-  let body: Partial<McpServerConfig>;
+  const body = await parseJsonBody<unknown>(request);
+  if (body instanceof Response) return body;
+  const parsed = updateMcpServerInputSchema.safeParse(body);
+  if (!parsed.success) return error("Invalid MCP server configuration", 400);
+
+  const encryptionKey = requireRepoSecretsEncryptionKey(env);
   try {
-    body = await request.json();
-  } catch {
-    return error("Invalid JSON body", 400);
-  }
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return error("Request body must be a JSON object", 400);
-  }
-
-  if (
-    body.name !== undefined &&
-    (!body.name || typeof body.name !== "string" || !body.name.trim())
-  ) {
-    return error("name must be a non-empty string", 400);
-  }
-
-  if (
-    body.command !== undefined &&
-    (!Array.isArray(body.command) || !body.command.every((c: unknown) => typeof c === "string"))
-  ) {
-    return error("command must be an array of strings", 400);
-  }
-  if (
-    body.repoScopes !== undefined &&
-    body.repoScopes !== null &&
-    (!Array.isArray(body.repoScopes) ||
-      !body.repoScopes.every((s: unknown) => typeof s === "string"))
-  ) {
-    return error("repoScopes must be an array of strings", 400);
-  }
-
-  try {
-    const store = new McpServerStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
-    const updated = await store.update(id, body);
+    const store = new McpServerStore(ctx.db, encryptionKey);
+    const { revision, ...patch } = parsed.data;
+    const updated = await store.update(id, patch, revision);
     if (!updated) return error("MCP server not found", 404);
 
     logger.info("MCP server updated", {
@@ -172,6 +131,9 @@ async function handleUpdateMcpServer(
     });
     return json(updated);
   } catch (err) {
+    if (err instanceof McpServerConflictError) {
+      return error(err.message, 409);
+    }
     if (err instanceof McpServerValidationError) {
       return error(err.message, 400);
     }
@@ -187,9 +149,9 @@ async function handleDeleteMcpServer(
 ): Promise<Response> {
   const id = match.groups?.id;
   if (!id) return error("Missing server ID", 400);
-  if (!env.DB) return error("Database not configured", 503);
+  if (!ctx.db) return error("Database not configured", 503);
 
-  const store = new McpServerStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY);
+  const store = new McpServerStore(ctx.db, requireRepoSecretsEncryptionKey(env));
   const deleted = await store.delete(id);
   if (!deleted) return error("MCP server not found", 404);
 
@@ -202,30 +164,35 @@ async function handleDeleteMcpServer(
   return json({ ok: true });
 }
 
-export const mcpServerRoutes: Route[] = [
+export const mcpServerRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SERVICE_ROUTE, [
   {
     method: "GET",
     pattern: parsePattern("/mcp-servers"),
+    authorization: requirePermission("mcp_servers.read"),
     handler: handleListMcpServers,
   },
   {
     method: "POST",
     pattern: parsePattern("/mcp-servers"),
+    authorization: requirePermission("mcp_servers.manage"),
     handler: handleCreateMcpServer,
   },
   {
     method: "GET",
     pattern: parsePattern("/mcp-servers/:id"),
+    authorization: requirePermission("mcp_servers.read"),
     handler: handleGetMcpServer,
   },
   {
     method: "PUT",
     pattern: parsePattern("/mcp-servers/:id"),
+    authorization: requirePermission("mcp_servers.manage"),
     handler: handleUpdateMcpServer,
   },
   {
     method: "DELETE",
     pattern: parsePattern("/mcp-servers/:id"),
+    authorization: requirePermission("mcp_servers.manage"),
     handler: handleDeleteMcpServer,
   },
-];
+]);

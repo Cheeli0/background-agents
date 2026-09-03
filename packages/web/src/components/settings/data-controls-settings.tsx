@@ -1,71 +1,105 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { buildSessionHref, type SessionItem } from "@/components/session-sidebar";
-import { SIDEBAR_SESSIONS_KEY } from "@/lib/session-list";
+import { formatRepoLabel } from "@/lib/repo-label";
+import {
+  buildSessionHref,
+  buildSessionsPageKey,
+  fetchSessionListPage,
+  isUnarchivedSessionListKey,
+  removeSessionFromList,
+  type SessionListItem,
+  type SessionListResponse,
+} from "@/lib/session-list";
 import { formatRelativeTime } from "@/lib/time";
+import { browserApiFetch } from "@/lib/browser-api-fetch";
+import { useCurrentUserAuthorization } from "@/hooks/use-current-user-authorization";
+import { canUseSettingsCapability } from "./settings-registry";
 
 const PAGE_SIZE = 20;
-const ARCHIVED_SESSIONS_KEY = `/api/sessions?status=archived&limit=${PAGE_SIZE}&offset=0`;
+const ARCHIVED_SESSIONS_KEY = buildSessionsPageKey({
+  status: "archived",
+  limit: PAGE_SIZE,
+  offset: 0,
+});
 
 export function DataControlsSettings() {
-  const [extraSessions, setExtraSessions] = useState<SessionItem[]>([]);
-  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const { hasPermission } = useCurrentUserAuthorization();
+  const canUnarchive = canUseSettingsCapability(
+    "data-controls",
+    "unarchiveSessions",
+    hasPermission
+  );
+  const [extraSessions, setExtraSessions] = useState<SessionListItem[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-  const [offset, setOffset] = useState(0);
+  const offsetRef = useRef(0);
 
-  const { data, isLoading: loading } = useSWR<{ sessions: SessionItem[] }>(ARCHIVED_SESSIONS_KEY, {
-    onSuccess: (data) => {
-      const fetched = data.sessions || [];
-      setHasMore(fetched.length === PAGE_SIZE);
-      setOffset(fetched.length);
-      setExtraSessions([]);
-      setHiddenIds(new Set());
-    },
-  });
+  const { data, isLoading: loading } = useSWR<SessionListResponse>(
+    ARCHIVED_SESSIONS_KEY,
+    fetchSessionListPage,
+    {
+      onSuccess: (data) => {
+        setHasMore(data.hasMore);
+        offsetRef.current = data.sessions.length;
+        setExtraSessions([]);
+      },
+    }
+  );
 
   const firstPageSessions = data?.sessions ?? [];
-  const sessions = [...firstPageSessions, ...extraSessions].filter((s) => !hiddenIds.has(s.id));
+  const sessions = [...firstPageSessions, ...extraSessions];
 
   const handleLoadMore = useCallback(async () => {
     setLoadingMore(true);
     try {
-      const res = await fetch(`/api/sessions?status=archived&limit=${PAGE_SIZE}&offset=${offset}`);
-      if (res.ok) {
-        const resData = await res.json();
-        const fetched: SessionItem[] = resData.sessions || [];
-        setExtraSessions((prev) => [...prev, ...fetched]);
-        setHasMore(fetched.length === PAGE_SIZE);
-        setOffset((prev) => prev + fetched.length);
-      }
+      const page = await fetchSessionListPage(
+        buildSessionsPageKey({
+          status: "archived",
+          limit: PAGE_SIZE,
+          offset: offsetRef.current,
+        })
+      );
+      setExtraSessions((prev) => [...prev, ...page.sessions]);
+      setHasMore(page.hasMore);
+      offsetRef.current += page.sessions.length;
     } catch (error) {
       console.error("Failed to fetch archived sessions:", error);
     } finally {
       setLoadingMore(false);
     }
-  }, [offset]);
+  }, []);
 
   const handleUnarchive = async (sessionId: string) => {
-    // Optimistically hide from both first-page and extra sessions
-    setHiddenIds((prev) => new Set(prev).add(sessionId));
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/unarchive`, { method: "POST" });
-      if (res.ok) {
-        toast.success("Session unarchived");
-        mutate(SIDEBAR_SESSIONS_KEY);
-        mutate(ARCHIVED_SESSIONS_KEY);
-      } else {
+      const res = await browserApiFetch(`/api/sessions/${sessionId}/unarchive`, {
+        method: "POST",
+      });
+      if (!res.ok) {
         toast.error("Failed to unarchive session");
-        mutate(ARCHIVED_SESSIONS_KEY);
+        return;
       }
+      toast.success("Session unarchived");
+      await mutate<SessionListResponse>(
+        ARCHIVED_SESSIONS_KEY,
+        (current) =>
+          current
+            ? { ...current, sessions: removeSessionFromList(current.sessions, sessionId) }
+            : current,
+        { revalidate: false, populateCache: true }
+      );
+      setExtraSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      // Server-side list shifts down by one, so the next Load more must
+      // start one offset earlier to avoid skipping the session that took
+      // this row's slot.
+      offsetRef.current -= 1;
+      mutate(isUnarchivedSessionListKey);
     } catch {
       toast.error("Failed to unarchive session");
-      mutate(ARCHIVED_SESSIONS_KEY);
     }
   };
 
@@ -100,6 +134,7 @@ export function DataControlsSettings() {
               <ArchivedSessionRow
                 key={session.id}
                 session={session}
+                canUnarchive={canUnarchive}
                 onUnarchive={handleUnarchive}
               />
             ))}
@@ -124,13 +159,15 @@ export function DataControlsSettings() {
 
 function ArchivedSessionRow({
   session,
+  canUnarchive,
   onUnarchive,
 }: {
-  session: SessionItem;
+  session: SessionListItem;
+  canUnarchive: boolean;
   onUnarchive: (id: string) => void;
 }) {
-  const displayTitle = session.title || `${session.repoOwner}/${session.repoName}`;
-  const repoInfo = `${session.repoOwner}/${session.repoName}`;
+  const repoInfo = formatRepoLabel(session.repoOwner, session.repoName);
+  const displayTitle = session.title || repoInfo;
   const timestamp = session.updatedAt || session.createdAt;
   const relativeTime = formatRelativeTime(timestamp);
   return (
@@ -143,14 +180,16 @@ function ArchivedSessionRow({
           <span className="truncate">{repoInfo}</span>
         </div>
       </Link>
-      <Button
-        variant="outline"
-        size="xs"
-        onClick={() => onUnarchive(session.id)}
-        className="flex-shrink-0 opacity-0 group-hover:opacity-100"
-      >
-        Unarchive
-      </Button>
+      {canUnarchive && (
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={() => onUnarchive(session.id)}
+          className="flex-shrink-0 opacity-0 group-hover:opacity-100"
+        >
+          Unarchive
+        </Button>
+      )}
     </div>
   );
 }

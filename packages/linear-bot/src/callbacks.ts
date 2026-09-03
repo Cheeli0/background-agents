@@ -4,7 +4,12 @@
  */
 
 import { Hono } from "hono";
-import type { Env, CompletionCallback, ToolCallCallback } from "./types";
+import type { Env } from "./types";
+import {
+  linearCompletionCallbackSchema,
+  linearToolCallCallbackSchema,
+  type LinearCompletionCallback,
+} from "@open-inspect/shared/types/session-api";
 import {
   getLinearClient,
   emitAgentActivity,
@@ -12,45 +17,39 @@ import {
   updateAgentSession,
 } from "./utils/linear-client";
 import { extractAgentResponse, formatAgentResponse } from "./completion/extractor";
-import { timingSafeEqual } from "@open-inspect/shared";
-import { computeHmacHex } from "./utils/crypto";
+import { resolveAppName } from "@open-inspect/shared/app-name";
 import { makePlan } from "./plan";
 import { createLogger } from "./logger";
+import { createStartCallbackRouter } from "./callbacks/start-callback";
+import { rejectInvalidCallback } from "./callbacks/reject-invalid-callback";
 
 const log = createLogger("callback");
 
-export async function verifyCallbackSignature<T extends { signature: string }>(
-  payload: T,
-  secret: string
-): Promise<boolean> {
-  const { signature, ...data } = payload;
-  const expectedHex = await computeHmacHex(JSON.stringify(data), secret);
-  return timingSafeEqual(signature, expectedHex);
-}
-
-export function isValidPayload(payload: unknown): payload is CompletionCallback {
-  if (!payload || typeof payload !== "object") return false;
-  const p = payload as Record<string, unknown>;
-  return (
-    typeof p.sessionId === "string" &&
-    typeof p.messageId === "string" &&
-    typeof p.success === "boolean" &&
-    typeof p.timestamp === "number" &&
-    typeof p.signature === "string" &&
-    p.context !== null &&
-    typeof p.context === "object" &&
-    typeof (p.context as Record<string, unknown>).issueId === "string"
-  );
+export function formatCompletionComment(
+  appName: string,
+  success: boolean,
+  message: string
+): string {
+  return success
+    ? `## 🤖 ${appName} completed\n\n${message}`
+    : `## ⚠️ ${appName} encountered an issue\n\n${message}`;
 }
 
 export const callbacksRouter = new Hono<{ Bindings: Env }>();
+callbacksRouter.route("/", createStartCallbackRouter());
 
 callbacksRouter.post("/complete", async (c) => {
   const startTime = Date.now();
   const traceId = c.req.header("x-trace-id") || crypto.randomUUID();
-  const payload = await c.req.json();
+  let rawPayload: unknown;
+  try {
+    rawPayload = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid payload" }, 400);
+  }
+  const parsed = linearCompletionCallbackSchema.safeParse(rawPayload);
 
-  if (!isValidPayload(payload)) {
+  if (!parsed.success) {
     log.warn("http.request", {
       trace_id: traceId,
       http_path: "/callbacks/complete",
@@ -61,31 +60,15 @@ callbacksRouter.post("/complete", async (c) => {
     });
     return c.json({ error: "invalid payload" }, 400);
   }
+  const payload = parsed.data;
 
-  if (!c.env.INTERNAL_CALLBACK_SECRET) {
-    log.error("http.request", {
-      trace_id: traceId,
-      http_path: "/callbacks/complete",
-      http_status: 500,
-      outcome: "error",
-      reject_reason: "secret_not_configured",
-      duration_ms: Date.now() - startTime,
-    });
-    return c.json({ error: "not configured" }, 500);
-  }
-
-  const isValid = await verifyCallbackSignature(payload, c.env.INTERNAL_CALLBACK_SECRET);
-  if (!isValid) {
-    log.warn("http.request", {
-      trace_id: traceId,
-      http_path: "/callbacks/complete",
-      http_status: 401,
-      outcome: "rejected",
-      reject_reason: "invalid_signature",
-      duration_ms: Date.now() - startTime,
-    });
-    return c.json({ error: "unauthorized" }, 401);
-  }
+  // Verify the original object because the signature covers its JSON key order.
+  const rejection = await rejectInvalidCallback(c, rawPayload, {
+    path: "/callbacks/complete",
+    traceId,
+    startTime,
+  });
+  if (rejection) return rejection;
 
   c.executionCtx.waitUntil(handleCompletionCallback(payload, c.env, traceId));
 
@@ -94,53 +77,51 @@ callbacksRouter.post("/complete", async (c) => {
 
 // ─── Tool Call Callback ──────────────────────────────────────────────────────
 
-export function formatToolAction(tool: string, args: Record<string, unknown>): string {
+/**
+ * Linear's Agent API requires `action`-typed activities to carry `action` and
+ * `parameter` fields (not `body`). The `action` is the verb shown in the UI,
+ * the `parameter` is the operand. Both fields must be present and non-empty.
+ */
+export function formatToolAction(
+  tool: string,
+  args: Record<string, unknown>
+): { action: string; parameter: string } {
   switch (tool) {
     case "edit_file":
     case "write_file":
-      return `Editing \`${args.filepath || args.path || "file"}\``;
+      return { action: "Edit", parameter: String(args.filepath || args.path || "file") };
     case "read_file":
-      return `Reading \`${args.filepath || args.path || "file"}\``;
+      return { action: "Read", parameter: String(args.filepath || args.path || "file") };
     case "bash":
     case "execute_command": {
       const cmd = String(args.command || args.cmd || "");
-      return `Running \`${cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd}\``;
+      return {
+        action: "Run",
+        parameter: cmd.length > 80 ? cmd.slice(0, 77) + "..." : cmd || "(no command)",
+      };
     }
-    default:
-      return `Using tool: ${tool}`;
+    default: {
+      const firstStringArg = Object.values(args).find((v) => typeof v === "string");
+      return {
+        action: tool,
+        parameter: firstStringArg ? String(firstStringArg).slice(0, 200) : "(no args)",
+      };
+    }
   }
-}
-
-export function buildToolProgressActivity(
-  tool: string,
-  args: Record<string, unknown>
-): { type: "thought"; body: string } {
-  return {
-    // Linear rejected the previous "action" content shape here. Use a supported text activity.
-    type: "thought",
-    body: formatToolAction(tool, args),
-  };
-}
-
-export function isValidToolCallPayload(payload: unknown): payload is ToolCallCallback {
-  if (!payload || typeof payload !== "object") return false;
-  const p = payload as Record<string, unknown>;
-  return (
-    typeof p.sessionId === "string" &&
-    typeof p.tool === "string" &&
-    typeof p.timestamp === "number" &&
-    typeof p.signature === "string" &&
-    p.context !== null &&
-    typeof p.context === "object"
-  );
 }
 
 callbacksRouter.post("/tool_call", async (c) => {
   const startTime = Date.now();
   const traceId = c.req.header("x-trace-id") || crypto.randomUUID();
-  const payload = await c.req.json();
+  let rawPayload: unknown;
+  try {
+    rawPayload = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid payload" }, 400);
+  }
+  const parsed = linearToolCallCallbackSchema.safeParse(rawPayload);
 
-  if (!isValidToolCallPayload(payload)) {
+  if (!parsed.success) {
     log.warn("http.request", {
       trace_id: traceId,
       http_path: "/callbacks/tool_call",
@@ -151,39 +132,23 @@ callbacksRouter.post("/tool_call", async (c) => {
     });
     return c.json({ error: "invalid payload" }, 400);
   }
+  const payload = parsed.data;
 
-  if (!c.env.INTERNAL_CALLBACK_SECRET) {
-    log.error("http.request", {
-      trace_id: traceId,
-      http_path: "/callbacks/tool_call",
-      http_status: 500,
-      outcome: "error",
-      reject_reason: "secret_not_configured",
-      duration_ms: Date.now() - startTime,
-    });
-    return c.json({ error: "not configured" }, 500);
-  }
-
-  const isValid = await verifyCallbackSignature(payload, c.env.INTERNAL_CALLBACK_SECRET);
-  if (!isValid) {
-    log.warn("http.request", {
-      trace_id: traceId,
-      http_path: "/callbacks/tool_call",
-      http_status: 401,
-      outcome: "rejected",
-      reject_reason: "invalid_signature",
-      session_id: payload.sessionId,
-      duration_ms: Date.now() - startTime,
-    });
-    return c.json({ error: "unauthorized" }, 401);
-  }
+  // Verify the original object because the signature covers its JSON key order.
+  const rejection = await rejectInvalidCallback(c, rawPayload, {
+    path: "/callbacks/tool_call",
+    traceId,
+    startTime,
+    sessionId: payload.sessionId,
+  });
+  if (rejection) return rejection;
 
   c.executionCtx.waitUntil(
     (async () => {
       const processStart = Date.now();
       const { context } = payload;
 
-      if (!context.agentSessionId || !context.organizationId) {
+      if (!context.agentSessionId || !context.organizationId || !context.appUserId) {
         log.debug("callback.tool_call", {
           trace_id: traceId,
           session_id: payload.sessionId,
@@ -209,7 +174,7 @@ callbacksRouter.post("/tool_call", async (c) => {
         return;
       }
 
-      const client = await getLinearClient(c.env, context.organizationId);
+      const client = await getLinearClient(c.env, context.organizationId, context.appUserId);
       if (!client) {
         log.warn("callback.tool_call", {
           trace_id: traceId,
@@ -225,10 +190,11 @@ callbacksRouter.post("/tool_call", async (c) => {
       }
 
       try {
+        const { action, parameter } = formatToolAction(payload.tool, payload.args);
         await emitAgentActivity(
           client,
           context.agentSessionId,
-          buildToolProgressActivity(payload.tool, payload.args),
+          { type: "action", action, parameter },
           true
         );
         log.info("callback.tool_call", {
@@ -258,26 +224,8 @@ callbacksRouter.post("/tool_call", async (c) => {
 
 // ─── Completion Callback ─────────────────────────────────────────────────────
 
-export function buildFailureMessage(params: {
-  textContent?: string;
-  agentError?: string;
-  payloadError?: string;
-}): string {
-  const textContent = params.textContent?.trim();
-  if (textContent) {
-    return `The agent encountered an error.\n\n${textContent.slice(0, 500)}`;
-  }
-
-  const errorMessage = (params.agentError || params.payloadError)?.trim();
-  if (errorMessage) {
-    return `The agent encountered an error.\n\n${errorMessage.slice(0, 500)}`;
-  }
-
-  return "The agent was unable to complete this task.";
-}
-
 async function handleCompletionCallback(
-  payload: CompletionCallback,
+  payload: LinearCompletionCallback,
   env: Env,
   traceId?: string
 ): Promise<void> {
@@ -287,7 +235,6 @@ async function handleCompletionCallback(
   try {
     // Extract rich agent response from events
     const agentResponse = await extractAgentResponse(env, sessionId, payload.messageId, traceId);
-    agentResponse.error = agentResponse.error || payload.error;
 
     let message: string;
     let activityType: "response" | "error";
@@ -297,21 +244,36 @@ async function handleCompletionCallback(
       message = formatAgentResponse(agentResponse);
     } else {
       activityType = "error";
-      message = buildFailureMessage({
-        textContent: agentResponse.textContent,
-        agentError: agentResponse.error,
-        payloadError: payload.error,
-      });
+      if (agentResponse.textContent) {
+        message = `The agent encountered an error.\n\n${agentResponse.textContent.slice(0, 500)}`;
+      } else {
+        message = `The agent was unable to complete this task.`;
+      }
     }
 
     // Emit via Agent API if we have session context
-    if (context.agentSessionId && context.organizationId) {
-      const client = await getLinearClient(env, context.organizationId);
+    if (context.agentSessionId && context.organizationId && context.appUserId) {
+      const client = await getLinearClient(env, context.organizationId, context.appUserId);
       if (client) {
-        await emitAgentActivity(client, context.agentSessionId, {
+        const activityDelivered = await emitAgentActivity(client, context.agentSessionId, {
           type: activityType,
           body: message,
         });
+        if (!activityDelivered) {
+          log.error("callback.complete", {
+            trace_id: traceId,
+            session_id: sessionId,
+            issue_id: context.issueId,
+            issue_identifier: context.issueIdentifier,
+            agent_session_id: context.agentSessionId,
+            outcome: "error",
+            agent_success: payload.success,
+            delivery: "agent_activity",
+            delivery_outcome: "error",
+            duration_ms: Date.now() - startTime,
+          });
+          return;
+        }
 
         // Update plan to completed/failed
         await updateAgentSession(client, context.agentSessionId, {
@@ -362,9 +324,7 @@ async function handleCompletionCallback(
       return;
     }
 
-    const commentBody = payload.success
-      ? `## 🤖 Open-Inspect completed\n\n${message}`
-      : `## ⚠️ Open-Inspect encountered an issue\n\n${message}`;
+    const commentBody = formatCompletionComment(resolveAppName(env), payload.success, message);
 
     const result = await postIssueComment(env.LINEAR_API_KEY, context.issueId, commentBody);
 

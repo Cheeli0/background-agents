@@ -11,7 +11,9 @@ The control plane provides:
 - **Multi-client Sync**: Web, Slack, extension clients all see the same state
 - **GitHub Integration**: GitHub App for repository access
 - **Token Encryption**: AES-256-GCM encryption for GitHub tokens at rest
-- **Repo Secrets**: Encrypted repo-scoped secrets stored in D1, injected into sandboxes as env vars
+- **Secrets**: Encrypted global, repo-scoped, and environment-scoped secrets stored in D1, injected
+  into sandboxes as env vars
+- **Environments**: Named repository sets with their own secrets and prebuilt images, stored in D1
 
 ## Architecture
 
@@ -37,7 +39,8 @@ The control plane provides:
 │  │  └────────────────┘                                       │   │
 │  └───────────────────────────────────────────────────────────┘   │
 │  ┌───────────────────────────────────────────────────────────┐   │
-│  │              D1 Database (repo-scoped secrets)              │   │
+│  │   D1 Database (sessions index, environments, automations,   │   │
+│  │              image builds, encrypted secrets)               │   │
 │  └───────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -52,23 +55,25 @@ The control plane provides:
 
 ### Sessions
 
-| Endpoint                     | Method    | Description              |
-| ---------------------------- | --------- | ------------------------ |
-| `/sessions`                  | GET       | List user's sessions     |
-| `/sessions`                  | POST      | Create new session       |
-| `/sessions/:id`              | GET       | Get session state        |
-| `/sessions/:id`              | DELETE    | Delete session           |
-| `/sessions/:id/prompt`       | POST      | Enqueue prompt           |
-| `/sessions/:id/stop`         | POST      | Stop execution           |
-| `/sessions/:id/ws`           | WebSocket | Real-time connection     |
-| `/sessions/:id/events`       | GET       | Paginated events         |
-| `/sessions/:id/artifacts`    | GET       | List artifacts           |
-| `/sessions/:id/participants` | GET/POST  | Manage participants      |
-| `/sessions/:id/messages`     | GET       | List messages            |
-| `/sessions/:id/pr`           | POST      | Create pull request      |
-| `/sessions/:id/ws-token`     | POST      | Generate WebSocket token |
-| `/sessions/:id/archive`      | POST      | Archive session          |
-| `/sessions/:id/unarchive`    | POST      | Unarchive session        |
+| Endpoint                        | Method    | Description                    |
+| ------------------------------- | --------- | ------------------------------ |
+| `/sessions`                     | GET       | List workspace sessions        |
+| `/sessions`                     | POST      | Create new session             |
+| `/sessions/:id`                 | GET       | Get canonical session snapshot |
+| `/sessions/:id`                 | DELETE    | Delete session                 |
+| `/sessions/:id/sandbox-access`  | GET       | Get sandbox connection details |
+| `/sessions/:id/prompt`          | POST      | Enqueue prompt                 |
+| `/sessions/:id/stop`            | POST      | Stop execution                 |
+| `/sessions/:id/ws`              | WebSocket | Real-time connection           |
+| `/sessions/:id/events`          | GET       | Paginated events               |
+| `/sessions/:id/artifacts`       | GET       | List artifacts                 |
+| `/sessions/:id/participants`    | GET       | List runtime participants      |
+| `/sessions/:id/messages`        | GET       | List messages                  |
+| `/sessions/:id/pr`              | POST      | Create pull request            |
+| `/sessions/:id/scm-credentials` | POST      | Broker sandbox git credentials |
+| `/sessions/:id/ws-token`        | POST      | Generate WebSocket token       |
+| `/sessions/:id/archive`         | POST      | Archive session                |
+| `/sessions/:id/unarchive`       | POST      | Unarchive session              |
 
 ### Create PR Payload
 
@@ -82,6 +87,30 @@ The control plane provides:
 When `headBranch` is omitted, control-plane resolves it from session state and finally falls back to
 the generated `open-inspect/<session>` branch.
 
+A session can hold multiple pull requests per repository — one open PR per head branch. Calling the
+endpoint again for a head branch that already carries an open PR force-pushes the branch and reuses
+that PR instead of creating a duplicate; the response marks this with `updated: true`. A merged or
+closed PR releases its head branch for a fresh PR. The success response is
+`{ prNumber, prUrl, state, headBranch, baseBranch, updated }`.
+
+### SCM Credentials
+
+`POST /sessions/:id/scm-credentials` is a sandbox-authenticated endpoint used by the in-sandbox git
+credential helper. It returns fresh SCM credentials for git operations in this shape:
+
+```json
+{
+  "username": "x-access-token",
+  "password": "<short-lived-token>",
+  "expires_at_epoch_ms": 1730000000000
+}
+```
+
+Common failures are `401` for a missing or invalid sandbox token, `404` when the session no longer
+exists, and `5xx` when provider configuration or upstream token minting fails. Source-control
+providers must implement `generateCredentialHelperAuth` before helper-backed sandbox git auth works
+for that provider.
+
 ### Repositories
 
 | Endpoint                           | Method | Description          |
@@ -92,6 +121,93 @@ the generated `open-inspect/<session>` branch.
 | `/repos/:owner/:name/secrets`      | GET    | List secret keys     |
 | `/repos/:owner/:name/secrets`      | PUT    | Upsert secrets       |
 | `/repos/:owner/:name/secrets/:key` | DELETE | Delete a secret      |
+
+### Environments
+
+An environment is a named, ordered repository set (1–10 repositories, first = primary) that sessions
+can be launched from. `POST /sessions` accepts exactly one of the scalar repo fields
+(`repoOwner`/`repoName`), a `repositories` list (ad-hoc multi-repository session), or an
+`environmentId`.
+
+| Endpoint                           | Method | Description                                                                     |
+| ---------------------------------- | ------ | ------------------------------------------------------------------------------- |
+| `/environments`                    | GET    | List environments                                                               |
+| `/environments`                    | POST   | Create environment                                                              |
+| `/environments/:id`                | GET    | Get environment with repositories                                               |
+| `/environments/:id`                | PUT    | Update name, description, repositories, prebuild, or Slack channel associations |
+| `/environments/:id`                | DELETE | Delete environment (sessions keep their snapshot)                               |
+| `/environments/:id/secrets`        | GET    | List environment secret keys                                                    |
+| `/environments/:id/secrets`        | PUT    | Upsert environment secrets                                                      |
+| `/environments/:id/secrets/:key`   | DELETE | Delete an environment secret                                                    |
+| `/environments/:id/secrets/import` | POST   | Copy selected keys from a repository of the env                                 |
+
+Environments can also carry integration-setting overrides — the top layer of the resolution chain
+(global defaults → primary-repo overrides → environment overrides), applied to sessions launched
+from the environment and to its image builds. Only the session-scoped integrations (`sandbox`,
+`code-server`) accept this level:
+
+| Endpoint                                        | Method         | Description                         |
+| ----------------------------------------------- | -------------- | ----------------------------------- |
+| `/integration-settings/:id/environments/:envId` | GET/PUT/DELETE | Environment-level setting overrides |
+
+### Image Builds
+
+One scope-generic route family manages prebuilt images for both scope kinds — `repo` (a
+one-repository set on the default branch, `scope_id = "owner/name"` lowercase) and `environment`
+(the environment's ordered repository set, `scope_id` = environment id). Build ids are `imgb-…`;
+statuses are `building | ready | failed | superseded`.
+
+| Endpoint                                     | Method | Description                                                                                                                                                          |
+| -------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/image-builds/build-complete`               | POST   | Success callback from image builders (public route, callback-authenticated)                                                                                          |
+| `/image-builds/build-failed`                 | POST   | Failure callback from image builders (public route, callback-authenticated)                                                                                          |
+| `/image-builds/trigger/repo/:owner/:name`    | POST   | Trigger a repo-scope build manually                                                                                                                                  |
+| `/image-builds/trigger/environment/:id`      | POST   | Trigger an environment-scope build manually                                                                                                                          |
+| `/image-builds/toggle/repo/:owner/:name`     | PUT    | Toggle repo prebuilds (`repo_metadata.image_build_enabled`); toggling on triggers a build. The environment toggle stays on the environments CRUD (`prebuildEnabled`) |
+| `/image-builds/status`                       | GET    | Cross-scope aggregate over every prebuild-enabled scope — excludes superseded, includes failed                                                                       |
+| `/image-builds/status?scope_kind=&scope_id=` | GET    | One scope's recent non-superseded builds (settings/debug view)                                                                                                       |
+| `/image-builds/enabled`                      | GET    | Settings feed: enabled scope identities with their current repository-set fingerprints                                                                               |
+
+Every provider uses the same callback contract. The control plane creates a dormant provider
+session, binds its opaque id to the build row, and only then starts the runtime. The runtime calls
+back with a single-use bearer token minted at trigger time; only its HMAC hash is stored and the
+callback must present the exact bound provider session id.
+
+Callbacks atomically accept the payload in D1 before publishing a small, secret-free command to
+Cloudflare Queue. The Queue consumer then leases the accepted row, snapshots/checkpoints the
+provider session, persists the artifact, transitions the row to `ready` or `superseded`, and
+performs idempotent session cleanup. This keeps provider operations outside the Worker's
+request-lifetime durability window and makes retries safe across all providers.
+
+### Automations
+
+| Endpoint                          | Method | Description                                                             |
+| --------------------------------- | ------ | ----------------------------------------------------------------------- |
+| `/automations`                    | GET    | List automations                                                        |
+| `/automations`                    | POST   | Create automation                                                       |
+| `/automations/:id`                | GET    | Get automation                                                          |
+| `/automations/:id`                | PUT    | Update automation                                                       |
+| `/automations/:id`                | DELETE | Soft-delete automation                                                  |
+| `/automations/:id/pause`          | POST   | Pause (stop firing)                                                     |
+| `/automations/:id/resume`         | POST   | Resume; resets the failure counter                                      |
+| `/automations/:id/trigger`        | POST   | Fire now → `201 {invocationId, runs}`, `409` if an invocation is active |
+| `/automations/:id/invocations`    | GET    | Run history: one entry per firing, with child runs                      |
+| `/automations/:id/runs/:runId`    | GET    | Get one run                                                             |
+| `/automations/:id/regenerate-key` | POST   | Rotate a webhook automation's API key                                   |
+
+An automation targets repositories (`repositories: [{repoOwner, repoName, baseBranch?}]`) and/or
+environments (`environmentIds: ["env_…"]`) — up to 10 combined; multi-target selections require a
+schedule trigger, and the repo-scoped `github_event`/`linear_event` triggers take exactly one
+repository and no environments. Each firing records one **invocation**; a non-skipped invocation
+fans out into one **run** per target, and each run links to one session. A repository run works that
+repository in its own session; an environment run opens the environment's full workspace, resolved
+at launch time. Runs snapshot their target at firing time, so editing the selection never rewrites
+history. See [docs/MULTI_REPO_AUTOMATIONS.md](../../docs/MULTI_REPO_AUTOMATIONS.md) for the design
+decisions.
+
+An invocation's status is **derived from its child runs, never stored**: no children → `skipped`;
+any child starting/running → `starting`/`running`; all terminal → `completed` (none failed),
+`failed` (none completed), `partial_failed` (a mix), or `skipped` (all skipped).
 
 ## WebSocket Protocol
 
@@ -166,24 +282,112 @@ Each session gets its own SQLite database with:
 - `messages`: Prompt queue and history
 - `events`: Agent events (tool calls, tokens)
 - `artifacts`: PRs, screenshots, previews
-- `sandbox`: Modal sandbox state
+- `sandbox`: selected backend sandbox state
 - `ws_client_mapping`: WebSocket ID to participant mapping (for hibernation recovery)
 
 See `src/session/schema.ts` for full schema.
 
-## Token Encryption
+## D1 Schema (sessions, environments, automations)
 
-GitHub OAuth tokens are encrypted at rest using AES-256-GCM:
+Shared state lives in the D1 database (migrations in `terraform/d1/migrations/`). Beyond the
+sessions index, repo metadata, and encrypted secrets:
 
-```typescript
-import { encryptToken, decryptToken } from "./auth/crypto";
+- `session_repositories`: a session's ordered repository list (position 0 = primary; single-repo
+  sessions also mirror the primary onto the session row's scalar columns).
+- `environments`: named repository sets (name, description, prebuild flag, Slack channel
+  associations).
+- `environment_repositories`: the environment's ordered repository list with per-repository base
+  branch.
+- `environment_secrets`: environment-scoped secrets, mirroring `repo_secrets` (same encryption key
+  and caps).
+- `image_builds`: the unified prebuilt-image registry for both scope kinds (`scope_kind` +
+  `scope_id` columns) — provider artifact id, per-repository SHAs (`repository_shas`), a
+  repositories fingerprint for spawn matching, the runtime version for the compatibility-floor
+  check, callback-token state, Queue-finalization lease state, and provider-session cleanup state.
+  Replaces the former `repo_images` and `environment_images` tables (dropped in migrations
+  0039/0040). The control-plane scheduler naturally rebuilds enabled scopes; no legacy backfill job
+  is required.
+- `integration_environment_settings`: environment-level integration-setting overrides (sandbox,
+  code-server), the top layer above `integration_settings` (global) and `integration_repo_settings`
+  (per-repo).
 
-// Encrypt before storing
-const encrypted = await encryptToken(accessToken, env.TOKEN_ENCRYPTION_KEY);
+Automations:
 
-// Decrypt when needed
-const token = await decryptToken(encrypted, env.TOKEN_ENCRYPTION_KEY);
-```
+- `automations`: trigger, schedule, model, instructions, failure counter. The target selection lives
+  in `automation_repositories` and `automation_environments`, not on this row.
+- `automation_environments`: the live environment selection (one row per targeted environment,
+  unique per `(automation_id, environment_id)`).
+- `automation_repositories`: the live repository selection (0–10 rows per automation), unique per
+  `(automation_id, repo_owner, repo_name)`.
+- `automation_invocations`: one thin row per firing — source, firing-scoped `trigger_key` (event
+  dedup, UNIQUE per automation) and `concurrency_key`, `skip_reason` for childless skips, and the
+  `failure_counted_at` compare-and-set stamp that makes auto-pause accounting exactly-once. Status
+  is **not** stored; it is derived from child runs (`DERIVED_INVOCATION_STATUS_SQL` in
+  `src/db/automation-store.ts` is the single definition).
+- `automation_runs`: one row per repository per invocation, linked by `invocation_id`, carrying the
+  firing-time repository snapshot (`repo_owner/repo_name/repo_id/base_branch`) and the session
+  linkage. Firing keys live on the invocation, not the run.
+
+## Browser Authentication
+
+The control plane is the browser authentication authority and runs exact-pinned Better Auth. The
+Next.js web app is a BFF: it proxies a small `/api/auth/*` allowlist with its `sig1` service
+credential and never stores provider secrets.
+
+Browser resource requests require both the signed `service:web` channel and Better Auth's opaque
+session cookie. The application principal is the canonical `users.id`, and the authentication
+context contains only the browser-session and signed-channel evidence. Provider-specific credential
+authorities resolve linked accounts on demand for workflows such as GitHub SCM enrichment; linked
+accounts do not participate in browser-session authentication.
+
+Terraform configures `WEB_APP_URL`, provider credentials, admission allowlists, and
+`BROWSER_AUTH_SECRET` on this worker. `WEB_APP_URL` must be the exact browser-visible HTTPS origin,
+except that an HTTP loopback origin is accepted for local development.
+
+A complete GitHub or Google OAuth credential pair enables that sign-in provider; partial pairs and
+an empty provider set fail closed. Google requires verified-email/domain admission (or explicit
+unsafe allow-all), while GitHub may also use username or organization admission. The normalized
+runtime constructs Better Auth and the immutable provider list from the same configuration.
+`GET /internal/auth/sign-in-providers` exposes only those identifiers to signed `service:web`
+requests so the React `/login` route can render them server-side.
+
+## Credential Encryption
+
+Three independent key domains protect stored credentials. Rotation guidance differs — never treat
+them as interchangeable during an incident:
+
+- **`TOKEN_ENCRYPTION_KEY`** — AES-256-GCM for the SCM enrichment tokens in `user_scm_tokens`:
+
+  ```typescript
+  import { encryptToken, decryptToken } from "./auth/crypto";
+
+  // Encrypt before storing
+  const encrypted = await encryptToken(accessToken, env.TOKEN_ENCRYPTION_KEY);
+
+  // Decrypt when needed
+  const token = await decryptToken(encrypted, env.TOKEN_ENCRYPTION_KEY);
+  ```
+
+  Rotating it invalidates stored SCM tokens; affected users re-link their SCM connection.
+
+- **`BROWSER_AUTH_SECRET`** — Better Auth's secret. It signs browser session cookies **and**
+  encrypts the sign-in OAuth credential columns on `user_identities` (`access_token`,
+  `refresh_token`, `id_token`, written at web sign-in and read via `auth.api.getAccessToken`).
+  Rotating it signs every browser session out and orphans those stored credentials — they
+  re-populate at each user's next sign-in. It does not affect `user_scm_tokens`.
+
+- **`PROVIDER_ACCOUNTS_ENCRYPTION_KEY`** — dedicated AES-256-GCM key for subscription-provider
+  account credentials. Provider account mode stores only account references on sessions and brokers
+  short-lived access through `POST /sessions/:id/provider-auth/:provider/access-token`. Rotation
+  requires an explicit migration that can decrypt every credential with the old key and re-encrypt
+  it with the new key while both are available, then verifies the migrated data before changing the
+  Worker binding. Reconnecting accounts does not migrate already encrypted rows. If the old key is
+  lost, remove affected defaults and archive/recreate the accounts; sessions bound to the lost
+  credentials are unrecoverable and must be recreated.
+
+Legacy scoped OpenAI/xAI OAuth and provider accounts can coexist. Explicit choices and provider
+defaults apply to newly created sessions; sessions without either retain legacy scoped behavior.
+Existing sessions remain pinned to their stored authentication mode.
 
 ## Security Model
 
@@ -194,14 +398,25 @@ const token = await decryptToken(encrypted, env.TOKEN_ENCRYPTION_KEY);
 
 The system uses two types of GitHub tokens:
 
-| Token            | Used For    | Sent to Sandbox? | Access Scope                     |
-| ---------------- | ----------- | ---------------- | -------------------------------- |
-| GitHub App Token | Clone, push | Yes (ephemeral)  | All repos where App is installed |
-| User OAuth Token | Create PRs  | No (server-only) | User's accessible repos          |
+| Token            | Used For           | Delivery                      | Access Scope                     |
+| ---------------- | ------------------ | ----------------------------- | -------------------------------- |
+| GitHub App Token | Clone, fetch, push | Brokered to credential helper | All repos where App is installed |
+| User OAuth Token | Create PRs         | Server-only                   | User's accessible repos          |
+
+Fresh and prebuilt-image sandboxes do not receive a long-lived `GITHUB_TOKEN`, `GITHUB_APP_TOKEN`,
+or `VCS_CLONE_TOKEN` for normal git operations. Git invokes the sandbox credential helper, which
+calls `/sessions/:id/scm-credentials` with the sandbox auth token and receives short-lived
+credentials on demand. Legacy snapshots and one-shot image builds may still receive env-token
+fallbacks for compatibility. The helper preserves the existing installation-wide model by serving
+credentials for HTTPS git requests to the configured SCM host, including setup/start hooks that
+clone auxiliary private repos. This avoids stale embedded credentials in long-running sessions and
+Daytona persistent resumes; Modal snapshot restores still mint a fresh fallback token during
+restore.
 
 If a `create-pr` request is triggered by a participant without a user OAuth token (for example,
-Slack-created sessions), the control-plane still pushes the branch with the GitHub App token and
-returns a manual GitHub `pull/new` URL instead of failing the request.
+Slack-created or Google-login sessions), the sandbox can still push the branch with brokered GitHub
+App credentials and the control plane returns a manual GitHub `pull/new` URL instead of failing the
+request.
 
 ### Why This Matters
 
@@ -221,6 +436,10 @@ All secrets are configured via Terraform. Required secrets include:
 - `REPO_SECRETS_ENCRYPTION_KEY` - AES-GCM key for encrypting repo secrets in D1
 
 Optional variables:
+
+- `provider_accounts_encryption_key` - Existing Base64 AES-256-GCM key override for provider account
+  credentials. When blank, Terraform generates a key and persists it in state. In both cases,
+  Terraform supplies the required `PROVIDER_ACCOUNTS_ENCRYPTION_KEY` Worker secret binding.
 
 - `SCM_PROVIDER` - Source control provider for this deployment (`github`, `bitbucket`, or `gitlab`,
   default: `github`). `bitbucket` returns explicit `501 Not Implemented` responses until
@@ -252,6 +471,7 @@ for the complete list.
 | Token encryption works             | Store/retrieve token, verify matches  |
 | Prompt queue ordering              | Enqueue 3 prompts, verify FIFO        |
 | Session survives DO eviction       | Create, wait, reconnect, verify state |
+| Sandbox survives WebSocket close   | Close with 1000/1001, reconnect       |
 | Ping/pong WebSocket health         | Send ping, verify pong                |
 | Typing triggers sandbox warm       | Send typing, verify warming event     |
 | Presence sync on connect           | Connect 2 clients, verify presence    |

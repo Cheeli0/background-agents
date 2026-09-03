@@ -1,25 +1,15 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { SELF, env } from "cloudflare:test";
-import { generateInternalToken } from "../../src/auth/internal";
+import { SELF } from "cloudflare:test";
 import { cleanD1Tables } from "./cleanup";
-
-async function authHeaders(): Promise<Record<string, string>> {
-  const token = await generateInternalToken(env.INTERNAL_CALLBACK_SECRET!);
-  return {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
-}
+import { serviceFetch } from "./helpers";
 
 describe("Global secrets API", () => {
   beforeEach(cleanD1Tables);
 
   describe("PUT /secrets", () => {
     it("creates global secrets", async () => {
-      const headers = await authHeaders();
-      const response = await SELF.fetch("https://test.local/secrets", {
+      const response = await serviceFetch("https://test.local/secrets", {
         method: "PUT",
-        headers,
         body: JSON.stringify({ secrets: { MY_KEY: "my-value" } }),
       });
       expect(response.status).toBe(200);
@@ -30,23 +20,29 @@ describe("Global secrets API", () => {
     });
 
     it("rejects reserved keys", async () => {
-      const headers = await authHeaders();
-      const response = await SELF.fetch("https://test.local/secrets", {
+      const response = await serviceFetch("https://test.local/secrets", {
         method: "PUT",
-        headers,
         body: JSON.stringify({ secrets: { PATH: "nope" } }),
       });
       expect(response.status).toBe(400);
     });
 
     it("rejects requests without body", async () => {
-      const headers = await authHeaders();
-      const response = await SELF.fetch("https://test.local/secrets", {
+      const response = await serviceFetch("https://test.local/secrets", {
         method: "PUT",
-        headers,
         body: JSON.stringify({}),
       });
       expect(response.status).toBe(400);
+    });
+
+    it("rejects non-string secret values with the shared request error", async () => {
+      const response = await serviceFetch("https://test.local/secrets", {
+        method: "PUT",
+        body: JSON.stringify({ secrets: { TOKEN: 123 } }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Request body must include secrets object" });
     });
 
     it("returns 401 without auth", async () => {
@@ -61,24 +57,20 @@ describe("Global secrets API", () => {
 
   describe("GET /secrets", () => {
     it("lists global secret keys", async () => {
-      const headers = await authHeaders();
-
       // Create secrets first
-      await SELF.fetch("https://test.local/secrets", {
+      await serviceFetch("https://test.local/secrets", {
         method: "PUT",
-        headers,
         body: JSON.stringify({ secrets: { ALPHA: "1", BETA: "2" } }),
       });
 
-      const response = await SELF.fetch("https://test.local/secrets", { headers });
+      const response = await serviceFetch("https://test.local/secrets");
       expect(response.status).toBe(200);
       const body = await response.json<{ secrets: Array<{ key: string }> }>();
       expect(body.secrets.map((s) => s.key)).toEqual(["ALPHA", "BETA"]);
     });
 
     it("returns empty list when no secrets exist", async () => {
-      const headers = await authHeaders();
-      const response = await SELF.fetch("https://test.local/secrets", { headers });
+      const response = await serviceFetch("https://test.local/secrets");
       expect(response.status).toBe(200);
       const body = await response.json<{ secrets: unknown[] }>();
       expect(body.secrets).toEqual([]);
@@ -87,17 +79,13 @@ describe("Global secrets API", () => {
 
   describe("DELETE /secrets/:key", () => {
     it("deletes an existing global secret", async () => {
-      const headers = await authHeaders();
-
-      await SELF.fetch("https://test.local/secrets", {
+      await serviceFetch("https://test.local/secrets", {
         method: "PUT",
-        headers,
         body: JSON.stringify({ secrets: { TO_DELETE: "val" } }),
       });
 
-      const response = await SELF.fetch("https://test.local/secrets/TO_DELETE", {
+      const response = await serviceFetch("https://test.local/secrets/TO_DELETE", {
         method: "DELETE",
-        headers,
       });
       expect(response.status).toBe(200);
       const body = await response.json<{ status: string; key: string }>();
@@ -105,16 +93,14 @@ describe("Global secrets API", () => {
       expect(body.key).toBe("TO_DELETE");
 
       // Verify it's gone
-      const listRes = await SELF.fetch("https://test.local/secrets", { headers });
+      const listRes = await serviceFetch("https://test.local/secrets");
       const listBody = await listRes.json<{ secrets: unknown[] }>();
       expect(listBody.secrets).toEqual([]);
     });
 
     it("returns 404 for nonexistent key", async () => {
-      const headers = await authHeaders();
-      const response = await SELF.fetch("https://test.local/secrets/NOPE", {
+      const response = await serviceFetch("https://test.local/secrets/NOPE", {
         method: "DELETE",
-        headers,
       });
       expect(response.status).toBe(404);
     });

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ParticipantRow } from "../../types";
-import { createParticipantsHandler } from "./participants.handler";
+import { ParticipantsHandler } from "./participants.handler";
+import type { ParticipantRepository } from "../../participant-repository";
 
 function createParticipant(overrides: Partial<ParticipantRow> = {}): ParticipantRow {
   return {
@@ -10,6 +11,7 @@ function createParticipant(overrides: Partial<ParticipantRow> = {}): Participant
     scm_login: "octocat",
     scm_email: "octocat@example.com",
     scm_name: "The Octocat",
+    auth_name: null,
     role: "member",
     scm_access_token_encrypted: "enc-access",
     scm_refresh_token_encrypted: "enc-refresh",
@@ -26,7 +28,7 @@ function createHandler() {
     listParticipants: vi.fn(),
   };
 
-  const handler = createParticipantsHandler({ repository });
+  const handler = new ParticipantsHandler(repository as unknown as ParticipantRepository);
 
   return {
     handler,
@@ -34,7 +36,7 @@ function createHandler() {
   };
 }
 
-describe("createParticipantsHandler", () => {
+describe("ParticipantsHandler", () => {
   it("returns an empty list when there are no participants", async () => {
     const { handler, repository } = createHandler();
     repository.listParticipants.mockReturnValue([]);
@@ -54,6 +56,7 @@ describe("createParticipantsHandler", () => {
         user_id: "user-2",
         scm_login: "hubot",
         scm_name: "Hubot",
+        auth_name: null,
         role: "owner",
         joined_at: 2,
       }),

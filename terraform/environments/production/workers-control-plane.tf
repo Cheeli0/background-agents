@@ -2,29 +2,37 @@
 # Cloudflare Workers
 # =============================================================================
 
-# Build control-plane worker bundle during plan so cloudflare_worker_version
-# reads the same dist/index.js bytes at plan and apply time.
-data "external" "control_plane_build" {
-  program = ["bash", "-c", <<-EOF
-    cd ${var.project_root}
-    npm run build -w @open-inspect/shared >&2
-    npm run build -w @open-inspect/control-plane >&2
-    if command -v sha256sum >/dev/null 2>&1; then
-      hash=$(sha256sum packages/control-plane/dist/index.js | cut -d' ' -f1)
-    else
-      hash=$(shasum -a 256 packages/control-plane/dist/index.js | cut -d' ' -f1)
-    fi
-    echo "{\"hash\": \"$hash\"}"
-  EOF
-  ]
+resource "cloudflare_queue" "image_build_finalization" {
+  account_id = var.cloudflare_account_id
+  queue_name = "open-inspect-image-build-finalization-${local.name_suffix}"
+}
+
+resource "cloudflare_queue" "image_build_finalization_dlq" {
+  account_id = var.cloudflare_account_id
+  queue_name = "open-inspect-image-build-finalization-dlq-${local.name_suffix}"
+}
+
+# Build control-plane worker bundle (only runs during apply, not plan)
+resource "null_resource" "control_plane_build" {
+  triggers = {
+    # Rebuild when source files change - use timestamp to always check
+    # In CI, this ensures fresh builds; locally, npm handles caching
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    command     = "npm run build"
+    working_dir = "${var.project_root}/packages/control-plane"
+  }
 }
 
 module "control_plane_worker" {
   source = "../../modules/cloudflare-worker"
 
-  account_id  = var.cloudflare_account_id
-  worker_name = "open-inspect-control-plane-${local.name_suffix}"
-  script_path = local.control_plane_script_path
+  account_id       = var.cloudflare_account_id
+  worker_name      = "open-inspect-control-plane-${local.name_suffix}"
+  worker_subdomain = var.cloudflare_worker_subdomain
+  script_path      = local.control_plane_script_path
 
   kv_namespaces = [
     {
@@ -47,6 +55,27 @@ module "control_plane_worker" {
     }
   ]
 
+  # These bindings provide read-only queue metrics to the operator health
+  # check. Autofix production remains owned by the GitHub bot.
+  queue_bindings = concat(
+    [
+      {
+        binding_name = "IMAGE_BUILD_FINALIZATION_QUEUE"
+        queue_name   = cloudflare_queue.image_build_finalization.queue_name
+      }
+    ],
+    var.enable_github_bot ? [
+      {
+        binding_name = "AUTOFIX_QUEUE"
+        queue_name   = cloudflare_queue.github_autofix[0].queue_name
+      },
+      {
+        binding_name = "AUTOFIX_DLQ"
+        queue_name   = cloudflare_queue.github_autofix_dlq[0].queue_name
+      }
+    ] : []
+  )
+
   service_bindings = concat(
     var.enable_slack_bot ? [
       {
@@ -66,46 +95,125 @@ module "control_plane_worker" {
 
   plain_text_bindings = concat(
     [
-      { name = "GITHUB_CLIENT_ID", value = var.github_client_id },
       { name = "WEB_APP_URL", value = local.web_app_url },
+      { name = "ALLOWED_USERS", value = var.allowed_users },
+      { name = "ALLOWED_EMAIL_DOMAINS", value = var.allowed_email_domains },
+      { name = "ALLOWED_EMAILS", value = var.allowed_emails },
+      { name = "ALLOWED_GITHUB_ORGS", value = var.allowed_github_orgs },
+      { name = "UNSAFE_ALLOW_ALL_USERS", value = tostring(var.unsafe_allow_all_users) },
       { name = "WORKER_URL", value = local.control_plane_url },
       { name = "DEPLOYMENT_NAME", value = var.deployment_name },
+      { name = "APP_NAME", value = var.app_name },
+      { name = "GITHUB_BOT_USERNAME", value = var.github_bot_username },
       { name = "SANDBOX_PROVIDER", value = var.sandbox_provider },
+      { name = "SANDBOX_INACTIVITY_TIMEOUT_MS", value = tostring(var.sandbox_inactivity_timeout_ms) },
     ],
-    local.use_modal_backend ? [{ name = "MODAL_WORKSPACE", value = var.modal_workspace }] : [],
+    local.github_oauth_enabled ? [
+      { name = "GITHUB_CLIENT_ID", value = trimspace(var.github_client_id) },
+    ] : [],
+    local.google_enabled ? [
+      { name = "GOOGLE_CLIENT_ID", value = trimspace(var.google_client_id) },
+    ] : [],
+    trimspace(var.modal_workspace) != "" ? [
+      { name = "MODAL_WORKSPACE", value = var.modal_workspace },
+      { name = "MODAL_ENVIRONMENT", value = var.modal_environment },
+      { name = "MODAL_ENVIRONMENT_WEB_SUFFIX", value = var.modal_environment_web_suffix },
+    ] : [],
     local.use_daytona_backend ? [
       { name = "DAYTONA_API_URL", value = var.daytona_api_url },
       { name = "DAYTONA_BASE_SNAPSHOT", value = var.daytona_base_snapshot },
     ] : [],
     local.use_daytona_backend && var.daytona_target != "" ? [
       { name = "DAYTONA_TARGET", value = var.daytona_target },
+    ] : [],
+    trimspace(var.opencomputer_api_url) != "" ? [
+      { name = "OPENCOMPUTER_API_URL", value = var.opencomputer_api_url },
+    ] : [],
+    local.use_opencomputer_backend || trimspace(var.opencomputer_template) != "" ? [
+      # Active deployments use the managed template when no manual pin exists.
+      {
+        name  = "OPENCOMPUTER_TEMPLATE",
+        value = var.opencomputer_template != "" ? var.opencomputer_template : module.opencomputer_infra[0].snapshot_name,
+      },
+    ] : [],
+    trimspace(var.vercel_sandbox_project_id) != "" ? [
+      { name = "VERCEL_PROJECT_ID", value = var.vercel_sandbox_project_id },
+      { name = "VERCEL_RUNTIME", value = var.vercel_sandbox_runtime },
+      { name = "VERCEL_SNAPSHOT_EXPIRATION_MS", value = tostring(var.vercel_snapshot_expiration_ms) },
+    ] : [],
+    var.vercel_sandbox_team_id != "" ? [
+      { name = "VERCEL_TEAM_ID", value = var.vercel_sandbox_team_id },
+    ] : [],
+    var.vercel_sandbox_api_base_url != "" ? [
+      { name = "VERCEL_SANDBOX_API_BASE_URL", value = var.vercel_sandbox_api_base_url },
+    ] : [],
+    local.use_vercel_backend && var.vercel_base_snapshot_id != "" ? [
+      { name = "VERCEL_BASE_SNAPSHOT_ID", value = var.vercel_base_snapshot_id },
+    ] : [],
+    local.use_vercel_backend && var.vercel_base_snapshot_id == "" ? [
+      { name = "VERCEL_BASE_SNAPSHOT_NAME", value = module.vercel_sandbox_infra[0].snapshot_name },
+    ] : [],
+    local.use_e2b_backend ? [
+      { name = "E2B_API_URL", value = var.e2b_api_url },
+      { name = "E2B_TEMPLATE_ID", value = var.e2b_template_id },
+      { name = "E2B_SANDBOX_TIMEOUT_SECONDS", value = tostring(var.e2b_sandbox_timeout_seconds) },
+      { name = "E2B_AUTO_PAUSE", value = tostring(var.e2b_auto_pause) },
     ] : []
   )
 
   secrets = concat(
     [
-      { name = "GITHUB_CLIENT_SECRET", value = var.github_client_secret },
+      # The existing operator-managed auth secret now signs Better Auth state
+      # and cookies in the control plane. Keeping the Terraform input stable
+      # avoids coupling secret rotation to the browser-auth cutover.
+      { name = "BROWSER_AUTH_SECRET", value = var.nextauth_secret },
       { name = "TOKEN_ENCRYPTION_KEY", value = var.token_encryption_key },
       { name = "REPO_SECRETS_ENCRYPTION_KEY", value = var.repo_secrets_encryption_key },
-      { name = "INTERNAL_CALLBACK_SECRET", value = var.internal_callback_secret },
+      { name = "PROVIDER_ACCOUNTS_ENCRYPTION_KEY", value = local.effective_provider_accounts_encryption_key },
+      # Pepper for image-build callback token hashes (see service-auth.tf)
+      { name = "IMAGE_CALLBACK_TOKEN_PEPPER", value = random_password.image_callback_token_pepper.result },
+      # Per-service sig1 verification keys
+      { name = "SERVICE_AUTH_SECRET_WEB", value = random_password.service_auth_secret_web.result },
+      { name = "SERVICE_AUTH_SECRET_SLACK_BOT", value = random_password.service_auth_secret_slack_bot.result },
+      { name = "SERVICE_AUTH_SECRET_GITHUB_BOT", value = random_password.service_auth_secret_github_bot.result },
+      { name = "SERVICE_AUTH_SECRET_LINEAR_BOT", value = random_password.service_auth_secret_linear_bot.result },
       # GitHub App credentials for /repos endpoint (listInstallationRepositories)
       { name = "GITHUB_APP_ID", value = var.github_app_id },
       { name = "GITHUB_APP_PRIVATE_KEY", value = var.github_app_private_key },
       { name = "GITHUB_APP_INSTALLATION_ID", value = var.github_app_installation_id },
     ],
-    local.use_modal_backend ? [
-      { name = "MODAL_TOKEN_ID", value = var.modal_token_id },
-      { name = "MODAL_TOKEN_SECRET", value = var.modal_token_secret },
+    local.github_oauth_enabled ? [
+      { name = "GITHUB_CLIENT_SECRET", value = trimspace(var.github_client_secret) },
+    ] : [],
+    local.google_enabled ? [
+      { name = "GOOGLE_CLIENT_SECRET", value = trimspace(var.google_client_secret) },
+    ] : [],
+    var.modal_api_secret != "" && trimspace(var.modal_workspace) != "" ? [
       { name = "MODAL_API_SECRET", value = var.modal_api_secret },
     ] : [],
     local.use_daytona_backend ? [
       { name = "DAYTONA_API_KEY", value = var.daytona_api_key },
+    ] : [],
+    var.opencomputer_api_key != "" && trimspace(var.opencomputer_api_url) != "" ? [
+      { name = "OPENCOMPUTER_API_KEY", value = var.opencomputer_api_key },
+      { name = "ANTHROPIC_API_KEY", value = var.anthropic_api_key },
+    ] : [],
+    var.vercel_sandbox_token != "" && trimspace(var.vercel_sandbox_project_id) != "" ? [
+      { name = "VERCEL_TOKEN", value = var.vercel_sandbox_token },
+    ] : [],
+    local.use_e2b_backend ? [
+      { name = "E2B_API_KEY", value = var.e2b_api_key },
+    ] : [],
+    # Slack bot token enables the agent-initiated `slack-notify` endpoint.
+    # Shares the variable with the slack-bot worker; bound here so the same
+    # token can authorize chat.postMessage from agent tool calls.
+    length(var.slack_bot_token) > 0 ? [
+      { name = "SLACK_BOT_TOKEN", value = var.slack_bot_token },
     ] : []
   )
 
   durable_objects = [
     { binding_name = "SESSION", class_name = "SessionDO" },
-    { binding_name = "SCHEDULER", class_name = "SchedulerDO" },
   ]
 
   enable_durable_object_bindings = var.enable_durable_object_bindings
@@ -115,14 +223,40 @@ module "control_plane_worker" {
   migration_tag       = var.control_plane_migration_tag
   migration_old_tag   = var.control_plane_migration_old_tag
   new_sqlite_classes  = var.control_plane_new_sqlite_classes
+  deleted_classes     = var.control_plane_deleted_classes
 
-  cron_triggers = ["* * * * *"]
+  # The image-build schedule must match IMAGE_BUILD_SCHEDULER_CRON in scheduler.ts,
+  # and the draft sweep ABANDONED_DRAFT_SWEEP_CRON in abandoned-draft-sweep.ts.
+  cron_triggers = ["* * * * *", "7,37 * * * *", "23 * * * *"]
 
+  # module.e2b_infra is deliberately absent: its template build depends on THIS
+  # worker instead (see e2b.tf), so control-plane deploys land before template
+  # rebuilds — the compatible order for E2B boots.
   depends_on = [
-    data.external.control_plane_build,
+    null_resource.control_plane_build,
     module.session_index_kv,
     null_resource.d1_migrations,
     module.linear_bot_worker,
     module.daytona_infra,
+    module.vercel_sandbox_infra,
+    module.opencomputer_infra,
+    module.modal_app,
   ]
+}
+
+resource "cloudflare_queue_consumer" "image_build_finalization" {
+  account_id        = var.cloudflare_account_id
+  queue_id          = cloudflare_queue.image_build_finalization.queue_id
+  type              = "worker"
+  script_name       = module.control_plane_worker.worker_name
+  dead_letter_queue = cloudflare_queue.image_build_finalization_dlq.queue_name
+  settings = {
+    batch_size       = 1
+    max_wait_time_ms = 1000
+    max_concurrency  = 5
+    max_retries      = 12
+    retry_delay      = 15
+  }
+
+  depends_on = [module.control_plane_worker]
 }

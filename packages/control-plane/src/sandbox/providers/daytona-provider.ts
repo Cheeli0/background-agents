@@ -5,11 +5,18 @@
  * code-server password derivation that previously lived in the Python shim.
  */
 
-import { computeHmacHex, MAX_TUNNEL_PORTS, type SandboxSettings } from "@open-inspect/shared";
+import type { SandboxSettings } from "@open-inspect/shared/types/integrations";
+import { resolveServicePorts, resolveTunnelPorts } from "./port-resolution";
 import { createLogger } from "../../logger";
 import type { SourceControlProviderName } from "../../source-control";
 import type { DaytonaRestClient, DaytonaCreateSandboxParams } from "../daytona-rest-client";
 import { DaytonaApiError, DaytonaNotFoundError } from "../daytona-rest-client";
+import {
+  buildSandboxEnvVars,
+  deriveCodeServerPassword,
+  deriveVncPassword,
+  scmCloneIdentity,
+} from "../sandbox-env";
 import {
   SandboxProviderError,
   type CreateSandboxConfig,
@@ -20,6 +27,7 @@ import {
   type SandboxProviderCapabilities,
   type StopConfig,
   type StopResult,
+  type VncAccess,
 } from "../provider";
 
 const log = createLogger("daytona-provider");
@@ -28,7 +36,6 @@ const log = createLogger("daytona-provider");
 // Constants (ported from packages/daytona-infra/src/config.py)
 // ---------------------------------------------------------------------------
 
-const CODE_SERVER_PORT = 8080;
 const DEFAULT_PREVIEW_EXPIRY_SECONDS = 3900;
 
 // ---------------------------------------------------------------------------
@@ -38,8 +45,8 @@ const DEFAULT_PREVIEW_EXPIRY_SECONDS = 3900;
 export interface DaytonaProviderConfig {
   scmProvider: SourceControlProviderName;
   gitlabAccessToken?: string;
-  /** Secret used for HMAC derivation of code-server passwords */
-  codeServerPasswordSecret: string;
+  /** Secret used for domain-separated sandbox access password derivation. */
+  sandboxAccessPasswordSecret: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,17 +57,16 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   readonly name = "daytona";
 
   readonly capabilities: SandboxProviderCapabilities = {
+    supportsSandboxTimeout: false,
     supportsSnapshots: false,
     supportsRestore: false,
-    supportsWarm: false,
     supportsPersistentResume: true,
     supportsExplicitStop: true,
   };
 
   constructor(
     private readonly client: DaytonaRestClient,
-    private readonly providerConfig: DaytonaProviderConfig,
-    private readonly getCloneToken: () => Promise<string | null>
+    private readonly providerConfig: DaytonaProviderConfig
   ) {}
 
   // -----------------------------------------------------------------------
@@ -87,21 +93,23 @@ export class DaytonaSandboxProvider implements SandboxProvider {
 
       const sandbox = await this.client.createSandbox(params);
 
-      const { codeServerUrl, codeServerPassword, tunnelUrls } = await this.buildTunnelUrls(
-        sandbox.id,
-        config.sandboxId,
-        config.timeoutSeconds,
-        config.codeServerEnabled,
-        config.sandboxSettings
-      );
+      const { codeServerUrl, codeServerPassword, vncAccess, tunnelUrls } =
+        await this.buildTunnelUrls(
+          sandbox.id,
+          config.sandboxId,
+          config.timeoutSeconds,
+          config.codeServerEnabled,
+          config.vncEnabled,
+          config.sandboxSettings
+        );
 
       return {
         sandboxId: config.sandboxId,
         providerObjectId: sandbox.id,
-        status: sandbox.state,
         createdAt: Date.now(),
         codeServerUrl,
         codeServerPassword,
+        vncAccess,
         tunnelUrls,
       };
     } catch (error) {
@@ -138,6 +146,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       // doesn't mask a successful resume.
       let codeServerUrl: string | undefined;
       let codeServerPassword: string | undefined;
+      let vncAccess: VncAccess | undefined;
       let tunnelUrls: Record<string, string> | undefined;
       try {
         const tunnels = await this.buildTunnelUrls(
@@ -145,10 +154,12 @@ export class DaytonaSandboxProvider implements SandboxProvider {
           config.sandboxId,
           config.timeoutSeconds,
           config.codeServerEnabled,
+          config.vncEnabled,
           config.sandboxSettings
         );
         codeServerUrl = tunnels.codeServerUrl;
         codeServerPassword = tunnels.codeServerPassword;
+        vncAccess = tunnels.vncAccess;
         tunnelUrls = tunnels.tunnelUrls;
       } catch (tunnelError) {
         log.warn("daytona.resume_tunnel_urls_failed", {
@@ -162,6 +173,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
         providerObjectId: sandbox.id,
         codeServerUrl,
         codeServerPassword,
+        vncAccess,
         tunnelUrls,
       };
     } catch (error) {
@@ -173,7 +185,14 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   async stopSandbox(config: StopConfig): Promise<StopResult> {
     try {
       try {
-        await this.client.stopSandbox(config.providerObjectId);
+        if (config.reason === "respawn") {
+          await this.client.deleteSandbox(
+            config.providerObjectId,
+            ...(config.signal ? [config.signal] : [])
+          );
+        } else {
+          await this.client.stopSandbox(config.providerObjectId);
+        }
       } catch (error) {
         if (error instanceof DaytonaNotFoundError) {
           return { success: true };
@@ -183,7 +202,10 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       return { success: true };
     } catch (error) {
       if (error instanceof SandboxProviderError) throw error;
-      throw this.classifyError("Failed to stop Daytona sandbox", error);
+      throw this.classifyError(
+        `Failed to ${config.reason === "respawn" ? "delete" : "stop"} Daytona sandbox`,
+        error
+      );
     }
   }
 
@@ -192,53 +214,18 @@ export class DaytonaSandboxProvider implements SandboxProvider {
   // -----------------------------------------------------------------------
 
   private async buildEnvVars(config: CreateSandboxConfig): Promise<Record<string, string>> {
-    const cloneToken = await this.getCloneToken();
-
-    // Start with user env vars (repo secrets), then overlay system vars
-    const envVars: Record<string, string> = { ...(config.userEnvVars ?? {}) };
-
-    const sessionConfig: Record<string, string> = {
-      session_id: config.sessionId,
-      repo_owner: config.repoOwner,
-      repo_name: config.repoName,
-      provider: config.provider,
-      model: config.model,
-    };
-    if (config.branch) {
-      sessionConfig.branch = config.branch;
-    }
-
-    Object.assign(envVars, {
-      PYTHONUNBUFFERED: "1",
-      SANDBOX_ID: config.sandboxId,
-      CONTROL_PLANE_URL: config.controlPlaneUrl,
-      SANDBOX_AUTH_TOKEN: config.sandboxAuthToken,
-      REPO_OWNER: config.repoOwner,
-      REPO_NAME: config.repoName,
-      SESSION_CONFIG: JSON.stringify(sessionConfig),
+    return buildSandboxEnvVars(config, {
+      scmIdentity: scmCloneIdentity(this.providerConfig.scmProvider),
+      codeServerPassword: config.codeServerEnabled
+        ? await deriveCodeServerPassword(
+            config.sandboxId,
+            this.providerConfig.sandboxAccessPasswordSecret
+          )
+        : undefined,
+      vncPassword: config.vncEnabled
+        ? await deriveVncPassword(config.sandboxId, this.providerConfig.sandboxAccessPasswordSecret)
+        : undefined,
     });
-
-    if (config.codeServerEnabled) {
-      envVars.CODE_SERVER_PASSWORD = await this.deriveCodeServerPassword(config.sandboxId);
-    }
-
-    if (this.providerConfig.scmProvider === "gitlab") {
-      envVars.VCS_HOST = "gitlab.com";
-      envVars.VCS_CLONE_USERNAME = "oauth2";
-    } else {
-      envVars.VCS_HOST = "github.com";
-      envVars.VCS_CLONE_USERNAME = "x-access-token";
-    }
-
-    if (cloneToken) {
-      envVars.VCS_CLONE_TOKEN = cloneToken;
-      if (this.providerConfig.scmProvider === "github") {
-        envVars.GITHUB_APP_TOKEN = cloneToken;
-        envVars.GITHUB_TOKEN = cloneToken;
-      }
-    }
-
-    return envVars;
   }
 
   // -----------------------------------------------------------------------
@@ -249,8 +236,10 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     return {
       openinspect_framework: "open-inspect",
       openinspect_session_id: config.sessionId,
-      openinspect_repo: `${config.repoOwner}/${config.repoName}`,
       openinspect_expected_sandbox_id: config.sandboxId,
+      ...(config.repoOwner && config.repoName
+        ? { openinspect_repo: `${config.repoOwner}/${config.repoName}` }
+        : {}),
     };
   }
 
@@ -263,26 +252,47 @@ export class DaytonaSandboxProvider implements SandboxProvider {
     logicalSandboxId: string,
     timeoutSeconds: number | undefined,
     codeServerEnabled: boolean | undefined,
+    vncEnabled: boolean | undefined,
     sandboxSettings: SandboxSettings | undefined
   ): Promise<{
     codeServerUrl?: string;
     codeServerPassword?: string;
+    vncAccess?: VncAccess;
     tunnelUrls?: Record<string, string>;
   }> {
     const expirySeconds = resolvePreviewExpirySeconds(timeoutSeconds);
+    const { codeServerPort, vncPort } = resolveServicePorts(sandboxSettings);
     let tunnelPorts = resolveTunnelPorts(sandboxSettings?.tunnelPorts);
     let codeServerUrl: string | undefined;
     let codeServerPassword: string | undefined;
+    let vncAccess: VncAccess | undefined;
 
     if (codeServerEnabled) {
       const preview = await this.client.getSignedPreviewUrl(
         daytonaSandboxId,
-        CODE_SERVER_PORT,
+        codeServerPort,
         expirySeconds
       );
       codeServerUrl = preview.url;
-      codeServerPassword = await this.deriveCodeServerPassword(logicalSandboxId);
-      tunnelPorts = tunnelPorts.filter((p) => p !== CODE_SERVER_PORT);
+      codeServerPassword = await deriveCodeServerPassword(
+        logicalSandboxId,
+        this.providerConfig.sandboxAccessPasswordSecret
+      );
+      tunnelPorts = tunnelPorts.filter((p) => p !== codeServerPort);
+    }
+
+    if (vncEnabled) {
+      const preview = await this.client.getSignedPreviewUrl(
+        daytonaSandboxId,
+        vncPort,
+        expirySeconds
+      );
+      const password = await deriveVncPassword(
+        logicalSandboxId,
+        this.providerConfig.sandboxAccessPasswordSecret
+      );
+      vncAccess = { url: preview.url, password };
+      tunnelPorts = tunnelPorts.filter((p) => p !== vncPort);
     }
 
     let tunnelUrls: Record<string, string> | undefined;
@@ -300,19 +310,7 @@ export class DaytonaSandboxProvider implements SandboxProvider {
       tunnelUrls = Object.fromEntries(entries);
     }
 
-    return { codeServerUrl, codeServerPassword, tunnelUrls };
-  }
-
-  // -----------------------------------------------------------------------
-  // Code-server password (ported from auth.py derive_code_server_password)
-  // -----------------------------------------------------------------------
-
-  private async deriveCodeServerPassword(sandboxId: string): Promise<string> {
-    const digest = await computeHmacHex(
-      `code-server:${sandboxId}`,
-      this.providerConfig.codeServerPasswordSecret
-    );
-    return digest.slice(0, 32);
+    return { codeServerUrl, codeServerPassword, vncAccess, tunnelUrls };
   }
 
   // -----------------------------------------------------------------------
@@ -340,26 +338,13 @@ function resolvePreviewExpirySeconds(timeoutSeconds: number | undefined): number
   return Math.min(86400, Math.max(900, timeoutSeconds + 300));
 }
 
-function resolveTunnelPorts(rawPorts: number[] | undefined): number[] {
-  if (!rawPorts) return [];
-  const ports: number[] = [];
-  for (const value of rawPorts) {
-    if (Number.isInteger(value) && value >= 1 && value <= 65535) {
-      ports.push(value);
-    }
-    if (ports.length >= MAX_TUNNEL_PORTS) break;
-  }
-  return ports;
-}
-
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
 export function createDaytonaProvider(
   client: DaytonaRestClient,
-  providerConfig: DaytonaProviderConfig,
-  getCloneToken: () => Promise<string | null>
+  providerConfig: DaytonaProviderConfig
 ): DaytonaSandboxProvider {
-  return new DaytonaSandboxProvider(client, providerConfig, getCloneToken);
+  return new DaytonaSandboxProvider(client, providerConfig);
 }

@@ -2,25 +2,17 @@
  * Utility functions for formatting display values
  */
 
-import { MODEL_OPTIONS, normalizeModelId, type ModelDisplayInfo } from "@open-inspect/shared";
+import { MODEL_OPTIONS, normalizeModelId } from "@open-inspect/shared/models";
 
 // Build a lookup map once at module level
 const MODEL_DISPLAY_NAMES = new Map<string, string>(
   MODEL_OPTIONS.flatMap((g) => g.models.map((m) => [m.id, m.name]))
 );
-const MODEL_DISPLAY_INFO = new Map<string, ModelDisplayInfo>(
-  MODEL_OPTIONS.flatMap((g) => g.models.map((m) => [m.id, m]))
-);
-const PROVIDER_DISPLAY_NAMES = new Map<string, string>(
-  MODEL_OPTIONS.flatMap((group) =>
-    group.models.map((model) => [normalizeModelId(model.id).split("/")[0], group.category])
-  )
-);
 
 /**
  * Format model ID to display name.
  * e.g., "anthropic/claude-sonnet-4-5" → "Claude Sonnet 4.5"
- * e.g., "openai/gpt-5.2-codex" → "GPT 5.2 Codex"
+ * e.g., "openai/gpt-5.3-codex" → "GPT 5.3 Codex"
  */
 export function formatModelName(modelId: string): string {
   if (!modelId) return "Unknown Model";
@@ -36,63 +28,6 @@ export function formatModelNameLower(modelId: string): string {
   return (MODEL_DISPLAY_NAMES.get(normalizeModelId(modelId)) ?? modelId).toLowerCase();
 }
 
-export function formatProviderName(modelId: string): string | null {
-  if (!modelId) return null;
-
-  const normalized = normalizeModelId(modelId);
-  if (!normalized.includes("/")) return null;
-
-  const [provider] = normalized.split("/");
-  if (!provider) return null;
-
-  const displayName = PROVIDER_DISPLAY_NAMES.get(provider);
-  if (displayName) return displayName;
-
-  return provider
-    .split(/[-_]/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function formatMultiplierNumber(multiplier: number): string {
-  return Number.isInteger(multiplier)
-    ? String(multiplier)
-    : multiplier.toFixed(2).replace(/\.?0+$/, "");
-}
-
-const MIN_PREMIUM_MULTIPLIER = 0;
-const MAX_PREMIUM_MULTIPLIER = 100;
-
-function isValidPremiumMultiplier(multiplier: number): boolean {
-  return (
-    Number.isFinite(multiplier) &&
-    multiplier >= MIN_PREMIUM_MULTIPLIER &&
-    multiplier <= MAX_PREMIUM_MULTIPLIER
-  );
-}
-
-export function formatPremiumMultiplierLabel(multiplier?: number): string | null {
-  if (multiplier === undefined) return null;
-  if (!isValidPremiumMultiplier(multiplier)) return null;
-  if (multiplier === 0) return "Free";
-  return `Premium x${formatMultiplierNumber(multiplier)}`;
-}
-
-export function formatModelOptionDescription(
-  model: Pick<ModelDisplayInfo, "description" | "premiumMultiplier">
-): string {
-  const multiplierLabel = formatPremiumMultiplierLabel(model.premiumMultiplier);
-  if (!multiplierLabel) return model.description;
-  return `${multiplierLabel} | ${model.description}`;
-}
-
-export function getModelOptionDescription(modelId: string): string | null {
-  if (!modelId) return null;
-  const model = MODEL_DISPLAY_INFO.get(normalizeModelId(modelId));
-  return model ? formatModelOptionDescription(model) : null;
-}
-
 /**
  * Truncate branch name with ellipsis at start
  * e.g., "feature/very-long-branch-name-here" → "...long-branch-name-here"
@@ -101,12 +36,6 @@ export function truncateBranch(branchName: string, maxLength = 30): string {
   if (!branchName) return "";
   if (branchName.length <= maxLength) return branchName;
   return "..." + branchName.slice(-maxLength);
-}
-
-export function truncateBranchStart(branchName: string, maxLength = 30): string {
-  if (!branchName) return "";
-  if (branchName.length <= maxLength) return branchName;
-  return branchName.slice(0, maxLength) + "...";
 }
 
 /**
@@ -133,39 +62,4 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * Format file path for display (show basename or last N characters)
- */
-export function formatFilePath(
-  filePath: string,
-  maxLength = 40
-): { display: string; full: string } {
-  if (!filePath) return { display: "", full: "" };
-
-  const parts = filePath.split("/");
-  const basename = parts[parts.length - 1];
-
-  if (basename.length <= maxLength) {
-    return { display: basename, full: filePath };
-  }
-
-  return {
-    display: basename.slice(0, maxLength - 3) + "...",
-    full: filePath,
-  };
-}
-
-/**
- * Format number with +/- prefix for diff stats
- */
-export function formatDiffStat(
-  additions: number,
-  deletions: number
-): { additions: string; deletions: string } {
-  return {
-    additions: additions > 0 ? `+${additions}` : "+0",
-    deletions: deletions > 0 ? `-${deletions}` : "-0",
-  };
 }

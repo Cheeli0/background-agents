@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { env, runInDurableObject } from "cloudflare:test";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { env } from "cloudflare:test";
+import { runInSessionDO } from "./session-do-access";
 import type { SessionDO } from "../../src/session/durable-object";
 import { MIGRATIONS } from "../../src/session/schema";
 
@@ -67,8 +68,8 @@ describe("SessionDO Durable Object", () => {
       }),
     });
 
-    await runInDurableObject(stub, (instance: SessionDO) => {
-      const tables = instance.ctx.storage.sql
+    await runInSessionDO(stub, (instance: SessionDO, state) => {
+      const tables = state.storage.sql
         .exec("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         .toArray();
 
@@ -99,13 +100,79 @@ describe("SessionDO Durable Object", () => {
       }),
     });
 
-    await runInDurableObject(stub, (instance: SessionDO) => {
-      const rows = instance.ctx.storage.sql
+    await runInSessionDO(stub, (instance: SessionDO, state) => {
+      const rows = state.storage.sql
         .exec("SELECT id FROM _schema_migrations ORDER BY id")
         .toArray() as Array<{ id: number }>;
 
       const ids = rows.map((r) => r.id);
       expect(ids).toEqual(MIGRATIONS.map((migration) => migration.id));
+    });
+  });
+
+  describe("request log correlation", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function parseDoRequestLines(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown>[] {
+      const lines: Record<string, unknown>[] = [];
+      for (const call of spy.mock.calls) {
+        if (typeof call[0] !== "string") continue;
+        try {
+          const parsed = JSON.parse(call[0]) as Record<string, unknown>;
+          if (parsed.event === "do.request") lines.push(parsed);
+        } catch {
+          // Not a structured log line.
+        }
+      }
+      return lines;
+    }
+
+    it("tags each request's access log with its own trace id and leaves the session logger untouched", async () => {
+      const id = env.SESSION.newUniqueId();
+      const stub = env.SESSION.get(id);
+
+      await stub.fetch("http://internal/internal/init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionName: "test-session-correlation",
+          repoOwner: "acme",
+          repoName: "api",
+          userId: "user-4",
+        }),
+      });
+
+      const spy = vi.spyOn(console, "log");
+
+      // Overlapping requests with distinct trace ids. Under the old design
+      // (fetch() mutated this.log and restored it in a finally), interleaved
+      // completion could restore loggers out of order; each access log line
+      // must carry exactly its own request's trace id.
+      await Promise.all([
+        stub.fetch("http://internal/internal/state", {
+          headers: { "x-trace-id": "trace-a", "x-request-id": "req-a" },
+        }),
+        stub.fetch("http://internal/internal/state", {
+          headers: { "x-trace-id": "trace-b", "x-request-id": "req-b" },
+        }),
+      ]);
+
+      const correlated = parseDoRequestLines(spy);
+      expect(correlated.map((line) => line.trace_id).sort()).toEqual(["trace-a", "trace-b"]);
+      expect(correlated.map((line) => line.request_id).sort()).toEqual(["req-a", "req-b"]);
+
+      // A request without correlation headers logs with the session logger:
+      // no trace_id may linger from the earlier correlated requests.
+      spy.mockClear();
+      await stub.fetch("http://internal/internal/state");
+
+      const uncorrelated = parseDoRequestLines(spy);
+      expect(uncorrelated).toHaveLength(1);
+      expect(uncorrelated[0]).not.toHaveProperty("trace_id");
+      expect(uncorrelated[0]).not.toHaveProperty("request_id");
+      expect(uncorrelated[0]).toHaveProperty("session_id");
     });
   });
 });

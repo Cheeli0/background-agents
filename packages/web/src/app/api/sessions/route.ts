@@ -1,42 +1,30 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { getToken } from "next-auth/jwt";
-import { authOptions } from "@/lib/auth";
-import { controlPlaneFetch } from "@/lib/control-plane";
-import {
-  buildControlPlanePath,
-  SESSION_CONTROL_PLANE_QUERY_PARAMS,
-} from "@/lib/control-plane-query";
+import { getServerAuthSession } from "@/lib/server-auth-session";
+import { controlPlaneUserFetch } from "@/lib/control-plane";
+import { SESSION_LIST_QUERY_PARAMS } from "@open-inspect/shared/session-list-query";
+import { buildControlPlanePath } from "@/lib/control-plane-query";
 
 export async function GET(request: NextRequest) {
   const routeStart = Date.now();
 
-  const session = await getServerSession(authOptions);
-  const authMs = Date.now() - routeStart;
-
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const path = buildControlPlanePath(
-    "/sessions",
-    request.nextUrl.searchParams,
-    SESSION_CONTROL_PLANE_QUERY_PARAMS
-  );
-
   try {
+    const searchParams = new URLSearchParams(request.nextUrl.searchParams);
+
+    const path = buildControlPlanePath("/sessions", searchParams, SESSION_LIST_QUERY_PARAMS);
+
     const fetchStart = Date.now();
-    const response = await controlPlaneFetch(path);
+    const response = await controlPlaneUserFetch(path);
     const fetchMs = Date.now() - fetchStart;
     const data = await response.json();
     const totalMs = Date.now() - routeStart;
 
-    console.log(
-      `[sessions:GET] total=${totalMs}ms auth=${authMs}ms fetch=${fetchMs}ms status=${response.status}`
-    );
+    console.log(`[sessions:GET] total=${totalMs}ms fetch=${fetchMs}ms status=${response.status}`);
 
-    return NextResponse.json(data, { status: response.status });
+    return NextResponse.json(data, {
+      status: response.status,
+      headers: { "Cache-Control": "private, no-store" },
+    });
   } catch (error) {
     console.error("Failed to fetch sessions:", error);
     return NextResponse.json({ error: "Failed to fetch sessions" }, { status: 500 });
@@ -44,7 +32,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getServerSession(authOptions);
+  const session = await getServerAuthSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -52,14 +40,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const jwt = await getToken({ req: request });
-    const accessToken = jwt?.accessToken as string | undefined;
-
-    // Explicitly pick allowed fields from client body and derive identity
-    // from the server-side NextAuth session (not client-supplied data)
-    const user = session.user;
-    const userId = user.id || user.email || "anonymous";
-
+    // Explicitly pick allowed fields from the client body. Identity and SCM
+    // provenance derive from authenticated control-plane state.
     const sessionBody = {
       repoOwner: body.repoOwner,
       repoName: body.repoName,
@@ -67,19 +49,16 @@ export async function POST(request: NextRequest) {
       reasoningEffort: body.reasoningEffort,
       branch: body.branch,
       title: body.title,
-      spawnSource: "user" as const,
-      scmToken: accessToken,
-      scmRefreshToken: jwt?.refreshToken as string | undefined,
-      scmTokenExpiresAt: jwt?.accessTokenExpiresAt as number | undefined,
-      scmUserId: user.id,
-      userId,
-      scmLogin: user.login,
-      scmName: user.name,
-      scmEmail: user.email,
-      scmAvatarUrl: user.image,
+      // The picker's other two target modes (mutually exclusive with the
+      // scalar fields — enforced by createSessionRequestSchema control-plane
+      // side): a named environment or an ad-hoc repository list.
+      environmentId: body.environmentId,
+      repositories: body.repositories,
+      skillSelection: body.skillSelection,
+      providerSelections: body.providerSelections,
     };
 
-    const response = await controlPlaneFetch("/sessions", {
+    const response = await controlPlaneUserFetch("/sessions", {
       method: "POST",
       body: JSON.stringify(sessionBody),
     });

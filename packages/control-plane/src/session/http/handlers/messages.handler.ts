@@ -1,124 +1,115 @@
 import type { Logger } from "../../../logger";
-import type { EnqueuePromptRequest, MessageService } from "../../services/message.service";
-
-/**
- * Valid event types for filtering.
- * Includes both external types (from types.ts) and internal types used by the sandbox.
- */
-const VALID_EVENT_TYPES = [
-  "tool_call",
-  "tool_result",
-  "token",
-  "error",
-  "git_sync",
-  "step_start",
-  "step_finish",
-  "execution_complete",
-  "heartbeat",
-  "push_complete",
-  "push_error",
-  "artifact",
-  "user_message",
-] as const;
+import { eventTypeSchema } from "@open-inspect/shared/types/sandbox-events";
+import {
+  enqueuePromptRequestSchema,
+  type EnqueuePromptRequest,
+} from "../../enqueue-prompt-contract";
+import type { MessageService } from "../../services/message.service";
+import { parseEventListCursor } from "../../event-cursor";
+import { SessionAttachmentError } from "../../session-attachment-resolver";
+import {
+  PromptQueueFullError,
+  PromptRequestConflictError,
+  SessionNotPromptableError,
+} from "../../message-queue";
 
 /**
  * Valid message statuses for filtering.
  */
 const VALID_MESSAGE_STATUSES = ["pending", "processing", "completed", "failed"] as const;
 
-export interface MessagesHandlerDeps {
-  messageService: MessageService;
-  getLog: () => Logger;
-}
+/**
+ * HTTP boundary for the prompt/event/artifact/message endpoints: parses
+ * requests, delegates to the message service, and maps thrown domain errors
+ * to statuses.
+ */
+export class MessagesHandler {
+  constructor(private readonly messageService: MessageService) {}
 
-export interface MessagesHandler {
-  enqueuePrompt: (request: Request) => Promise<Response>;
-  stop: () => Promise<Response>;
-  listEvents: (url: URL) => Response;
-  listArtifacts: (url: URL) => Response;
-  listMessages: (url: URL) => Response;
-}
-
-export function createMessagesHandler(deps: MessagesHandlerDeps): MessagesHandler {
-  return {
-    async enqueuePrompt(request: Request): Promise<Response> {
-      try {
-        const body = (await request.json()) as EnqueuePromptRequest;
-        return Response.json(await deps.messageService.enqueuePrompt(body));
-      } catch (error) {
-        deps.getLog().error("handleEnqueuePrompt error", {
-          error: error instanceof Error ? error : String(error),
-        });
-        throw error;
-      }
-    },
-
-    async stop(): Promise<Response> {
-      return Response.json(await deps.messageService.stop());
-    },
-
-    listEvents(url: URL): Response {
-      const cursor = url.searchParams.get("cursor");
-      const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "50"), 200);
-      const type = url.searchParams.get("type");
-      const messageId = url.searchParams.get("message_id");
-
-      if (type && !VALID_EVENT_TYPES.includes(type as (typeof VALID_EVENT_TYPES)[number])) {
-        return Response.json({ error: `Invalid event type: ${type}` }, { status: 400 });
+  async enqueuePrompt(request: Request, log: Logger): Promise<Response> {
+    try {
+      const raw = await request.json();
+      const result = enqueuePromptRequestSchema.safeParse(raw);
+      if (!result.success) {
+        return Response.json({ error: "Invalid prompt body" }, { status: 400 });
       }
 
-      const result = deps.messageService.listEvents({ cursor, limit, type, messageId });
-
-      return Response.json({
-        events: result.events.map((event) => ({
-          id: event.id,
-          type: event.type,
-          data: JSON.parse(event.data),
-          messageId: event.message_id,
-          createdAt: event.created_at,
-        })),
-        cursor: result.cursor,
-        hasMore: result.hasMore,
+      const body: EnqueuePromptRequest = result.data;
+      return Response.json(await this.messageService.enqueuePrompt(body));
+    } catch (error) {
+      if (error instanceof SessionAttachmentError) {
+        return Response.json({ error: error.message }, { status: 400 });
+      }
+      if (error instanceof SessionNotPromptableError) {
+        return Response.json({ error: error.message }, { status: 409 });
+      }
+      if (error instanceof PromptQueueFullError) {
+        return Response.json({ error: error.message, code: "PROMPT_QUEUE_FULL" }, { status: 429 });
+      }
+      if (error instanceof PromptRequestConflictError) {
+        return Response.json(
+          { error: error.message, code: "PROMPT_REQUEST_CONFLICT" },
+          { status: 409 }
+        );
+      }
+      log.error("handleEnqueuePrompt error", {
+        error: error instanceof Error ? error : String(error),
       });
-    },
+      throw error;
+    }
+  }
 
-    listArtifacts(url: URL): Response {
-      const artifactId = url.searchParams.get("artifactId");
-      if (artifactId) {
-        return Response.json(deps.messageService.getArtifact(artifactId));
-      }
+  async stop(): Promise<Response> {
+    return Response.json(await this.messageService.stop());
+  }
 
-      return Response.json(deps.messageService.listArtifacts());
-    },
+  listEvents(url: URL): Response {
+    const cursorResult = parseEventListCursor(url.searchParams.get("cursor"));
+    const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "50"), 200);
+    const type = url.searchParams.get("type");
+    const messageId = url.searchParams.get("message_id");
 
-    listMessages(url: URL): Response {
-      const cursor = url.searchParams.get("cursor");
-      const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "50"), 100);
-      const status = url.searchParams.get("status");
+    if (type && !eventTypeSchema.safeParse(type).success) {
+      return Response.json({ error: `Invalid event type: ${type}` }, { status: 400 });
+    }
 
-      if (
-        status &&
-        !VALID_MESSAGE_STATUSES.includes(status as (typeof VALID_MESSAGE_STATUSES)[number])
-      ) {
-        return Response.json({ error: `Invalid message status: ${status}` }, { status: 400 });
-      }
+    if (!cursorResult.ok) {
+      return Response.json({ error: cursorResult.error }, { status: 400 });
+    }
 
-      const result = deps.messageService.listMessages({ cursor, limit, status });
+    const result = this.messageService.listEvents({
+      cursor: cursorResult.cursor,
+      limit,
+      type,
+      messageId,
+    });
 
-      return Response.json({
-        messages: result.messages.map((message) => ({
-          id: message.id,
-          authorId: message.author_id,
-          content: message.content,
-          source: message.source,
-          status: message.status,
-          createdAt: message.created_at,
-          startedAt: message.started_at,
-          completedAt: message.completed_at,
-        })),
-        cursor: result.cursor,
-        hasMore: result.hasMore,
-      });
-    },
-  };
+    return Response.json(result);
+  }
+
+  listArtifacts(url: URL): Response {
+    const artifactId = url.searchParams.get("artifactId");
+    if (artifactId) {
+      return Response.json(this.messageService.getArtifact(artifactId));
+    }
+
+    return Response.json(this.messageService.listArtifacts());
+  }
+
+  listMessages(url: URL): Response {
+    const cursor = url.searchParams.get("cursor");
+    const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "50"), 100);
+    const status = url.searchParams.get("status");
+
+    if (
+      status &&
+      !VALID_MESSAGE_STATUSES.includes(status as (typeof VALID_MESSAGE_STATUSES)[number])
+    ) {
+      return Response.json({ error: `Invalid message status: ${status}` }, { status: 400 });
+    }
+
+    const result = this.messageService.listMessages({ cursor, limit, status });
+
+    return Response.json(result);
+  }
 }

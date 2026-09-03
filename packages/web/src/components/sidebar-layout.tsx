@@ -1,18 +1,19 @@
 "use client";
 
-import { createContext, useCallback, useContext, useState } from "react";
-import { useSession, signIn } from "next-auth/react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { BrandMark } from "./brand-mark";
-import { SessionSidebar } from "./session-sidebar";
+import { NewSessionButton, SearchSessionsButton, SessionSidebar } from "./session-sidebar";
 import { GlobalCommandMenu } from "./global-command-menu";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { useGlobalShortcuts } from "@/hooks/use-global-shortcuts";
-import { SIDEBAR_SESSIONS_KEY, type SessionListResponse } from "@/lib/session-list";
+import { COMMAND_MENU_SESSIONS_KEY, type SessionListResponse } from "@/lib/session-list";
 import { Button } from "@/components/ui/button";
-import { GitHubIcon } from "@/components/ui/icons";
+import { SidebarIcon } from "@/components/ui/icons";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { useMobileSidebarPull } from "@/hooks/use-mobile-sidebar-pull";
+import { useCurrentUserAuthorization } from "@/hooks/use-current-user-authorization";
 
 interface SidebarContextValue {
   isOpen: boolean;
@@ -21,7 +22,13 @@ interface SidebarContextValue {
   close: () => void;
 }
 
+interface AppShellActionsContextValue {
+  searchSessions: () => void;
+  newSession: () => void;
+}
+
 const SidebarContext = createContext<SidebarContextValue | null>(null);
+const AppShellActionsContext = createContext<AppShellActionsContextValue | null>(null);
 
 export function useSidebarContext() {
   const context = useContext(SidebarContext);
@@ -35,26 +42,70 @@ interface SidebarLayoutProps {
   children: React.ReactNode;
 }
 
+function SidebarToggleButton({ label = "Open sidebar" }: { label?: string }) {
+  const { toggle } = useSidebarContext();
+  const { labels } = useKeyboardShortcuts();
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={toggle}
+      title={`${label} (${labels["toggle-sidebar"]})`}
+      aria-label={`${label} (${labels["toggle-sidebar"]})`}
+    >
+      <SidebarIcon className="w-4 h-4" />
+    </Button>
+  );
+}
+
+export function CollapsedSidebarControls() {
+  const actions = useContext(AppShellActionsContext);
+  const { hasPermission } = useCurrentUserAuthorization();
+  if (!actions) {
+    throw new Error("CollapsedSidebarControls must be used within a SidebarLayout");
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <SidebarToggleButton />
+      <SearchSessionsButton onClick={actions.searchSessions} />
+      {hasPermission("sessions.create") && <NewSessionButton onClick={actions.newSession} />}
+    </div>
+  );
+}
+
 export function SidebarLayout({ children }: SidebarLayoutProps) {
-  const { data: session, status } = useSession();
   const router = useRouter();
+  const { hasPermission } = useCurrentUserAuthorization();
+  const canCreateSession = hasPermission("sessions.create");
   const sidebar = useSidebar();
   const isMobile = useIsMobile();
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  const mobileSidebarRef = useRef<HTMLDivElement>(null);
+  const getMobileSidebarWidth = useCallback(
+    () => mobileSidebarRef.current?.getBoundingClientRect().width ?? 0,
+    []
+  );
+  const sidebarPull = useMobileSidebarPull({
+    isMobile,
+    isSidebarOpen: sidebar.isOpen,
+    getSidebarWidth: getMobileSidebarWidth,
+    onOpen: sidebar.open,
+  });
 
   const { data: sessionsResponse } = useSWR<SessionListResponse>(
-    status === "authenticated" && Boolean(session) && isCommandMenuOpen
-      ? SIDEBAR_SESSIONS_KEY
-      : null
+    isCommandMenuOpen ? COMMAND_MENU_SESSIONS_KEY : null
   );
 
   const handleNewSession = useCallback(() => {
+    if (!canCreateSession) return;
     setIsCommandMenuOpen(false);
     if (isMobile) {
       sidebar.close();
     }
     router.push("/");
-  }, [isMobile, router, sidebar]);
+  }, [canCreateSession, isMobile, router, sidebar]);
 
   const handleNavigate = useCallback(
     (href: string) => {
@@ -70,82 +121,88 @@ export function SidebarLayout({ children }: SidebarLayoutProps) {
     setIsCommandMenuOpen((prev) => !prev);
   }, []);
 
+  const handleSearchSessions = useCallback(() => {
+    setIsCommandMenuOpen(true);
+  }, []);
+  const appShellActions = useMemo(
+    () => ({ searchSessions: handleSearchSessions, newSession: handleNewSession }),
+    [handleSearchSessions, handleNewSession]
+  );
+
   useGlobalShortcuts({
-    enabled: status === "authenticated" && Boolean(session),
+    enabled: true,
     onOpenCommandMenu: handleOpenCommandMenu,
     onNewSession: handleNewSession,
     onToggleSidebar: sidebar.toggle,
   });
 
-  // Show loading state
-  if (status === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-6 w-6 border-2 border-current border-t-transparent text-foreground" />
-      </div>
-    );
-  }
-
-  // Show sign-in page if not authenticated
-  if (!session) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-8">
-        <div className="flex flex-col items-center gap-4">
-          <BrandMark className="h-20 w-20 rounded-2xl" priority />
-          <h1 className="text-4xl font-bold text-foreground">Open-Inspect</h1>
-        </div>
-        <p className="text-muted-foreground max-w-md text-center">
-          Background coding agent for your team. Ship faster with AI-powered code changes.
-        </p>
-        <Button onClick={() => signIn("github")} className="gap-2 px-6 py-3">
-          <GitHubIcon className="w-5 h-5" />
-          Sign in with GitHub
-        </Button>
-      </div>
-    );
-  }
-
   return (
     <SidebarContext.Provider value={sidebar}>
-      <div className="flex h-dvh overflow-hidden">
-        {/* Mobile: overlay backdrop */}
-        {isMobile && (
-          <div
-            className={`fixed inset-0 z-30 bg-overlay transition-opacity duration-200 ${
-              sidebar.isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-            }`}
-            role="presentation"
-            aria-hidden="true"
-            onClick={sidebar.close}
-          />
-        )}
-        {/* Sidebar: overlay on mobile, push on desktop */}
+      <AppShellActionsContext.Provider value={appShellActions}>
         <div
-          className={
-            isMobile
-              ? `fixed inset-y-0 left-0 z-40 w-72 transition-transform duration-200 ease-in-out ${
-                  sidebar.isOpen ? "translate-x-0" : "-translate-x-full"
-                }`
-              : `transition-all duration-200 ease-in-out ${
-                  sidebar.isOpen ? "w-72" : "w-0"
-                } flex-shrink-0 overflow-hidden`
-          }
+          data-testid="mobile-sidebar-gesture-boundary"
+          className={`flex h-dvh overflow-hidden ${
+            isMobile && !sidebar.isOpen ? "touch-pan-y" : ""
+          }`}
+          onPointerDownCapture={sidebarPull.handlePointerDown}
+          onPointerMoveCapture={sidebarPull.handlePointerMove}
+          onPointerUpCapture={sidebarPull.handlePointerUp}
+          onPointerCancelCapture={sidebarPull.handlePointerCancel}
         >
-          <SessionSidebar
-            onNewSession={handleNewSession}
-            onToggle={sidebar.toggle}
-            onSessionSelect={sidebar.close}
-          />
+          {/* Mobile: overlay backdrop */}
+          {isMobile && (
+            <div
+              className={`fixed inset-0 z-30 bg-overlay ${
+                sidebarPull.isDragging ? "" : "transition-opacity duration-200"
+              } ${sidebar.isOpen ? "opacity-100" : "pointer-events-none"}`}
+              style={
+                !sidebar.isOpen && sidebarPull.dragProgress > 0
+                  ? { opacity: sidebarPull.dragProgress }
+                  : !sidebar.isOpen
+                    ? { opacity: 0 }
+                    : undefined
+              }
+              role="presentation"
+              aria-hidden="true"
+              onClick={sidebar.close}
+            />
+          )}
+          {/* Sidebar: overlay on mobile, push on desktop */}
+          <div
+            ref={mobileSidebarRef}
+            data-testid="mobile-sidebar-drawer"
+            className={
+              isMobile
+                ? `fixed inset-y-0 left-0 z-40 w-72 ease-in-out ${
+                    sidebarPull.isDragging ? "" : "transition-transform duration-200"
+                  } ${sidebar.isOpen ? "translate-x-0" : "-translate-x-full"}`
+                : `transition-all duration-200 ease-in-out ${
+                    sidebar.isOpen ? "w-72" : "w-0"
+                  } flex-shrink-0 overflow-hidden`
+            }
+            style={
+              isMobile && !sidebar.isOpen && sidebarPull.dragDistance > 0
+                ? { transform: `translateX(calc(-100% + ${sidebarPull.dragDistance}px))` }
+                : undefined
+            }
+          >
+            <SessionSidebar
+              onNewSession={handleNewSession}
+              onSearchSessions={handleSearchSessions}
+              onToggle={sidebar.toggle}
+              onSessionSelect={sidebar.close}
+            />
+          </div>
+          <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
         </div>
-        <main className="flex-1 overflow-hidden">{children}</main>
-      </div>
-      <GlobalCommandMenu
-        open={isCommandMenuOpen}
-        onOpenChange={setIsCommandMenuOpen}
-        onNavigate={handleNavigate}
-        onNewSession={handleNewSession}
-        sessions={sessionsResponse?.sessions ?? []}
-      />
+        <GlobalCommandMenu
+          open={isCommandMenuOpen}
+          onOpenChange={setIsCommandMenuOpen}
+          onNavigate={handleNavigate}
+          onNewSession={handleNewSession}
+          sessions={sessionsResponse?.sessions ?? []}
+        />
+      </AppShellActionsContext.Provider>
     </SidebarContext.Provider>
   );
 }

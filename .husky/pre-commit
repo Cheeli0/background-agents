@@ -1,1 +1,6 @@
-npx lint-staged --concurrent false
+# Activate modal-infra venv if it exists (provides ruff for Python linting)
+if [ -f packages/modal-infra/.venv/bin/activate ]; then
+  . packages/modal-infra/.venv/bin/activate
+fi
+
+npx lint-staged

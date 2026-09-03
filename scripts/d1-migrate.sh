@@ -7,33 +7,64 @@ MIGRATIONS_DIR="${2:-$SCRIPT_DIR/../terraform/d1/migrations}"
 
 WRANGLER="npx wrangler"
 
-# Keep bootstrap SQL as one statement to avoid shell/newline parsing edge cases.
-CREATE_MIGRATIONS_TABLE_SQL="CREATE TABLE IF NOT EXISTS _schema_migrations (version TEXT PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));"
+# 0. Validate filenames and guard against duplicate version numbers. Migrations
+# are deduped by their numeric prefix (the _schema_migrations version), so two
+# files sharing a prefix mean one is silently skipped forever — e.g. two PRs
+# that each grab the next number and then both merge. A file with no numeric
+# prefix can't be tracked at all. Fail fast on either, with a clear message.
+INVALID_FILES=""
+PREFIXES=""
+for file in "$MIGRATIONS_DIR"/*.sql; do
+  [ -f "$file" ] || continue
+  BASE=$(basename "$file")
+  # `|| true` so a prefix-less filename doesn't trip the grep's non-zero exit
+  # under `set -o pipefail` and abort before we can report it below.
+  PREFIX=$(printf '%s' "$BASE" | grep -oE '^[0-9]+' || true)
+  if [ -z "$PREFIX" ]; then
+    INVALID_FILES+="  $BASE"$'\n'
+  else
+    PREFIXES+="$PREFIX"$'\n'
+  fi
+done
+
+if [ -n "$INVALID_FILES" ]; then
+  echo "ERROR: migration files without a leading numeric prefix:" >&2
+  printf '%s' "$INVALID_FILES" >&2
+  echo "Rename them as NNNN_description.sql so they can be tracked." >&2
+  exit 1
+fi
+
+DUPES=$(printf '%s' "$PREFIXES" | sort | uniq -d)
+if [ -n "$DUPES" ]; then
+  echo "ERROR: duplicate migration version prefixes detected:" >&2
+  echo "$DUPES" | sed 's/^/  /' >&2
+  echo "Renumber the colliding files so each prefix is unique before deploying." >&2
+  exit 1
+fi
 
 # 1. Ensure tracking table exists
 $WRANGLER d1 execute "$DATABASE_NAME" --remote \
-  --command "$CREATE_MIGRATIONS_TABLE_SQL"
+  --command "CREATE TABLE IF NOT EXISTS _schema_migrations (version TEXT PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
 
-# 2. Get applied versions (parse JSON output)
-APPLIED=$($WRANGLER d1 execute "$DATABASE_NAME" --remote \
-  --command "SELECT version FROM _schema_migrations ORDER BY version" \
-  --json | jq -r '.[0].results[].version // empty' 2>/dev/null || echo "")
-
-# Guard against ambiguous migration state. The runner keys migrations by their
-# numeric prefix, so duplicate prefixes would cause one file to mask another.
-DUPLICATE_VERSIONS=$(
-  for file in "$MIGRATIONS_DIR"/*.sql; do
-    [ -f "$file" ] || continue
-    basename "$file" | grep -oE '^[0-9]+'
-  done | sort | uniq -d
+# 2. Get the applied versions and their exact filenames. A numeric prefix is
+# only unique within this repository; downstream installations can already
+# have used the same version for a different migration.
+APPLIED_JSON=$(
+  $WRANGLER d1 execute "$DATABASE_NAME" --remote \
+    --command "SELECT version, name FROM _schema_migrations ORDER BY version" \
+    --json
 )
+printf '%s' "$APPLIED_JSON" |
+  jq -e '.[0].results | type == "array"' >/dev/null
 
-if [ -n "$DUPLICATE_VERSIONS" ]; then
-  echo "Error: duplicate migration version prefixes found in $MIGRATIONS_DIR:" >&2
-  echo "$DUPLICATE_VERSIONS" | sed 's/^/  - /' >&2
-  echo "Rename the conflicting migration files so each numeric prefix is unique." >&2
-  exit 1
-fi
+# Each migration and its ledger row are submitted in one SQL file. D1 executes
+# the file atomically, so a failed migration rolls back and a lost client
+# response is safe to retry: a committed migration always has its ledger row.
+MIGRATION_BATCH_DIR="$(mktemp -d)"
+cleanup() {
+  rm -r -- "$MIGRATION_BATCH_DIR"
+}
+trap cleanup EXIT
 
 # 3. Apply pending migrations in order
 COUNT=0
@@ -41,18 +72,29 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
   [ -f "$file" ] || continue
   FILENAME=$(basename "$file")
   VERSION=$(echo "$FILENAME" | grep -oE '^[0-9]+')
+  SAFE_FILENAME=$(echo "$FILENAME" | sed "s/'/''/g")
 
-  if echo "$APPLIED" | grep -qxF "$VERSION"; then
+  RECORDED_NAME=$(
+    printf '%s' "$APPLIED_JSON" |
+      jq -r --arg version "$VERSION" \
+        '.[0].results[]? | select(.version == $version) | .name'
+  )
+  if [ -n "$RECORDED_NAME" ]; then
+    if [ "$RECORDED_NAME" != "$FILENAME" ]; then
+      echo "ERROR: version $VERSION is already recorded as $RECORDED_NAME." >&2
+      echo "Renumber this migration before applying it to this installation." >&2
+      exit 1
+    fi
     echo "Skip (already applied): $FILENAME"
     continue
   fi
 
   echo "Applying: $FILENAME"
-  $WRANGLER d1 execute "$DATABASE_NAME" --remote --file "$file"
-
-  SAFE_FILENAME=$(echo "$FILENAME" | sed "s/'/''/g")
-  $WRANGLER d1 execute "$DATABASE_NAME" --remote \
-    --command "INSERT INTO _schema_migrations (version, name) VALUES ('$VERSION', '$SAFE_FILENAME')"
+  MIGRATION_BATCH="$MIGRATION_BATCH_DIR/$FILENAME"
+  cp "$file" "$MIGRATION_BATCH"
+  printf "\n\nINSERT INTO _schema_migrations (version, name) VALUES ('%s', '%s');\n" \
+    "$VERSION" "$SAFE_FILENAME" >>"$MIGRATION_BATCH"
+  $WRANGLER d1 execute "$DATABASE_NAME" --remote --file "$MIGRATION_BATCH"
 
   COUNT=$((COUNT + 1))
 done

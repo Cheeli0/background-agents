@@ -7,7 +7,6 @@ export interface ComboboxOption<T = string> {
   value: T;
   label: string;
   description?: string;
-  badge?: string;
 }
 
 export interface ComboboxGroup<T = string> {
@@ -28,7 +27,23 @@ function flattenOptions<T>(items: ComboboxOption<T>[] | ComboboxGroup<T>[]): Com
   return items;
 }
 
+function defaultFilter<T>(option: ComboboxOption<T>, query: string): boolean {
+  return (
+    option.label.toLowerCase().includes(query) ||
+    (option.description?.toLowerCase().includes(query) ?? false)
+  );
+}
+
 interface ComboboxProps<T = string> {
+  id?: string;
+  /**
+   * Id of the `<label>` element for this field. Pass this whenever a `label[for]`
+   * points at `id`: the trigger is a plain `<button>`, so an associated label wins
+   * the accessible name outright and the collapsed control stops announcing its
+   * selection. With `labelId` set, the trigger is named by the label text plus the
+   * current value text instead.
+   */
+  labelId?: string;
   value: T;
   onChange: (value: T) => void;
   items: ComboboxOption<T>[] | ComboboxGroup<T>[];
@@ -45,6 +60,8 @@ interface ComboboxProps<T = string> {
 }
 
 export function Combobox<T = string>({
+  id,
+  labelId,
   value,
   onChange,
   items,
@@ -69,6 +86,7 @@ export function Combobox<T = string>({
   const instanceId = useId();
   const listboxId = `${instanceId}-listbox`;
   const optionIdPrefix = `${instanceId}-option`;
+  const valueId = `${instanceId}-value`;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -93,11 +111,6 @@ export function Combobox<T = string>({
   }, [open, searchable]);
 
   const normalizedQuery = query.trim().toLowerCase();
-
-  const defaultFilter = (option: ComboboxOption<T>, q: string) =>
-    option.label.toLowerCase().includes(q) ||
-    (option.description?.toLowerCase().includes(q) ?? false) ||
-    (option.badge?.toLowerCase().includes(q) ?? false);
 
   const filterOption = filterFn || defaultFilter;
 
@@ -253,15 +266,21 @@ export function Combobox<T = string>({
   return (
     <div className="relative" ref={containerRef} onKeyDown={handleKeyDown}>
       <button
+        id={id}
         type="button"
         onClick={() => !disabled && setOpen(!open)}
         disabled={disabled}
         className={triggerClassName}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-activedescendant={open ? activeOptionId : undefined}
+        aria-controls={listboxId}
+        aria-labelledby={labelId ? `${labelId} ${valueId}` : undefined}
       >
-        {children}
+        {/* `contents` keeps this wrapper out of the trigger's layout while giving the
+            rendered value an id that aria-labelledby can point at. */}
+        <span id={valueId} className="contents">
+          {children}
+        </span>
       </button>
 
       {open && (
@@ -386,15 +405,8 @@ function OptionButton<T>({
         isActive ? "bg-muted" : ""
       } ${isSelected ? "text-foreground" : "text-muted-foreground"}`}
     >
-      <div className="flex flex-col items-start text-left min-w-0 flex-1">
-        <div className="flex items-center gap-2 w-full min-w-0">
-          <span className="font-medium truncate max-w-full">{option.label}</span>
-          {option.badge && (
-            <span className="inline-flex shrink-0 items-center rounded-full border border-border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground bg-muted">
-              {option.badge}
-            </span>
-          )}
-        </div>
+      <div className="flex flex-col items-start text-left min-w-0">
+        <span className="font-medium truncate max-w-full">{option.label}</span>
         {option.description && (
           <span className="text-xs text-secondary-foreground truncate max-w-full">
             {option.description}

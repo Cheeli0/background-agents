@@ -3,10 +3,23 @@ import {
   ANALYTICS_DAYS,
   type AnalyticsBreakdownBy,
   type AnalyticsDays,
-} from "@open-inspect/shared";
+} from "@open-inspect/shared/types/analytics";
 import { type AnalyticsFilters, AnalyticsStore, HUMAN_SPAWN_SOURCES } from "../db/analytics-store";
+import {
+  type PullRequestAnalyticsFilters,
+  PullRequestAnalyticsStore,
+} from "../db/pull-request-analytics-store";
 import type { Env } from "../types";
-import { type RequestContext, type Route, error, json, parsePattern } from "./shared";
+import {
+  type RequestContext,
+  type Route,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
+  defineRoutes,
+  error,
+  json,
+  parsePattern,
+  requirePermission,
+} from "./shared";
 
 function parseDaysParam(value: string | null): AnalyticsDays | null {
   if (value === null) return 30;
@@ -28,11 +41,21 @@ function getFilters(days: AnalyticsDays): AnalyticsFilters {
   return { startAt, endAt, spawnSources: HUMAN_SPAWN_SOURCES };
 }
 
+/**
+ * PR analytics is scoped to the PR population itself, so unlike the session
+ * analytics it applies no spawn-source filter — automation-produced PRs are
+ * output too, surfaced via the source dimension instead.
+ */
+function getPullRequestFilters(days: AnalyticsDays): PullRequestAnalyticsFilters {
+  const now = Date.now();
+  return { startAt: now - days * 24 * 60 * 60 * 1000, endAt: now, now };
+}
+
 async function handleSummary(
   request: Request,
   env: Env,
   _match: RegExpMatchArray,
-  _ctx: RequestContext
+  ctx: RequestContext
 ): Promise<Response> {
   const url = new URL(request.url);
   const days = parseDaysParam(url.searchParams.get("days"));
@@ -40,7 +63,7 @@ async function handleSummary(
     return error(`days must be one of: ${ANALYTICS_DAYS.join(", ")}`, 400);
   }
 
-  const store = new AnalyticsStore(env.DB);
+  const store = new AnalyticsStore(ctx.db);
   return json(await store.getSummary(getFilters(days)));
 }
 
@@ -48,7 +71,7 @@ async function handleTimeseries(
   request: Request,
   env: Env,
   _match: RegExpMatchArray,
-  _ctx: RequestContext
+  ctx: RequestContext
 ): Promise<Response> {
   const url = new URL(request.url);
   const days = parseDaysParam(url.searchParams.get("days"));
@@ -56,7 +79,7 @@ async function handleTimeseries(
     return error(`days must be one of: ${ANALYTICS_DAYS.join(", ")}`, 400);
   }
 
-  const store = new AnalyticsStore(env.DB);
+  const store = new AnalyticsStore(ctx.db);
   return json(await store.getTimeseries(getFilters(days)));
 }
 
@@ -64,7 +87,7 @@ async function handleBreakdown(
   request: Request,
   env: Env,
   _match: RegExpMatchArray,
-  _ctx: RequestContext
+  ctx: RequestContext
 ): Promise<Response> {
   const url = new URL(request.url);
   const days = parseDaysParam(url.searchParams.get("days"));
@@ -78,24 +101,49 @@ async function handleBreakdown(
     return error(`by must be one of: ${ANALYTICS_BREAKDOWN_BY.join(", ")}`, 400);
   }
 
-  const store = new AnalyticsStore(env.DB);
+  const store = new AnalyticsStore(ctx.db);
   return json(await store.getBreakdown(getFilters(days), by));
 }
 
-export const analyticsRoutes: Route[] = [
+async function handlePullRequests(
+  request: Request,
+  env: Env,
+  _match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  const url = new URL(request.url);
+  const days = parseDaysParam(url.searchParams.get("days"));
+  if (!days) {
+    return error(`days must be one of: ${ANALYTICS_DAYS.join(", ")}`, 400);
+  }
+
+  const store = new PullRequestAnalyticsStore(ctx.db);
+  return json(await store.get(getPullRequestFilters(days)));
+}
+
+export const analyticsRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
   {
     method: "GET",
     pattern: parsePattern("/analytics/summary"),
+    authorization: requirePermission("analytics.read"),
     handler: handleSummary,
   },
   {
     method: "GET",
     pattern: parsePattern("/analytics/timeseries"),
+    authorization: requirePermission("analytics.read"),
     handler: handleTimeseries,
   },
   {
     method: "GET",
     pattern: parsePattern("/analytics/breakdown"),
+    authorization: requirePermission("analytics.read"),
     handler: handleBreakdown,
   },
-];
+  {
+    method: "GET",
+    pattern: parsePattern("/analytics/pull-requests"),
+    authorization: requirePermission("analytics.read"),
+    handler: handlePullRequests,
+  },
+]);

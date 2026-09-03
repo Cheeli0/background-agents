@@ -4,7 +4,8 @@
  * Core interfaces and type definitions for source control platform abstraction.
  */
 
-import type { InstallationRepository } from "@open-inspect/shared";
+import type { InstallationRepository } from "@open-inspect/shared/types/repository-catalog";
+import type { PullRequestLifecycleState } from "@open-inspect/shared/types/artifacts";
 
 /**
  * Repository information.
@@ -54,6 +55,23 @@ export interface GitPushAuthContext {
 }
 
 /**
+ * Credentials returned to a sandbox's git credential helper.
+ *
+ * Used by the long-lived sandbox to obtain fresh per-request credentials over
+ * git's standard `credential get` protocol, so individual git operations
+ * (fetch / push / ls-remote) survive past the credential's TTL without
+ * requiring env-var or remote-URL rotation.
+ */
+export interface CredentialHelperAuth {
+  /** Username component for HTTPS Basic auth (provider-specific). */
+  username: string;
+  /** Password component, typically a short-lived provider token. */
+  password: string;
+  /** Absolute epoch milliseconds when the password stops being valid. */
+  expiresAtEpochMs: number;
+}
+
+/**
  * Configuration for building a manual pull-request URL.
  */
 export interface BuildManualPullRequestUrlConfig {
@@ -99,6 +117,10 @@ export interface GitPushSpec {
   refspec: string;
   /** Remote branch name (for observability and event correlation) */
   targetBranch: string;
+  /** Target repository owner — selects the checkout in multi-repo sandboxes */
+  repoOwner: string;
+  /** Target repository name — selects the checkout in multi-repo sandboxes */
+  repoName: string;
   /** Whether force push is required */
   force: boolean;
 }
@@ -125,6 +147,47 @@ export interface RepositoryAccessResult {
   repoName: string;
   /** Repository's default branch (e.g., "main") */
   defaultBranch: string;
+}
+
+/**
+ * A commit-ish resolved to the commit it names.
+ */
+export interface ResolvedCommit {
+  /** Full commit SHA. */
+  sha: string;
+}
+
+/**
+ * One entry in a recursive repository listing.
+ */
+export interface RepositoryTreeEntry {
+  /** Repository-relative POSIX path. */
+  path: string;
+  /**
+   * Entry kind. Anything a provider reports that is neither a file nor a
+   * directory (submodule, symlink) is "other" — callers decide whether their
+   * operation can proceed without it.
+   */
+  type: "file" | "directory" | "other";
+  /** Provider blob ID, for files. */
+  blobId: string;
+  /**
+   * Byte size when the provider reports one, otherwise null. Null means
+   * unknown, never zero — a caller enforcing a size budget cannot treat a
+   * listing as size-bearing unless every entry reports one.
+   */
+  sizeBytes: number | null;
+  /** Whether the file carries the executable mode bit. */
+  executable: boolean;
+}
+
+/**
+ * A recursive repository listing at one commit.
+ */
+export interface RepositoryTree {
+  entries: RepositoryTreeEntry[];
+  /** True when the provider cut the listing short and entries are missing. */
+  truncated: boolean;
 }
 
 /**
@@ -159,48 +222,81 @@ export interface CreatePullRequestResult {
   webUrl: string;
   /** API URL for the pull request */
   apiUrl: string;
-  /** Current state of the pull request */
-  state: "open" | "closed" | "merged" | "draft";
+  /**
+   * Stored status facts (PR lifecycle tracking). Providers return only the
+   * facts; consumers derive any display state with toDisplayStatus at their
+   * own boundary, so a provider result can never carry an inconsistent pair.
+   */
+  lifecycleState: PullRequestLifecycleState;
+  /** Stored status fact; only meaningful while open */
+  isDraft: boolean;
   /** Source branch */
   sourceBranch: string;
   /** Target branch */
   targetBranch: string;
-}
-
-export interface GetPullRequestChecksConfig {
-  owner: string;
-  name: string;
-  pullRequestNumber: number;
-}
-
-export interface PullRequestChecks {
-  state: "success" | "failure" | "pending";
-  totalCount: number;
-  successfulCount: number;
-  failedCount: number;
-  pendingCount: number;
+  /** Head commit SHA at creation, when the provider response carries it */
+  headSha?: string;
+  /** Stable provider repo id (canonical PR identity), when carried */
+  repositoryExternalId?: string;
+  /**
+   * Provider's updated_at (epoch ms) from the create response, when carried.
+   * Seeds the monotonic guard so a creation write cannot regress a webhook
+   * for the same PR that landed first.
+   */
+  providerUpdatedAt?: number;
 }
 
 /**
- * Configuration for fetching pull request status details.
+ * Configuration for reading a pull request's current state.
  */
-export interface GetPullRequestStatusConfig {
+export interface GetPullRequestConfig {
   /** Repository owner */
   owner: string;
   /** Repository name */
   name: string;
   /** Pull request number */
-  pullRequestNumber: number;
+  number: number;
+  /**
+   * Stable provider repo id, when known. Enables rename/transfer tolerance:
+   * on a 404 the provider re-resolves the repository's current location by
+   * id and retries once.
+   */
+  repositoryExternalId?: string;
 }
 
 /**
- * Pull request status details.
+ * Snapshot of a pull request's current provider state.
+ *
+ * Field names mirror PullRequestArtifactMetadata (shared) so the snapshot
+ * flows into the D1 record and DO artifact without a mapping layer;
+ * lifecycleState/isDraft structurally satisfy PullRequestStatus.
  */
-export interface PullRequestStatus {
+export interface PullRequestSnapshot {
   number: number;
-  title: string;
+  /** Web URL of the pull request */
   url: string;
-  status: "open" | "merged" | "closed" | "draft";
+  lifecycleState: PullRequestLifecycleState;
+  /** Draft readiness; false whenever the PR is not open (invariant) */
+  isDraft: boolean;
+  /** Head (source) branch name */
+  headBranch: string;
+  /** Base (target) branch name */
+  baseBranch: string;
+  headSha?: string;
+  /** Canonical current owner (refreshed when a rename/transfer is detected) */
+  repoOwner: string;
+  /** Canonical current name (refreshed when a rename/transfer is detected) */
+  repoName: string;
+  /** Stable provider repo id */
+  repositoryExternalId?: string;
+  /** Provider's created_at (epoch ms) — analytics cohort bucketing */
+  providerCreatedAt?: number;
+  /** Provider's updated_at (epoch ms) — the monotonic write guard source */
+  providerUpdatedAt?: number;
+  /** Provider's merged_at (epoch ms); only meaningful when merged */
+  mergedAt?: number;
+  /** Provider's closed_at (epoch ms); only meaningful when not open */
+  closedAt?: number;
 }
 
 /**
@@ -241,7 +337,7 @@ export interface PullRequestStatus {
  */
 export interface SourceControlProvider {
   /** Provider name for logging and debugging */
-  readonly name: string;
+  readonly name: SourceControlProviderName;
 
   //
   // User-authenticated operations
@@ -291,11 +387,6 @@ export interface SourceControlProvider {
   checkRepositoryAccess(config: GetRepositoryConfig): Promise<RepositoryAccessResult | null>;
 
   /**
-   * Get the aggregate CI check status for a pull request.
-   */
-  getPullRequestChecks(config: GetPullRequestChecksConfig): Promise<PullRequestChecks | null>;
-
-  /**
    * List all repositories accessible to this deployment's app-level credentials.
    *
    * @returns Array of installation repositories
@@ -313,6 +404,70 @@ export interface SourceControlProvider {
   listBranches(config: GetRepositoryConfig): Promise<{ name: string }[]>;
 
   /**
+   * Resolve one branch tip with app-level credentials. A confirmed 404 is
+   * absence; authentication, throttling, and transport failures throw.
+   */
+  getBranchHead(config: GetRepositoryConfig & { branch: string }): Promise<string | null>;
+
+  /**
+   * Resolve a branch, tag, or commit-ish to the commit it names.
+   *
+   * App-authenticated. A confirmed 404 is absence (null); authentication,
+   * throttling, and transport failures throw.
+   *
+   * @param config - Repository identifier plus the ref to resolve
+   * @returns The resolved commit, or null when the ref does not exist
+   * @throws SourceControlProviderError
+   */
+  resolveCommit(config: GetRepositoryConfig & { ref: string }): Promise<ResolvedCommit | null>;
+
+  /**
+   * List every entry reachable from a commit, recursively.
+   *
+   * App-authenticated. Providers cap how much tree they will return in one
+   * response; `truncated` reports that cap being hit so callers can refuse to
+   * act on a partial listing rather than silently dropping entries.
+   *
+   * @param config - Repository identifier plus the commit and optional subtree to read
+   * @throws SourceControlProviderError
+   */
+  listTree(
+    config: GetRepositoryConfig & { commitSha: string; path?: string | null }
+  ): Promise<RepositoryTree>;
+
+  /**
+   * Read one blob's raw bytes by its provider blob ID.
+   *
+   * App-authenticated. Blob IDs come from `listTree`, so the content read is
+   * pinned to the same commit no matter what the ref does meanwhile.
+   *
+   * `maxBytes` is a refusal threshold, not a truncation point: a blob the
+   * provider can tell is larger is rejected before its body is buffered, so a
+   * caller with a size budget never has to hold an oversized blob in memory to
+   * discover it is oversized. Providers that cannot know the size up front
+   * still return the full body, so callers must re-check what they receive.
+   *
+   * @param config - Repository identifier, the blob ID from listTree, and the
+   *   largest body the caller is willing to accept
+   * @throws SourceControlProviderError, including when the blob is too large
+   */
+  readBlob(config: GetRepositoryConfig & { blobId: string; maxBytes: number }): Promise<Uint8Array>;
+
+  /**
+   * Read the current state of a pull request.
+   *
+   * App-authenticated: credentials come from provider-level configuration
+   * (matching listRepositories), never a caller token — the webhook and
+   * read-through freshness paths run with no user in the loop.
+   *
+   * @param config - PR identifier; include repositoryExternalId when known
+   *   so a 404 triggers a resolve-by-id + single retry (rename tolerance)
+   * @returns Current PR snapshot
+   * @throws SourceControlProviderError
+   */
+  getPullRequest(config: GetPullRequestConfig): Promise<PullRequestSnapshot>;
+
+  /**
    * Generate authentication for git push operations.
    *
    * Uses app-level credentials (configured at provider construction) rather than
@@ -325,6 +480,19 @@ export interface SourceControlProvider {
   generatePushAuth(): Promise<GitPushAuthContext>;
 
   /**
+   * Generate credentials for the sandbox's git credential helper.
+   *
+   * Called per request from inside the sandbox via
+   * `POST /sessions/:id/scm-credentials`. The returned `username` is the
+   * provider-specific basic-auth username (e.g. `x-access-token` for GitHub),
+   * and `password` is a freshly minted token. `expiresAtEpochMs` lets the
+   * client side cache the credentials until shortly before they expire.
+   *
+   * @throws SourceControlProviderError on configuration or upstream errors
+   */
+  generateCredentialHelperAuth(): Promise<CredentialHelperAuth>;
+
+  /**
    * Build provider-specific URL for manual pull request creation.
    */
   buildManualPullRequestUrl(config: BuildManualPullRequestUrlConfig): string;
@@ -333,11 +501,10 @@ export interface SourceControlProvider {
    * Build provider-specific git push specification for bridge execution.
    */
   buildGitPushSpec(config: BuildGitPushSpecConfig): GitPushSpec;
-
-  /**
-   * Get pull request status details when supported by the provider.
-   *
-   * Optional to preserve compatibility with providers that don't expose this.
-   */
-  getPullRequestStatus?(config: GetPullRequestStatusConfig): Promise<PullRequestStatus | null>;
 }
+
+/** App-authenticated repository capabilities required by managed-skill imports. */
+export type RepositoryReader = Pick<
+  SourceControlProvider,
+  "name" | "checkRepositoryAccess" | "resolveCommit" | "listTree" | "readBlob"
+>;

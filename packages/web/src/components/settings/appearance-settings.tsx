@@ -1,5 +1,6 @@
 "use client";
 
+import { useTheme } from "next-themes";
 import {
   useSyntaxHighlightPreferences,
   LIGHT_THEMES,
@@ -30,15 +31,16 @@ function ThemeRow({
   onChange: (id: string) => void;
 }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3">
+    <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <span className="text-sm text-foreground">{label}</span>
         <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
       <select
+        aria-label={label}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="text-sm bg-background border border-border rounded px-2 py-1.5 text-foreground"
+        className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground sm:w-auto"
       >
         {themes.map((t) => (
           <option key={t.id} value={t.id}>
@@ -53,6 +55,8 @@ function ThemeRow({
 export function AppearanceSettings() {
   const { colorSchemeMode, preferredLightTheme, preferredDarkTheme, update } =
     useSyntaxHighlightPreferences();
+  const { theme, setTheme } = useTheme();
+  const selectedColorScheme = (theme ?? colorSchemeMode) as ColorSchemeMode;
 
   return (
     <div>
@@ -68,9 +72,9 @@ export function AppearanceSettings() {
           Customize how code is displayed in sessions.
         </p>
 
-        <div className="border border-border rounded-md divide-y divide-border-muted">
+        <div className="divide-y divide-border-muted overflow-hidden rounded-xl border border-border-muted bg-card">
           {/* Color scheme mode toggle */}
-          <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <span className="text-sm text-foreground">Color scheme</span>
               <p className="text-xs text-muted-foreground mt-0.5">
@@ -81,9 +85,13 @@ export function AppearanceSettings() {
               type="single"
               variant="outline"
               size="sm"
-              value={colorSchemeMode}
+              value={selectedColorScheme}
+              className="self-start"
               onValueChange={(value) => {
-                if (value) update({ colorSchemeMode: value as ColorSchemeMode });
+                if (!value) return;
+                const nextMode = value as ColorSchemeMode;
+                setTheme(nextMode);
+                update({ colorSchemeMode: nextMode });
               }}
             >
               {COLOR_SCHEME_OPTIONS.map((opt) => {

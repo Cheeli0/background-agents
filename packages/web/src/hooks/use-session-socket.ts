@@ -1,24 +1,31 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { mutate } from "swr";
-import { SIDEBAR_SESSIONS_KEY, type SessionListResponse } from "@/lib/session-list";
+import { useSessionTransport } from "@/hooks/use-session-transport";
+import { useSandboxAccess } from "@/hooks/use-sandbox-access";
+import type { SessionCapabilities } from "@/lib/session-capabilities";
+import {
+  ingestLiveSandboxEvent,
+  pendingToTokenEvent,
+  toUiSandboxEvent,
+  type PendingAssistantText,
+} from "@/lib/session-socket/event-log";
+import { createSessionSocketState, sessionSocketReducer } from "@/lib/session-socket/reducer";
+import { swrKeysToRevalidate } from "@/lib/session-socket/swr-revalidation";
 import type { Artifact, SandboxEvent } from "@/types/session";
+import type { SessionAttachmentReference } from "@open-inspect/shared/types/session-attachments";
 import type {
   ParticipantPresence,
-  SandboxEvent as SharedSandboxEvent,
-  ScreenshotArtifactMetadata,
+  PromptQueueItem,
   ServerMessage,
-  SessionArtifact,
-  SessionState as SharedSessionState,
-} from "@open-inspect/shared";
+  SessionSnapshot,
+  SessionState,
+} from "@open-inspect/shared/types/server-messages";
 
-// WebSocket URL (should come from env in production)
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8787";
-
-// WebSocket close codes
-const WS_CLOSE_AUTH_REQUIRED = 4001;
-const WS_CLOSE_SESSION_EXPIRED = 4002;
+const PROMPT_SUBSCRIPTION_TIMEOUT_MS = 5_000;
+const PROMPT_ACK_TIMEOUT_MS = 15_000;
+const HISTORY_PAGE_SIZE = 200;
 
 interface Message {
   id: string;
@@ -29,905 +36,401 @@ interface Message {
   createdAt: number;
 }
 
-type SessionState = SharedSessionState;
-type Participant = ParticipantPresence;
-type WsMessage = ServerMessage;
+// Message history is delivered through replayed events; kept for API shape.
+const NO_MESSAGES: Message[] = [];
 
 interface UseSessionSocketReturn {
   connected: boolean;
   connecting: boolean;
-  replaying: boolean;
+  ready: boolean;
+  presenceSynced: boolean;
   authError: string | null;
   connectionError: string | null;
   sessionState: SessionState | null;
+  /** Why the sandbox last failed, when the control plane reported a reason. */
+  sandboxError: string | null;
   messages: Message[];
   events: SandboxEvent[];
-  participants: Participant[];
+  participants: ParticipantPresence[];
   artifacts: Artifact[];
   currentParticipantId: string | null;
   isProcessing: boolean;
+  promptQueue: PromptQueueItem[];
   hasMoreHistory: boolean;
   loadingHistory: boolean;
-  sendPrompt: (content: string, model?: string, reasoningEffort?: string) => void;
+  sendPrompt: (
+    content: string,
+    model?: string,
+    reasoningEffort?: string,
+    attachments?: SessionAttachmentReference[],
+    clientRequestId?: string
+  ) => Promise<QueuePromptResult>;
+  cancelPrompt: (messageId: string) => Promise<CancelPromptResult>;
   stopExecution: () => void;
   sendTyping: () => void;
   reconnect: () => void;
   loadOlderEvents: () => void;
 }
 
+type CorrelatedRequestFailure = {
+  ok: false;
+  reason: "rejected" | "disconnected" | "timeout";
+  message?: string;
+};
+
+type QueuePromptResult =
+  | { ok: true; clientRequestId: string; messageId: string; position: number | null }
+  | CorrelatedRequestFailure;
+
+type CancelPromptResult = { ok: true; messageId: string } | CorrelatedRequestFailure;
+
+interface PendingCorrelatedRequest {
+  settleSuccess: (message: ServerMessage) => boolean;
+  settleFailure: (failure: CorrelatedRequestFailure) => void;
+}
+
 /**
- * Collapse a batch of events by folding streaming token events into their
- * final form (only the last accumulated token before execution_complete is kept).
- * Mutates pendingTextRef to track in-flight tokens across calls.
+ * Session view over a WebSocket connection, composed from four layers:
+ *
+ * - transport (connect/auth/reconnect/ping): `useSessionTransport`
+ * - event-log construction and token buffering: `lib/session-socket/event-log`
+ * - view-state projection: `lib/session-socket/reducer`
+ * - SWR revalidation: `lib/session-socket/swr-revalidation` (applied below,
+ *   the only place this hook touches the cache)
  */
-function collapseTokenEvents(
-  events: SandboxEvent[],
-  pendingTextRef: React.MutableRefObject<{
-    content: string;
-    messageId: string;
-    sandboxId: string;
-    timestamp: number;
-  } | null>
-): SandboxEvent[] {
-  const result: SandboxEvent[] = [];
-  for (const evt of events) {
-    if (evt.type === "token" && evt.content && evt.messageId) {
-      pendingTextRef.current = {
-        content: evt.content,
-        messageId: evt.messageId,
-        sandboxId: evt.sandboxId,
-        timestamp: evt.timestamp,
-      };
-    } else if (evt.type === "execution_complete") {
-      if (pendingTextRef.current) {
-        const pending = pendingTextRef.current;
-        pendingTextRef.current = null;
-        result.push({
-          type: "token",
-          content: pending.content,
-          messageId: pending.messageId,
-          sandboxId: pending.sandboxId,
-          timestamp: pending.timestamp,
-        });
-      }
-      result.push(evt);
-    } else {
-      result.push(evt);
-    }
-  }
-  return result;
-}
-
-function parseWsMessage(raw: unknown): WsMessage | null {
-  if (!raw || typeof raw !== "object") return null;
-  if (!("type" in raw)) return null;
-  return raw as WsMessage;
-}
-
-function toUiSandboxEvent(event: SharedSandboxEvent): SandboxEvent {
-  return {
-    ...event,
-    timestamp: typeof event.timestamp === "number" ? event.timestamp : Date.now() / 1000,
-  };
-}
-
-interface RawArtifact {
-  id: string;
-  type: string;
-  url: string | null;
-  prNumber?: number;
-  metadata?: Record<string, unknown> | null;
-  createdAt?: number;
-}
-
-interface SessionArtifactsResponse {
-  artifacts?: RawArtifact[];
-}
-
-type ArtifactMetadata = NonNullable<Artifact["metadata"]>;
-type ArtifactPrState = NonNullable<ArtifactMetadata["prState"]>;
-type ArtifactPreviewStatus = NonNullable<ArtifactMetadata["previewStatus"]>;
-const SCREENSHOT_MIME_TYPES = new Set<ScreenshotArtifactMetadata["mimeType"]>([
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-]);
-
-function toRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
-
-function toStringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function toNumberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" ? value : undefined;
-}
-
-function toBooleanOrUndefined(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function toPrStateOrUndefined(value: unknown): ArtifactPrState | undefined {
-  if (value === "open" || value === "merged" || value === "closed" || value === "draft") {
-    return value;
-  }
-  return undefined;
-}
-
-function toPreviewStatusOrUndefined(value: unknown): ArtifactPreviewStatus | undefined {
-  if (value === "active" || value === "outdated" || value === "stopped") {
-    return value;
-  }
-  return undefined;
-}
-
-function isScreenshotMimeType(value: string): value is ScreenshotArtifactMetadata["mimeType"] {
-  return SCREENSHOT_MIME_TYPES.has(value as ScreenshotArtifactMetadata["mimeType"]);
-}
-
-function toViewportOrUndefined(value: unknown): ArtifactMetadata["viewport"] | undefined {
-  const viewport = toRecord(value);
-  const width = viewport ? toNumberOrUndefined(viewport.width) : undefined;
-  const height = viewport ? toNumberOrUndefined(viewport.height) : undefined;
-  if (
-    width !== undefined &&
-    Number.isFinite(width) &&
-    width > 0 &&
-    height !== undefined &&
-    Number.isFinite(height) &&
-    height > 0
-  ) {
-    return { width, height };
-  }
-  return undefined;
-}
-
-function toUiArtifact(artifact: RawArtifact | SessionArtifact): Artifact {
-  const rawMetadata = toRecord(artifact.metadata) ?? {};
-  const topLevelPrNumber =
-    "prNumber" in artifact ? toNumberOrUndefined(artifact.prNumber) : undefined;
-  const prNumber =
-    topLevelPrNumber ??
-    toNumberOrUndefined(rawMetadata.prNumber) ??
-    toNumberOrUndefined(rawMetadata.number);
-  const prState =
-    toPrStateOrUndefined(rawMetadata.prState) ?? toPrStateOrUndefined(rawMetadata.state);
-  const mode = rawMetadata.mode === "manual_pr" ? "manual_pr" : undefined;
-  const createPrUrl = toStringOrUndefined(rawMetadata.createPrUrl);
-  const head = toStringOrUndefined(rawMetadata.head);
-  const base = toStringOrUndefined(rawMetadata.base);
-  const provider = toStringOrUndefined(rawMetadata.provider);
-  const filename = toStringOrUndefined(rawMetadata.filename);
-  const objectKey = toStringOrUndefined(rawMetadata.objectKey);
-  const mimeType = toStringOrUndefined(rawMetadata.mimeType);
-  const sizeBytes = toNumberOrUndefined(rawMetadata.sizeBytes);
-  const viewport = toViewportOrUndefined(rawMetadata.viewport);
-  const sourceUrl = toStringOrUndefined(rawMetadata.sourceUrl);
-  const fullPage = toBooleanOrUndefined(rawMetadata.fullPage);
-  const annotated = toBooleanOrUndefined(rawMetadata.annotated);
-  const caption = toStringOrUndefined(rawMetadata.caption);
-  const previewStatus = toPreviewStatusOrUndefined(rawMetadata.previewStatus);
-
-  const metadata: Artifact["metadata"] = {
-    prNumber,
-    prState,
-    mode,
-    createPrUrl,
-    head,
-    base,
-    provider,
-    filename,
-    objectKey,
-    mimeType: mimeType && isScreenshotMimeType(mimeType) ? mimeType : undefined,
-    sizeBytes:
-      sizeBytes !== undefined && Number.isFinite(sizeBytes) && sizeBytes >= 0
-        ? sizeBytes
-        : undefined,
-    viewport,
-    sourceUrl,
-    fullPage,
-    annotated,
-    caption,
-    previewStatus,
-  };
-  const hasMetadata = Object.values(metadata).some((value) => value !== undefined);
-
-  return {
-    id: artifact.id,
-    type: artifact.type as Artifact["type"],
-    url: artifact.url ?? null,
-    createdAt: typeof artifact.createdAt === "number" ? artifact.createdAt : Date.now(),
-    metadata: hasMetadata ? metadata : undefined,
-  };
-}
-
-function mergeArtifacts(existing: Artifact[], incoming: Artifact[]): Artifact[] {
-  const byId = new Map<string, Artifact>();
-
-  for (const artifact of existing) {
-    byId.set(artifact.id, artifact);
-  }
-  for (const artifact of incoming) {
-    const current = byId.get(artifact.id);
-    byId.set(
-      artifact.id,
-      current
-        ? {
-            ...current,
-            ...artifact,
-            metadata: {
-              ...(current.metadata ?? {}),
-              ...(artifact.metadata ?? {}),
-            },
-          }
-        : artifact
-    );
-  }
-
-  return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
-}
-
-export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
-  const wsRef = useRef<WebSocket | null>(null);
-  const connectingRef = useRef(false);
-  const mountedRef = useRef(true);
+export function useSessionSocket(
+  sessionId: string,
+  initialSnapshot: SessionSnapshot,
+  capabilities: SessionCapabilities
+): UseSessionSocketReturn {
+  const [state, dispatch] = useReducer(
+    sessionSocketReducer,
+    initialSnapshot,
+    createSessionSocketState
+  );
   const subscribedRef = useRef(false);
-  const wsTokenRef = useRef<string | null>(null);
-  // Accumulates text during streaming, displayed only on completion to avoid duplicate display.
-  // Stores only the latest token since token events contain the full accumulated
-  // text (not incremental).
-  const pendingTextRef = useRef<{
-    content: string;
-    messageId: string;
-    sandboxId: string;
-    timestamp: number;
-  } | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-  const [replaying, setReplaying] = useState(true);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [sessionState, setSessionState] = useState<SessionState | null>(null);
-  const [messages, _setMessages] = useState<Message[]>([]);
-  const [events, setEvents] = useState<SandboxEvent[]>([]);
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [currentParticipantId, setCurrentParticipantId] = useState<string | null>(null);
-  const currentParticipantRef = useRef<{
-    participantId: string;
-    name: string;
-    avatar?: string;
-  } | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectAttempts = useRef(0);
-
-  const patchSidebarSession = useCallback(
-    (
-      patch: (
-        session: SessionListResponse["sessions"][number]
-      ) => SessionListResponse["sessions"][number]
-    ) => {
-      mutate<SessionListResponse>(
-        SIDEBAR_SESSIONS_KEY,
-        (current) => {
-          if (!current) {
-            return current;
-          }
-
-          let updated = false;
-          const sessions = current.sessions.map((session) => {
-            if (session.id !== sessionId) {
-              return session;
-            }
-
-            updated = true;
-            return patch(session);
-          });
-
-          return updated ? { ...current, sessions } : current;
-        },
-        false
-      );
-    },
-    [sessionId]
+  // Buffers streamed assistant text in a ref so token events (which arrive at
+  // high frequency) don't re-render; the text is appended on completion.
+  const pendingTextRef = useRef<PendingAssistantText | null>(null);
+  const subscriptionWaitersRef = useRef(new Set<(subscribed: boolean) => void>());
+  const pendingPromptRequestIdRef = useRef<string | null>(null);
+  const pendingRequestsRef = useRef(new Map<string, PendingCorrelatedRequest>());
+  const {
+    sandboxAccess,
+    clear: clearSandboxAccess,
+    refresh: refreshSandboxAccess,
+  } = useSandboxAccess(
+    sessionId,
+    state.sessionState?.sandboxStatus === "ready",
+    capabilities.sandboxAccess
   );
 
-  // Pagination state
-  const [hasMoreHistory, setHasMoreHistory] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const cursorRef = useRef<{ timestamp: number; id: string } | null>(null);
-
-  /**
-   * Process a single live sandbox_event.
-   */
-  const processSandboxEvent = useCallback((event: SandboxEvent) => {
-    if (event.type === "token" && event.content && event.messageId) {
-      // Accumulate text but DON'T display yet
-      pendingTextRef.current = {
-        content: event.content,
-        messageId: event.messageId,
-        sandboxId: event.sandboxId,
-        timestamp: event.timestamp,
-      };
-    } else if (event.type === "execution_complete") {
-      // On completion: Add final text to events using the token's original timestamp
-      if (pendingTextRef.current) {
-        const pending = pendingTextRef.current;
-        pendingTextRef.current = null;
-        setEvents((prev) => [
-          ...prev,
-          {
-            type: "token",
-            content: pending.content,
-            messageId: pending.messageId,
-            sandboxId: pending.sandboxId,
-            timestamp: pending.timestamp,
-          },
-        ]);
-      }
-      setEvents((prev) => [...prev, event]);
-    } else {
-      // Other events (tool_call, user_message, git_sync, etc.) - add normally
-      setEvents((prev) => [...prev, event]);
+  const settleSubscriptionWaiters = useCallback((subscribed: boolean) => {
+    for (const resolve of subscriptionWaitersRef.current) {
+      resolve(subscribed);
     }
+    subscriptionWaitersRef.current.clear();
+  }, []);
 
-    if (
-      event.type === "step_finish" &&
-      typeof event.cost === "number" &&
-      Number.isFinite(event.cost) &&
-      event.cost > 0
-    ) {
-      const stepCost = event.cost;
-      setSessionState((prev) =>
-        prev
-          ? {
-              ...prev,
-              totalCost: (prev.totalCost ?? 0) + stepCost,
-            }
-          : prev
+  const registerCorrelatedRequest = useCallback(
+    <T extends { ok: true }>(
+      clientRequestId: string,
+      resolve: (result: T | CorrelatedRequestFailure) => void,
+      successFromMessage: (message: ServerMessage) => T | null,
+      onSettled?: () => void
+    ) => {
+      let settled = false;
+      const finish = (result: T | CorrelatedRequestFailure) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(ackTimeoutId);
+        pendingRequestsRef.current.delete(clientRequestId);
+        onSettled?.();
+        resolve(result);
+      };
+
+      const ackTimeoutId = setTimeout(
+        () => finish({ ok: false, reason: "timeout" }),
+        PROMPT_ACK_TIMEOUT_MS
       );
+      pendingRequestsRef.current.set(clientRequestId, {
+        settleSuccess: (message) => {
+          const result = successFromMessage(message);
+          if (!result) return false;
+          finish(result);
+          return true;
+        },
+        settleFailure: finish,
+      });
+    },
+    []
+  );
+
+  const settleAllCorrelatedRequests = useCallback((failure: CorrelatedRequestFailure) => {
+    for (const pending of [...pendingRequestsRef.current.values()]) {
+      pending.settleFailure(failure);
     }
   }, []);
 
-  const fetchArtifacts = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}/artifacts`);
-      if (!response.ok) {
-        console.error("Failed to fetch session artifacts:", response.status);
-        return;
-      }
-
-      const data = (await response.json()) as SessionArtifactsResponse;
-      const fetchedArtifacts = Array.isArray(data.artifacts)
-        ? data.artifacts.map(toUiArtifact)
-        : [];
-
-      if (!mountedRef.current) {
-        return;
-      }
-
-      setArtifacts((prev) => mergeArtifacts(prev, fetchedArtifacts));
-    } catch (error) {
-      console.error("Failed to fetch session artifacts:", error);
-    }
-  }, [sessionId]);
+  useEffect(() => {
+    subscribedRef.current = state.ready;
+    if (state.ready) settleSubscriptionWaiters(true);
+  }, [state.ready, settleSubscriptionWaiters]);
 
   const handleMessage = useCallback(
-    (data: WsMessage) => {
-      switch (data.type) {
-        case "subscribed": {
-          console.log("WebSocket subscribed to session");
-          subscribedRef.current = true;
-          // Replace local artifacts with the subscribed snapshot so reconnects
-          // still clear stale state instead of merging stale client data.
-          setArtifacts(data.artifacts.map(toUiArtifact));
-          pendingTextRef.current = null;
-          if (data.state) {
-            setSessionState({
-              ...data.state,
-              // Backward-compatible default for older sessions that may omit this.
-              isProcessing: data.state.isProcessing ?? false,
-              totalCost: data.state.totalCost ?? 0,
-            });
-          }
-          // Store the current user's participant ID and info for author attribution
-          if (data.participantId) {
-            setCurrentParticipantId(data.participantId);
-          }
-          // Initialize participant ref immediately for sendPrompt author attribution
-          if (data.participant) {
-            currentParticipantRef.current = data.participant;
-          }
-
-          // Process batched replay events in a single state update
-          setEvents(
-            data.replay
-              ? collapseTokenEvents(data.replay.events.map(toUiSandboxEvent), pendingTextRef)
-              : []
-          );
-          setHasMoreHistory(data.replay?.hasMore ?? false);
-          cursorRef.current = data.replay?.cursor ?? null;
-          setReplaying(false);
-          void fetchArtifacts();
-
-          if (data.spawnError && data.state?.sandboxStatus === "failed") {
-            console.error("Sandbox spawn error:", data.spawnError);
-            setSessionState((prev) => (prev ? { ...prev, sandboxStatus: "failed" } : null));
-          }
-          break;
+    (message: ServerMessage) => {
+      if (message.type === "sandbox_event") {
+        const { pending, append } = ingestLiveSandboxEvent(
+          pendingTextRef.current,
+          toUiSandboxEvent(message.event)
+        );
+        pendingTextRef.current = pending;
+        if (append.length > 0) {
+          dispatch({ type: "events_appended", events: append });
         }
+        return;
+      }
 
-        case "prompt_queued":
-          // Could show queue position indicator
-          break;
-
-        case "sandbox_event":
-          if (data.event) {
-            processSandboxEvent(toUiSandboxEvent(data.event));
-          }
-          break;
-
-        case "history_page": {
-          // Prepend older events to the beginning
-          setEvents((prev) => [...data.items.map(toUiSandboxEvent), ...prev]);
-          setHasMoreHistory(data.hasMore ?? false);
-          cursorRef.current = data.cursor ?? null;
-          setLoadingHistory(false);
-          break;
-        }
-
-        case "presence_sync":
-        case "presence_update":
-          setParticipants(data.participants);
-          // Update current participant info for author attribution
-          setCurrentParticipantId((currentId) => {
-            if (currentId) {
-              const currentParticipant = data.participants.find(
-                (p) => p.participantId === currentId
-              );
-              if (currentParticipant) {
-                currentParticipantRef.current = {
-                  participantId: currentParticipant.participantId,
-                  name: currentParticipant.name,
-                  avatar: currentParticipant.avatar,
-                };
-              }
-            }
-            return currentId;
+      if (message.type === "subscribed") {
+        console.log("WebSocket subscribed to session");
+        pendingTextRef.current = null;
+        void refreshSandboxAccess();
+      } else if (message.type === "sandbox_access_changed") {
+        void refreshSandboxAccess();
+      } else if (message.type === "sandbox_error") {
+        console.error("Sandbox error:", message.error);
+      } else if (message.type === "error") {
+        console.error("Session error:", message);
+        if (message.clientRequestId) {
+          pendingRequestsRef.current.get(message.clientRequestId)?.settleFailure({
+            ok: false,
+            reason: "rejected",
+            message: message.message,
           });
-          break;
-
-        case "presence_leave":
-          setParticipants((prev) => prev.filter((p) => p.userId !== data.userId));
-          break;
-
-        case "sandbox_warming":
-          setSessionState((prev) => (prev ? { ...prev, sandboxStatus: "warming" } : null));
-          break;
-
-        case "sandbox_spawning":
-          setSessionState((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  sandboxStatus: "spawning",
-                  codeServerUrl: undefined,
-                  codeServerPassword: undefined,
-                  tunnelUrls: undefined,
-                  ttydUrl: undefined,
-                  ttydToken: undefined,
-                }
-              : null
-          );
-          break;
-
-        case "sandbox_status": {
-          const isTerminal =
-            data.status === "stale" || data.status === "stopped" || data.status === "failed";
-          setSessionState((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  sandboxStatus: data.status,
-                  ...(isTerminal && {
-                    codeServerUrl: undefined,
-                    codeServerPassword: undefined,
-                    tunnelUrls: undefined,
-                    ttydUrl: undefined,
-                    ttydToken: undefined,
-                  }),
-                }
-              : null
-          );
-          break;
         }
+      } else if (message.type === "prompt_queued" || message.type === "prompt_cancelled") {
+        pendingRequestsRef.current.get(message.clientRequestId)?.settleSuccess(message);
+      }
 
-        case "code_server_info":
-          setSessionState((prev) =>
-            prev ? { ...prev, codeServerUrl: data.url, codeServerPassword: data.password } : null
-          );
-          break;
+      const clearsSandboxAccess =
+        message.type === "sandbox_spawning" ||
+        message.type === "sandbox_error" ||
+        (message.type === "sandbox_status" &&
+          ["spawning", "stale", "stopped", "failed"].includes(message.status));
+      if (clearsSandboxAccess) void clearSandboxAccess();
 
-        case "ttyd_info":
-          setSessionState((prev) =>
-            prev ? { ...prev, ttydUrl: data.url, ttydToken: data.token } : null
-          );
-          break;
-
-        case "tunnel_urls":
-          setSessionState((prev) => (prev ? { ...prev, tunnelUrls: data.urls } : null));
-          break;
-
-        case "sandbox_ready":
-          setSessionState((prev) => (prev ? { ...prev, sandboxStatus: "ready" } : null));
-          break;
-
-        case "artifact_created":
-          setArtifacts((prev) => {
-            const nextArtifact = toUiArtifact(data.artifact);
-            const existingIndex = prev.findIndex((artifact) => artifact.id === nextArtifact.id);
-            if (existingIndex === -1) {
-              return [nextArtifact, ...prev];
-            }
-
-            return prev.map((artifact, index) =>
-              index === existingIndex ? nextArtifact : artifact
-            );
-          });
-          break;
-
-        case "session_branch":
-          // Branch updates apply only to the active session detail view.
-          setSessionState((prev) => (prev ? { ...prev, branchName: data.branchName } : null));
-          break;
-
-        case "session_title":
-          if (data.title) {
-            setSessionState((prev) => (prev ? { ...prev, title: data.title! } : null));
-          }
-          break;
-
-        case "session_status":
-          setSessionState((prev) => (prev ? { ...prev, status: data.status } : null));
-          patchSidebarSession((session) => ({
-            ...session,
-            status: data.status,
-            isProcessing:
-              data.status === "completed" || data.status === "cancelled" || data.status === "failed"
-                ? false
-                : session.isProcessing,
-          }));
-          // Revalidate session list so status change is reflected in sidebar
-          mutate(SIDEBAR_SESSIONS_KEY);
-          break;
-
-        case "child_session_update":
-          // Child session spawned or changed status — revalidate child list and sidebar
-          mutate(`/api/sessions/${sessionId}/children`);
-          mutate(SIDEBAR_SESSIONS_KEY);
-          break;
-
-        case "processing_status":
-          setSessionState((prev) => (prev ? { ...prev, isProcessing: data.isProcessing } : null));
-          patchSidebarSession((session) => ({ ...session, isProcessing: data.isProcessing }));
-          break;
-
-        case "sandbox_error":
-          console.error("Sandbox error:", data.error);
-          setSessionState((prev) => (prev ? { ...prev, sandboxStatus: "failed" } : null));
-          break;
-
-        case "pong":
-          // Health check response
-          break;
-
-        case "error":
-          console.error("Session error:", data);
-          // Reset loading state if a fetch_history request was rejected
-          setLoadingHistory(false);
-          break;
+      dispatch({ type: "server_message", message });
+      for (const key of swrKeysToRevalidate(message, sessionId)) {
+        mutate(key);
       }
     },
-    [fetchArtifacts, patchSidebarSession, processSandboxEvent, sessionId]
+    [clearSandboxAccess, refreshSandboxAccess, sessionId]
   );
 
-  const fetchWsToken = useCallback(async (): Promise<string | null> => {
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}/ws-token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
+  const handleClose = useCallback(() => {
+    subscribedRef.current = false;
+    settleSubscriptionWaiters(false);
+    settleAllCorrelatedRequests({ ok: false, reason: "disconnected" });
+    dispatch({ type: "socket_closed" });
+  }, [settleAllCorrelatedRequests, settleSubscriptionWaiters]);
 
-      if (!response.ok) {
-        if (response.status === 401) {
-          setAuthError("Please sign in to connect");
-          return null;
-        }
-        const error = await response.text();
-        console.error("Failed to fetch WS token:", error);
-        setAuthError("Failed to authenticate");
-        return null;
-      }
+  const transport = useSessionTransport(
+    sessionId,
+    {
+      onMessage: handleMessage,
+      onClose: handleClose,
+    },
+    capabilities.read
+  );
+  const { isOpen, send, reconnect, markHealthy } = transport;
 
-      const data = await response.json();
-      return data.token;
-    } catch (error) {
-      console.error("Failed to fetch WS token:", error);
-      setAuthError("Failed to authenticate");
-      return null;
-    }
-  }, [sessionId]);
+  useEffect(() => {
+    if (!state.ready) return;
+    markHealthy();
+  }, [markHealthy, state.ready]);
 
-  const connect = useCallback(async () => {
-    // Use ref to avoid race conditions with React StrictMode
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log("WebSocket already open");
-      return;
-    }
-    if (wsRef.current?.readyState === WebSocket.CONNECTING) {
-      console.log("WebSocket already connecting");
-      return;
-    }
-    if (connectingRef.current) {
-      console.log("Connection in progress (ref)");
-      return;
-    }
+  useEffect(
+    () => () => {
+      settleSubscriptionWaiters(false);
+      settleAllCorrelatedRequests({ ok: false, reason: "disconnected" });
+    },
+    [settleAllCorrelatedRequests, settleSubscriptionWaiters]
+  );
 
-    connectingRef.current = true;
-    setConnecting(true);
-    setAuthError(null);
+  const waitForSubscription = useCallback((): Promise<boolean> => {
+    if (subscribedRef.current) return Promise.resolve(true);
+    if (!isOpen()) return Promise.resolve(false);
 
-    // Fetch a WebSocket auth token first
-    if (!wsTokenRef.current) {
-      const token = await fetchWsToken();
-      if (!token) {
-        connectingRef.current = false;
-        setConnecting(false);
-        return;
-      }
-      wsTokenRef.current = token;
-    }
-
-    const wsUrl = `${WS_URL}/sessions/${sessionId}/ws`;
-    console.log("WebSocket connecting to:", wsUrl);
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      if (!mountedRef.current) {
-        ws.close();
-        return;
-      }
-      console.log("WebSocket connected!");
-      connectingRef.current = false;
-      setConnected(true);
-      setConnecting(false);
-      reconnectAttempts.current = 0;
-
-      // Subscribe to session with the auth token
-      ws.send(
-        JSON.stringify({
-          type: "subscribe",
-          token: wsTokenRef.current,
-          clientId: crypto.randomUUID(),
-        })
-      );
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = parseWsMessage(JSON.parse(event.data));
-        if (!data) return;
-        handleMessage(data);
-      } catch (error) {
-        console.error("Failed to parse WebSocket message:", error);
-      }
-    };
-
-    ws.onclose = (event) => {
-      console.log("WebSocket closed:", {
-        code: event.code,
-        reason: event.reason,
-        wasClean: event.wasClean,
-      });
-      connectingRef.current = false;
-      subscribedRef.current = false;
-      setConnected(false);
-      setConnecting(false);
-      setReplaying(false);
-      wsRef.current = null;
-
-      // Handle authentication errors
-      if (event.code === WS_CLOSE_AUTH_REQUIRED) {
-        setAuthError("Authentication failed. Please sign in again.");
-        // Clear the token so we fetch a new one on reconnect
-        wsTokenRef.current = null;
-        return;
-      }
-
-      // Handle session expired (e.g., after server hibernation)
-      if (event.code === WS_CLOSE_SESSION_EXPIRED) {
-        setConnectionError("Session expired. Please reconnect.");
-        wsTokenRef.current = null;
-        return;
-      }
-
-      // Only reconnect if mounted and not a clean close
-      if (mountedRef.current && !event.wasClean) {
-        if (reconnectAttempts.current < 5) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          reconnectAttempts.current++;
-          console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})`);
-
-          reconnectTimeoutRef.current = setTimeout(() => {
-            if (mountedRef.current) {
-              connect();
-            }
-          }, delay);
-        } else {
-          // Exhausted reconnection attempts
-          console.error("WebSocket reconnection failed after 5 attempts");
-          setConnectionError("Connection lost. Please check your network and try reconnecting.");
-        }
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error("WebSocket error event:", error);
-    };
-  }, [sessionId, handleMessage, fetchWsToken]);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (subscribed: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        subscriptionWaitersRef.current.delete(finish);
+        resolve(subscribed);
+      };
+      const timeout = setTimeout(() => finish(false), PROMPT_SUBSCRIPTION_TIMEOUT_MS);
+      subscriptionWaitersRef.current.add(finish);
+    });
+  }, [isOpen]);
 
   const sendPrompt = useCallback(
-    (content: string, model?: string, reasoningEffort?: string) => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    async (
+      content: string,
+      model?: string,
+      reasoningEffort?: string,
+      attachments?: SessionAttachmentReference[],
+      requestedClientRequestId?: string
+    ): Promise<QueuePromptResult> => {
+      if (!isOpen()) {
         console.error("WebSocket not connected");
-        return;
+        return { ok: false, reason: "disconnected" };
       }
 
-      if (!subscribedRef.current) {
-        console.error("Not subscribed yet, waiting...");
-        // Retry after a short delay
-        setTimeout(() => sendPrompt(content, model, reasoningEffort), 500);
-        return;
+      if (pendingPromptRequestIdRef.current) {
+        console.error("A prompt is already waiting for acknowledgement");
+        return { ok: false, reason: "rejected", message: "A prompt is awaiting confirmation" };
+      }
+
+      if (!(await waitForSubscription()) || !isOpen()) {
+        console.error("WebSocket subscription unavailable");
+        return { ok: false, reason: "disconnected" };
+      }
+
+      if (pendingPromptRequestIdRef.current) {
+        console.error("A prompt is already waiting for acknowledgement");
+        return { ok: false, reason: "rejected", message: "A prompt is awaiting confirmation" };
       }
 
       console.log("Sending prompt", {
         contentLength: content.length,
         model,
         reasoningEffort,
+        attachmentsCount: attachments?.length ?? 0,
       });
-
-      // Optimistically set isProcessing for immediate feedback
-      // Server will confirm with processing_status message
-      setSessionState((prev) => (prev ? { ...prev, isProcessing: true } : null));
-      patchSidebarSession((session) => ({ ...session, isProcessing: true }));
 
       // Note: user_message event is NOT inserted optimistically here.
       // The server writes a user_message event to the events table and broadcasts it
       // to all clients (including the sender), which handles both display and multiplayer.
 
-      wsRef.current.send(
-        JSON.stringify({
+      const clientRequestId = requestedClientRequestId ?? crypto.randomUUID();
+      return new Promise<QueuePromptResult>((resolve) => {
+        pendingPromptRequestIdRef.current = clientRequestId;
+        registerCorrelatedRequest<Extract<QueuePromptResult, { ok: true }>>(
+          clientRequestId,
+          resolve,
+          (message) =>
+            message.type === "prompt_queued"
+              ? {
+                  ok: true,
+                  clientRequestId,
+                  messageId: message.messageId,
+                  position: message.position,
+                }
+              : null,
+          () => {
+            if (pendingPromptRequestIdRef.current === clientRequestId) {
+              pendingPromptRequestIdRef.current = null;
+            }
+          }
+        );
+
+        send({
           type: "prompt",
+          clientRequestId,
           content,
           model, // Include model for per-message model switching
           reasoningEffort,
-        })
-      );
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        });
+      });
     },
-    [patchSidebarSession]
+    [isOpen, registerCorrelatedRequest, send, waitForSubscription]
   );
 
   const stopExecution = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    if (!isOpen() || !subscribedRef.current) {
       return;
     }
     // Preserve partial content when stopping
-    if (pendingTextRef.current) {
-      const pending = pendingTextRef.current;
-      pendingTextRef.current = null;
-      setEvents((prev) => [
-        ...prev,
-        {
-          type: "token",
-          content: pending.content,
-          messageId: pending.messageId,
-          sandboxId: pending.sandboxId,
-          timestamp: pending.timestamp,
-        },
-      ]);
+    const pending = pendingTextRef.current;
+    pendingTextRef.current = null;
+    if (pending) {
+      dispatch({ type: "events_appended", events: [pendingToTokenEvent(pending)] });
     }
-    wsRef.current.send(JSON.stringify({ type: "stop" }));
-  }, []);
+    send({ type: "stop" });
+  }, [isOpen, send]);
+
+  const cancelPrompt = useCallback(
+    async (messageId: string): Promise<CancelPromptResult> => {
+      if (!isOpen() || !(await waitForSubscription()) || !isOpen()) {
+        return { ok: false, reason: "disconnected" };
+      }
+
+      const clientRequestId = crypto.randomUUID();
+      return new Promise<CancelPromptResult>((resolve) => {
+        registerCorrelatedRequest<Extract<CancelPromptResult, { ok: true }>>(
+          clientRequestId,
+          resolve,
+          (message) =>
+            message.type === "prompt_cancelled" && message.messageId === messageId
+              ? { ok: true, messageId }
+              : null
+        );
+        send({ type: "cancel_prompt", messageId, clientRequestId });
+      });
+    },
+    [isOpen, registerCorrelatedRequest, send, waitForSubscription]
+  );
 
   const sendTyping = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    if (!isOpen() || !subscribedRef.current) {
       return;
     }
-    wsRef.current.send(JSON.stringify({ type: "typing" }));
-  }, []);
+    send({ type: "typing" });
+  }, [isOpen, send]);
 
+  const { hasMoreHistory, loadingHistory, cursor } = state;
   const loadOlderEvents = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    if (!hasMoreHistory || loadingHistory || !cursorRef.current) return;
-    setLoadingHistory(true);
-    wsRef.current.send(
-      JSON.stringify({
-        type: "fetch_history",
-        cursor: cursorRef.current,
-        limit: 200,
-      })
-    );
-  }, [hasMoreHistory, loadingHistory]);
+    if (!isOpen() || !subscribedRef.current) return;
+    if (!hasMoreHistory || loadingHistory || !cursor) return;
+    dispatch({ type: "history_requested" });
+    send({
+      type: "fetch_history",
+      cursor,
+      limit: HISTORY_PAGE_SIZE,
+    });
+  }, [isOpen, send, hasMoreHistory, loadingHistory, cursor]);
 
-  const reconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    connectingRef.current = false;
-    reconnectAttempts.current = 0;
-    wsTokenRef.current = null; // Clear token to fetch fresh one
-    setAuthError(null);
-    setConnectionError(null);
-    connect();
-  }, [connect]);
-
-  // Connect on mount
-  useEffect(() => {
-    mountedRef.current = true;
-    connect();
-
-    return () => {
-      mountedRef.current = false;
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
+  const isProcessing = state.sessionState?.isProcessing ?? false;
+  const sessionState = state.sessionState
+    ? {
+        ...state.sessionState,
+        ...(sandboxAccess ?? {}),
       }
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      connectingRef.current = false;
-    };
-  }, [connect]);
-
-  // Ping every 30 seconds to keep connection alive
-  useEffect(() => {
-    const pingInterval = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: "ping" }));
-      }
-    }, 30000);
-
-    return () => clearInterval(pingInterval);
-  }, []);
-
-  const isProcessing = sessionState?.isProcessing ?? false;
+    : null;
 
   return {
-    connected,
-    connecting,
-    replaying,
-    authError,
-    connectionError,
+    connected: transport.connected,
+    connecting: transport.connecting,
+    ready: state.ready,
+    presenceSynced: state.presenceSynced,
+    authError: transport.authError,
+    connectionError: transport.connectionError,
     sessionState,
-    messages,
-    events,
-    participants,
-    artifacts,
-    currentParticipantId,
+    sandboxError: state.sandboxError,
+    messages: NO_MESSAGES,
+    events: state.events,
+    participants: state.participants,
+    artifacts: state.artifacts,
+    currentParticipantId: state.currentParticipantId,
     isProcessing,
+    promptQueue: state.promptQueue,
     hasMoreHistory,
     loadingHistory,
     sendPrompt,
+    cancelPrompt,
     stopExecution,
     sendTyping,
     reconnect,

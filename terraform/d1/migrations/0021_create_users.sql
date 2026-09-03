@@ -1,7 +1,5 @@
 -- Unified user model: canonical user records and cross-provider identity linking.
--- See docs/internal/2026-04-21-unified-user-model-implementation-plan.md
 
--- Canonical user record (one per person across all providers)
 CREATE TABLE IF NOT EXISTS users (
   id           TEXT    PRIMARY KEY,
   display_name TEXT,
@@ -11,13 +9,10 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at   INTEGER NOT NULL
 );
 
--- Partial unique index on email: allows multiple NULL emails,
--- enforces uniqueness for non-NULL values. COLLATE NOCASE is a
--- safety net; all writes normalize to lowercase.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
   ON users(email COLLATE NOCASE) WHERE email IS NOT NULL;
 
--- Links provider identities (GitHub, Slack, Linear) to canonical users
+-- Keep provider open-ended so adding an auth or SCM provider does not require a migration.
 CREATE TABLE IF NOT EXISTS user_identities (
   id               TEXT PRIMARY KEY,
   user_id          TEXT NOT NULL,
@@ -35,7 +30,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_identities_provider
 CREATE INDEX IF NOT EXISTS idx_user_identities_user
   ON user_identities(user_id);
 
--- Extend existing tables with nullable user_id column
 ALTER TABLE sessions ADD COLUMN user_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id

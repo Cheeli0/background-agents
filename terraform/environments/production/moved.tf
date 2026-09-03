@@ -8,6 +8,11 @@ moved {
 }
 
 moved {
+  from = null_resource.slack_bot_build
+  to   = null_resource.slack_bot_build[0]
+}
+
+moved {
   from = module.slack_bot_worker
   to   = module.slack_bot_worker[0]
 }

@@ -9,11 +9,11 @@ import type {
   WebhookAutomationEvent,
   GitHubAutomationEvent,
   LinearAutomationEvent,
+  SlackAutomationEvent,
 } from "./types";
-import type { TriggerCondition } from "./conditions";
 import { matchesConditions } from "./conditions";
+import type { TriggerCondition } from "./types";
 import { conditionRegistry } from "./registry";
-import type { Automation } from "../types";
 
 type EventForSource<S extends AutomationEventSource> = Extract<AutomationEvent, { source: S }>;
 
@@ -63,6 +63,19 @@ const defaults: Record<AutomationEventSource, () => AutomationEvent> = {
       automationId: "auto-1",
       body: {},
     }) as WebhookAutomationEvent,
+  slack: () =>
+    ({
+      source: "slack",
+      eventType: "message.posted",
+      triggerKey: "slack:msg:C123:1700000000.000100",
+      concurrencyKey: "slack:C123:1700000000.000100",
+      contextBlock: "Test Slack context",
+      meta: {},
+      channelId: "C123",
+      ts: "1700000000.000100",
+      actorUserId: "U999",
+      text: "test slack message",
+    }) satisfies SlackAutomationEvent,
 };
 
 /**
@@ -89,34 +102,4 @@ export function assertConditionMatch(
       `Expected condition ${condition.type}/${condition.operator} to ${expected ? "match" : "not match"}, but got ${result}`
     );
   }
-}
-
-/**
- * Build a minimal trigger automation for testing.
- */
-export function makeTriggerAutomation(overrides?: Partial<Automation>): Automation {
-  return {
-    id: "auto-test",
-    name: "Test Automation",
-    repoOwner: "test-owner",
-    repoName: "test-repo",
-    baseBranch: "main",
-    repoId: 1,
-    instructions: "Test instructions",
-    triggerType: "sentry",
-    scheduleCron: null,
-    scheduleTz: "UTC",
-    model: "anthropic/claude-sonnet-4-6",
-    reasoningEffort: null,
-    enabled: true,
-    nextRunAt: null,
-    consecutiveFailures: 0,
-    createdBy: "test-user",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    deletedAt: null,
-    eventType: "issue.created",
-    triggerConfig: { conditions: [] },
-    ...overrides,
-  };
 }

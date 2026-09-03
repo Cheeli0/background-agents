@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { toast } from "sonner";
 import { ArchiveSessionDialog } from "@/components/archive-session-dialog";
-import type { Artifact } from "@/types/session";
+import {
+  resolveSessionActions,
+  useSessionActionControls,
+  type SessionActionProps,
+} from "@/components/session-actions";
 import {
   GlobeIcon,
   GitPrIcon,
@@ -11,7 +13,10 @@ import {
   MoreIcon,
   LinkIcon,
   GitHubIcon,
+  ChevronUpIcon,
 } from "@/components/ui/icons";
+import { Badge } from "@/components/ui/badge";
+import { prBadgeVariant } from "@/components/ui/badge-variants";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,70 +24,35 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { getSafeExternalUrl } from "@/lib/urls";
 
-interface ActionBarProps {
-  sessionId: string;
-  sessionStatus: string;
-  artifacts: Artifact[];
-  onArchive?: () => void | Promise<void>;
-  onUnarchive?: () => void | Promise<void>;
-}
+export type ActionBarProps = SessionActionProps;
 
 export function ActionBar({
   sessionId,
   sessionStatus,
   artifacts,
+  primaryRepo,
   onArchive,
   onUnarchive,
+  capabilities,
 }: ActionBarProps) {
-  const [isArchiving, setIsArchiving] = useState(false);
-  const [showArchiveDialog, setShowArchiveDialog] = useState(false);
-
-  const prArtifact = artifacts.find((a) => a.type === "pr");
-  const previewArtifact = artifacts.find((a) => a.type === "preview");
-  const screenshotCount = artifacts.filter((artifact) => artifact.type === "screenshot").length;
-  const previewUrl = getSafeExternalUrl(previewArtifact?.url);
-  const prUrl = getSafeExternalUrl(prArtifact?.url);
-
-  const isArchived = sessionStatus === "archived";
-
-  const handleArchiveToggle = async () => {
-    if (!isArchived) {
-      setShowArchiveDialog(true);
-      return;
-    }
-
-    setIsArchiving(true);
-    try {
-      if (onUnarchive) await onUnarchive();
-    } finally {
-      setIsArchiving(false);
-    }
-  };
-
-  const handleConfirmArchive = async () => {
-    setShowArchiveDialog(false);
-    setIsArchiving(true);
-    try {
-      if (onArchive) await onArchive();
-    } finally {
-      setIsArchiving(false);
-    }
-  };
-
-  const handleCopyLink = async () => {
-    const url = `${window.location.origin}/session/${sessionId}`;
-    await navigator.clipboard.writeText(url);
-    toast.success("Link copied to clipboard");
-  };
+  const { previewArtifact, previewUrl, prLinks, mediaCount } = resolveSessionActions(
+    artifacts,
+    primaryRepo
+  );
+  const controls = useSessionActionControls({
+    sessionId,
+    sessionStatus,
+    onArchive,
+    onUnarchive,
+  });
 
   return (
     <>
       <div className="flex flex-wrap items-stretch gap-2">
         {/* View Preview */}
         {previewUrl && (
-          <Button variant="outline" size="sm" className="gap-1.5" asChild>
+          <Button variant="outline" size="sm" className="hidden gap-1.5 md:inline-flex" asChild>
             <a href={previewUrl} target="_blank" rel="noopener noreferrer">
               <GlobeIcon className="w-4 h-4" />
               <span>View preview</span>
@@ -93,49 +63,77 @@ export function ActionBar({
           </Button>
         )}
 
-        {/* View PR */}
-        {prUrl && (
-          <Button variant="outline" size="sm" className="gap-1.5" asChild>
-            <a href={prUrl} target="_blank" rel="noopener noreferrer">
+        {/* View PR — a direct link for one PR, a picker for several */}
+        {prLinks.length === 1 && (
+          <Button variant="outline" size="sm" className="hidden gap-1.5 md:inline-flex" asChild>
+            <a href={prLinks[0].url} target="_blank" rel="noopener noreferrer">
               <GitPrIcon className="w-4 h-4" />
               <span>View PR</span>
             </a>
           </Button>
         )}
+        {prLinks.length > 1 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="hidden gap-1.5 md:inline-flex">
+                <GitPrIcon className="w-4 h-4" />
+                <span>View PRs ({prLinks.length})</span>
+                <ChevronUpIcon className="w-3 h-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top">
+              {prLinks.map((link) => (
+                <DropdownMenuItem key={link.id} asChild>
+                  <a href={link.url} target="_blank" rel="noopener noreferrer">
+                    <GitPrIcon className="w-4 h-4" />
+                    <span className="max-w-[16rem] truncate">{link.label}</span>
+                    {link.prState && (
+                      <Badge variant={prBadgeVariant(link.prState)} className="capitalize">
+                        {link.prState}
+                      </Badge>
+                    )}
+                  </a>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
         {/* Archive/Unarchive */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleArchiveToggle}
-          disabled={isArchiving}
-          className="gap-1.5"
-        >
-          <ArchiveIcon className="w-4 h-4" />
-          <span>{isArchived ? "Unarchive" : "Archive"}</span>
-        </Button>
+        {capabilities.lifecycle && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={controls.handleArchiveToggle}
+            disabled={controls.isArchiving}
+            className="hidden gap-1.5 md:inline-flex"
+          >
+            <ArchiveIcon className="w-4 h-4" />
+            <span>{controls.isArchived ? "Unarchive" : "Archive"}</span>
+          </Button>
+        )}
 
-        {screenshotCount > 0 && (
-          <div className="inline-flex items-center rounded-md border border-border-muted px-3 text-sm text-muted-foreground">
-            Screenshots ({screenshotCount})
+        {mediaCount > 0 && (
+          <div className="hidden items-center rounded-md border border-border-muted px-3 text-sm text-muted-foreground md:inline-flex">
+            Media ({mediaCount})
           </div>
         )}
 
         {/* More menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="!px-2">
+            <Button variant="outline" size="sm" className="!px-2" aria-label="More session actions">
               <MoreIcon className="w-4 h-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" side="top">
-            <DropdownMenuItem onClick={handleCopyLink}>
+            <DropdownMenuItem onClick={controls.handleCopyLink}>
               <LinkIcon className="w-4 h-4" />
               Copy link
             </DropdownMenuItem>
-            {prUrl && (
-              <DropdownMenuItem asChild>
-                <a href={prUrl} target="_blank" rel="noopener noreferrer">
+            {prLinks.length === 1 && (
+              <DropdownMenuItem className="hidden md:flex" asChild>
+                <a href={prLinks[0].url} target="_blank" rel="noopener noreferrer">
                   <GitHubIcon className="w-4 h-4" />
                   View in GitHub
                 </a>
@@ -145,11 +143,13 @@ export function ActionBar({
         </DropdownMenu>
       </div>
 
-      <ArchiveSessionDialog
-        open={showArchiveDialog}
-        onOpenChange={setShowArchiveDialog}
-        onConfirm={handleConfirmArchive}
-      />
+      {capabilities.lifecycle && (
+        <ArchiveSessionDialog
+          open={controls.showArchiveDialog}
+          onOpenChange={controls.setShowArchiveDialog}
+          onConfirm={controls.handleConfirmArchive}
+        />
+      )}
     </>
   );
 }

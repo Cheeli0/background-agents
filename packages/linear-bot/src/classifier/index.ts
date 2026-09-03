@@ -3,74 +3,83 @@
  * Uses raw Anthropic API (no SDK) to classify which repo an issue belongs to.
  */
 
-import type { Env, RepoConfig, ClassificationResult } from "../types";
+import type {
+  ClassificationResult,
+  RepoConfig,
+} from "@open-inspect/shared/types/repository-catalog";
+import type { Env } from "../types";
+import { z } from "zod";
 import {
-  extractProviderAndModel,
-  isSupportedClassifierModel,
-  normalizeModelId,
-  type ConfidenceLevel,
-} from "@open-inspect/shared";
+  CLASSIFICATION_REQUEST_TIMEOUT_MS,
+  DEFAULT_CLASSIFICATION_MODEL,
+  callOpenAIStructured,
+  requireClassificationProviderKey,
+  resolveClassificationProvider,
+} from "@open-inspect/shared/classification";
 import { getAvailableRepos, buildRepoDescriptions } from "./repos";
 import { createLogger } from "../logger";
-import { getClassifierRuntimeConfig } from "./config";
 
 const log = createLogger("classifier");
 
 const CLASSIFY_REPO_TOOL_NAME = "classify_repository";
-const GITHUB_MODELS_API_VERSION = "2026-03-10";
-const CLASSIFIER_DEBUG_VERSION = "2026-03-24-gpt5-request-shape-debug-2";
-const COPILOT_MODEL_MAP: Record<string, string> = {
-  "gpt-5-mini": "openai/gpt-5-mini",
-};
 
-interface ClassifyToolInput {
-  repoId: string | null;
-  confidence: ConfidenceLevel;
-  reasoning: string;
-  alternatives: string[];
-}
+export const classifyToolInputSchema = z.object({
+  repoId: z.string().nullable(),
+  confidence: z.enum(["high", "medium", "low"]),
+  reasoning: z.string(),
+  alternatives: z.array(z.string()),
+});
 
-interface AnthropicContentBlock {
-  type: string;
-  id?: string;
-  name?: string;
-  input?: unknown;
-  text?: string;
-}
+type ClassifyToolInput = z.infer<typeof classifyToolInputSchema>;
 
-interface AnthropicResponse {
-  content: AnthropicContentBlock[];
-}
+export const anthropicMessagesResponseSchema = z.object({
+  content: z.array(
+    z.object({
+      type: z.string(),
+      name: z.string().optional(),
+      input: z.unknown().optional(),
+    })
+  ),
+});
 
-interface GitHubModelsResponse {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
-}
+/**
+ * JSON schema for the classification result, shared by the Anthropic tool
+ * definition and the OpenAI strict structured-output schema.
+ *
+ * Anthropic's tool `input_schema` omits `additionalProperties`, so it stays a
+ * base schema here and the OpenAI side spreads the flag on: `strict: true`
+ * requires it, and keeping it off the base leaves the Anthropic request bytes
+ * unchanged.
+ */
+const classifyRepoJsonSchema = {
+  type: "object",
+  properties: {
+    repoId: {
+      type: ["string", "null"],
+      description: "Repository ID (owner/name) if confident, otherwise null.",
+    },
+    confidence: {
+      type: "string",
+      enum: ["high", "medium", "low"],
+    },
+    reasoning: {
+      type: "string",
+      description: "Brief explanation.",
+    },
+    alternatives: {
+      type: "array",
+      items: { type: "string" },
+      description: "Alternative repo IDs when not confident.",
+    },
+  },
+  required: ["repoId", "confidence", "reasoning", "alternatives"],
+} as const;
 
-export function buildGitHubModelsTokenLimit(
-  model: string,
-  tokenLimit: number
-): {
-  max_tokens?: number;
-  max_completion_tokens?: number;
-} {
-  if (model.startsWith("openai/gpt-5")) {
-    return { max_completion_tokens: tokenLimit };
-  }
-
-  return { max_tokens: tokenLimit };
-}
-
-export function buildGitHubModelsTemperature(model: string): { temperature?: number } {
-  if (model.startsWith("openai/gpt-5")) {
-    return {};
-  }
-
-  return { temperature: 0 };
-}
+/** OpenAI's strict structured-output mode requires `additionalProperties: false`. */
+const classifyRepoStrictJsonSchema = {
+  ...classifyRepoJsonSchema,
+  additionalProperties: false,
+} as const;
 
 /**
  * Build classification prompt from Linear issue context.
@@ -122,13 +131,17 @@ Consider:
 5. Project name associations
 6. Label associations
 
-Return your decision by calling the ${CLASSIFY_REPO_TOOL_NAME} tool.`;
+Return your decision with the fields repoId, confidence, reasoning, and alternatives.`;
 }
 
 /**
  * Call Anthropic API directly (no SDK — Workers can't use CJS imports).
  */
-async function callAnthropic(apiKey: string, prompt: string): Promise<ClassifyToolInput> {
+async function callAnthropic(
+  apiKey: string,
+  prompt: string,
+  model: string
+): Promise<ClassifyToolInput> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -137,41 +150,20 @@ async function callAnthropic(apiKey: string, prompt: string): Promise<ClassifyTo
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5",
+      model,
       max_tokens: 500,
       temperature: 0,
       tools: [
         {
           name: CLASSIFY_REPO_TOOL_NAME,
           description: "Classify which repository an issue belongs to.",
-          input_schema: {
-            type: "object" as const,
-            properties: {
-              repoId: {
-                type: ["string", "null"],
-                description: "Repository ID (owner/name) if confident, otherwise null.",
-              },
-              confidence: {
-                type: "string",
-                enum: ["high", "medium", "low"],
-              },
-              reasoning: {
-                type: "string",
-                description: "Brief explanation.",
-              },
-              alternatives: {
-                type: "array",
-                items: { type: "string" },
-                description: "Alternative repo IDs when not confident.",
-              },
-            },
-            required: ["repoId", "confidence", "reasoning", "alternatives"],
-          },
+          input_schema: classifyRepoJsonSchema,
         },
       ],
       tool_choice: { type: "tool", name: CLASSIFY_REPO_TOOL_NAME },
       messages: [{ role: "user", content: prompt }],
     }),
+    signal: AbortSignal.timeout(CLASSIFICATION_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -179,138 +171,40 @@ async function callAnthropic(apiKey: string, prompt: string): Promise<ClassifyTo
     throw new Error(`Anthropic API error ${response.status}: ${errText}`);
   }
 
-  const data = (await response.json()) as AnthropicResponse;
-  const toolBlock = data.content.find(
+  const data = anthropicMessagesResponseSchema.safeParse(await response.json());
+  if (!data.success) throw new Error("Malformed Anthropic response");
+
+  const toolBlock = data.data.content.find(
     (b) => b.type === "tool_use" && b.name === CLASSIFY_REPO_TOOL_NAME
   );
 
   if (!toolBlock) throw new Error("No tool_use block in Anthropic response");
 
-  const input = toolBlock.input as Record<string, unknown>;
-  return {
-    repoId: input.repoId === null ? null : typeof input.repoId === "string" ? input.repoId : null,
-    confidence: (input.confidence as ConfidenceLevel) || "low",
-    reasoning: String(input.reasoning || ""),
-    alternatives: Array.isArray(input.alternatives)
-      ? input.alternatives.filter((a): a is string => typeof a === "string")
-      : [],
-  };
+  const input = classifyToolInputSchema.safeParse(toolBlock.input);
+  if (!input.success) throw new Error("Malformed Anthropic tool input");
+
+  return input.data;
 }
 
-async function callGitHubModels(
-  model: string,
-  accessToken: string | null,
+/**
+ * Call the OpenAI Chat Completions API with strict JSON-schema structured
+ * output, matching the same {@link classifyToolInputSchema} shape the
+ * Anthropic tool call produces.
+ */
+async function callOpenAI(
+  apiKey: string,
   prompt: string,
-  traceId?: string
+  model: string
 ): Promise<ClassifyToolInput> {
-  if (!accessToken) {
-    throw new Error("GitHub Copilot classifier token is not configured");
-  }
-
-  const mappedModel = COPILOT_MODEL_MAP[model];
-  if (!mappedModel) {
-    throw new Error(`Unsupported GitHub Copilot classifier model: ${model}`);
-  }
-  const tokenLimit = buildGitHubModelsTokenLimit(mappedModel, 500);
-  const tokenLimitParam = Object.keys(tokenLimit)[0] ?? "unknown";
-  const temperature = buildGitHubModelsTemperature(mappedModel);
-  const temperatureValue = temperature.temperature ?? null;
-
-  log.info("classifier.github_models.request", {
-    trace_id: traceId,
-    debug_version: CLASSIFIER_DEBUG_VERSION,
-    source_model: model,
-    mapped_model: mappedModel,
-    token_limit_param: tokenLimitParam,
-    token_limit_value: tokenLimit.max_completion_tokens ?? tokenLimit.max_tokens ?? null,
-    temperature_value: temperatureValue,
+  const parsed = await callOpenAIStructured(apiKey, model, prompt, {
+    name: CLASSIFY_REPO_TOOL_NAME,
+    schema: classifyRepoStrictJsonSchema,
   });
 
-  const response = await fetch("https://models.github.ai/inference/chat/completions", {
-    method: "POST",
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": GITHUB_MODELS_API_VERSION,
-    },
-    body: JSON.stringify({
-      model: mappedModel,
-      ...tokenLimit,
-      ...temperature,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "repo_classification",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              repoId: { type: ["string", "null"] },
-              confidence: { type: "string", enum: ["high", "medium", "low"] },
-              reasoning: { type: "string" },
-              alternatives: {
-                type: "array",
-                items: { type: "string" },
-              },
-            },
-            required: ["repoId", "confidence", "reasoning", "alternatives"],
-          },
-        },
-      },
-      messages: [
-        {
-          role: "developer",
-          content:
-            "You are a repository classifier. Return only JSON matching the requested schema.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    }),
-  });
+  const input = classifyToolInputSchema.safeParse(parsed);
+  if (!input.success) throw new Error("Malformed OpenAI tool input");
 
-  if (!response.ok) {
-    const errText = await response.text();
-    log.error("classifier.github_models.response_error", {
-      trace_id: traceId,
-      debug_version: CLASSIFIER_DEBUG_VERSION,
-      source_model: model,
-      mapped_model: mappedModel,
-      token_limit_param: tokenLimitParam,
-      temperature_value: temperatureValue,
-      http_status: response.status,
-      response_body: errText,
-    });
-    throw new Error(`GitHub Models API error ${response.status}: ${errText}`);
-  }
-
-  const data = (await response.json()) as GitHubModelsResponse;
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || content.trim().length === 0) {
-    throw new Error("GitHub Models response did not contain structured content");
-  }
-
-  const input = JSON.parse(content) as Record<string, unknown>;
-  return {
-    repoId: input.repoId === null ? null : typeof input.repoId === "string" ? input.repoId : null,
-    confidence: (input.confidence as ConfidenceLevel) || "low",
-    reasoning: String(input.reasoning || ""),
-    alternatives: Array.isArray(input.alternatives)
-      ? input.alternatives.filter((a): a is string => typeof a === "string")
-      : [],
-  };
-}
-
-function resolveClassifierModel(
-  configuredModel: string | null | undefined,
-  preferredModel: string
-): string {
-  const normalizedConfigured = configuredModel?.trim() ? normalizeModelId(configuredModel) : "";
-  const candidate = normalizedConfigured === "" ? preferredModel : normalizedConfigured;
-  return isSupportedClassifierModel(candidate) ? candidate : "anthropic/claude-haiku-4-5";
+  return input.data;
 }
 
 /**
@@ -322,7 +216,6 @@ export async function classifyRepo(
   issueDescription: string | null | undefined,
   labels: string[],
   projectName: string | null | undefined,
-  configuredModel: string | null | undefined,
   teamName: string | null | undefined,
   teamKey: string | null | undefined,
   triggerComment: string | null | undefined,
@@ -349,7 +242,6 @@ export async function classifyRepo(
   }
 
   try {
-    const runtimeConfig = await getClassifierRuntimeConfig(env, traceId);
     const prompt = await buildClassificationPrompt(
       env,
       issueTitle,
@@ -361,23 +253,22 @@ export async function classifyRepo(
       triggerComment,
       traceId
     );
-    const classifierModel = resolveClassifierModel(configuredModel, runtimeConfig.preferredModel);
-    const { provider, model } = extractProviderAndModel(classifierModel);
 
-    log.info("classifier.model_selection", {
-      trace_id: traceId,
-      debug_version: CLASSIFIER_DEBUG_VERSION,
-      configured_model: configuredModel ?? null,
-      runtime_preferred_model: runtimeConfig.preferredModel,
-      resolved_classifier_model: classifierModel,
-      provider,
-      provider_model: model,
-    });
+    const modelId = env.CLASSIFICATION_MODEL || DEFAULT_CLASSIFICATION_MODEL;
+    const { provider, model } = resolveClassificationProvider(modelId);
 
-    const result =
-      provider === "github-copilot"
-        ? await callGitHubModels(model, runtimeConfig.githubCopilotAccessToken, prompt, traceId)
-        : await callAnthropic(env.ANTHROPIC_API_KEY || "", prompt);
+    const result: ClassifyToolInput =
+      provider === "anthropic"
+        ? await callAnthropic(
+            requireClassificationProviderKey(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY", modelId),
+            prompt,
+            model
+          )
+        : await callOpenAI(
+            requireClassificationProviderKey(env.OPENAI_API_KEY, "OPENAI_API_KEY", modelId),
+            prompt,
+            model
+          );
 
     let matchedRepo: RepoConfig | null = null;
     if (result.repoId) {
@@ -412,7 +303,6 @@ export async function classifyRepo(
   } catch (e) {
     log.error("classifier.classify", {
       trace_id: traceId,
-      method: "llm",
       outcome: "error",
       error: e instanceof Error ? e : new Error(String(e)),
     });

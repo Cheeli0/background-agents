@@ -9,10 +9,15 @@
  * 3. Token valid for 1 hour
  */
 
-import type { CacheStore, InstallationRepository } from "@open-inspect/shared";
+import type { InstallationRepository } from "@open-inspect/shared/types/repository-catalog";
+import { DEFAULT_APP_NAME } from "@open-inspect/shared/app-name";
+import type { CacheStore } from "@open-inspect/shared/cache-store";
+import { z } from "zod";
+
+import { base64UrlEncode } from "./encoding";
 
 /** Timeout for individual GitHub API requests (ms). */
-export const GITHUB_FETCH_TIMEOUT_MS = 60_000;
+const GITHUB_FETCH_TIMEOUT_MS = 60_000;
 
 /** Cache installation tokens for this duration at most (ms). */
 export const INSTALLATION_TOKEN_CACHE_MAX_AGE_MS = 50 * 60 * 1000;
@@ -21,12 +26,19 @@ export const INSTALLATION_TOKEN_CACHE_MAX_AGE_MS = 50 * 60 * 1000;
 export const INSTALLATION_TOKEN_MIN_REMAINING_MS = 5 * 60 * 1000;
 
 /** Upper bound for KV cache TTL (seconds). */
-export const INSTALLATION_TOKEN_CACHE_MAX_TTL_SECONDS = 3600;
+const INSTALLATION_TOKEN_CACHE_MAX_TTL_SECONDS = 3600;
 
 const INSTALLATION_TOKEN_CACHE_KEY_PREFIX = "github:installation-token:v1";
 
 interface InstallationTokenCacheBindings {
   cacheStore?: CacheStore;
+  /** User-Agent header sent on outbound GitHub API requests. */
+  userAgent?: string;
+}
+
+function resolveUserAgent(env: InstallationTokenCacheBindings | undefined): string {
+  const value = env?.userAgent?.trim();
+  return value && value.length > 0 ? value : DEFAULT_APP_NAME;
 }
 
 interface CachedInstallationToken {
@@ -61,7 +73,7 @@ export function fetchWithTimeout(
 }
 
 /** Per-page timing record returned from listInstallationRepositories. */
-export interface GitHubPageTiming {
+interface GitHubPageTiming {
   page: number;
   fetchMs: number;
   repoCount: number;
@@ -84,23 +96,40 @@ export interface GitHubAppConfig {
   installationId: string;
 }
 
-/**
- * GitHub installation token response.
- */
-interface InstallationTokenResponse {
-  token: string;
-  expires_at: string;
-}
+const installationTokenResponseSchema = z
+  .object({
+    token: z.string(),
+    expires_at: z.string().refine((value) => Number.isFinite(Date.parse(value))),
+  })
+  .transform(({ token, expires_at }) => ({
+    token,
+    expiresAtEpochMs: Date.parse(expires_at),
+  }));
 
-/**
- * Base64URL encode a Uint8Array or string.
- */
-function base64UrlEncode(input: Uint8Array | string): string {
-  const bytes = typeof input === "string" ? new TextEncoder().encode(input) : input;
+/** GitHub installation token response. */
+type InstallationTokenResponse = z.infer<typeof installationTokenResponseSchema>;
 
-  const base64 = btoa(String.fromCharCode(...bytes));
-  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
+const installationRepositorySchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  full_name: z.string(),
+  description: z.string().nullable(),
+  private: z.boolean(),
+  archived: z.boolean(),
+  default_branch: z.string(),
+  language: z.string().nullable().optional(),
+  topics: z.array(z.string()).optional(),
+  owner: z.object({ login: z.string() }),
+});
+
+const listInstallationReposResponseSchema = z.object({
+  total_count: z.number(),
+  repositories: z.array(installationRepositorySchema),
+});
+
+type ListInstallationReposResponse = z.infer<typeof listInstallationReposResponseSchema>;
+
+const repositoryBranchesResponseSchema = z.array(z.object({ name: z.string() }));
 
 /**
  * Parse PEM-encoded private key to raw bytes.
@@ -176,7 +205,7 @@ async function importPrivateKeyCached(pem: string): Promise<CryptoKey> {
  * @param privateKey - PEM-encoded private key
  * @returns Signed JWT valid for 10 minutes
  */
-export async function generateAppJwt(appId: string, privateKey: string): Promise<string> {
+async function generateAppJwt(appId: string, privateKey: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
 
   // JWT header
@@ -215,7 +244,8 @@ export async function generateAppJwt(appId: string, privateKey: string): Promise
  */
 async function getInstallationTokenWithMetadata(
   jwt: string,
-  installationId: string
+  installationId: string,
+  userAgent: string
 ): Promise<InstallationTokenResponse> {
   const url = `https://api.github.com/app/installations/${installationId}/access_tokens`;
 
@@ -225,16 +255,32 @@ async function getInstallationTokenWithMetadata(
       Authorization: `Bearer ${jwt}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "Open-Inspect",
+      "User-Agent": userAgent,
     },
   });
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Failed to get installation token: ${response.status} ${error}`);
+    // Attach the HTTP status so callers can classify transient (5xx/429)
+    // vs permanent failures rather than substring-matching the message.
+    throw Object.assign(
+      new Error(`Failed to get installation token: ${response.status} ${error}`),
+      { status: response.status }
+    );
   }
 
-  return (await response.json()) as InstallationTokenResponse;
+  let raw: unknown;
+  try {
+    raw = await response.json();
+  } catch {
+    throw new Error("Failed to get installation token: invalid response");
+  }
+
+  const parsed = installationTokenResponseSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error("Failed to get installation token: invalid response");
+  }
+  return parsed.data;
 }
 
 function getInstallationTokenCacheKey(config: GitHubAppConfig): string {
@@ -318,19 +364,54 @@ async function refreshInstallationToken(
 ): Promise<CachedInstallationToken> {
   const nowEpochMs = Date.now();
   const jwt = await generateAppJwt(config.appId, config.privateKey);
-  const tokenData = await getInstallationTokenWithMetadata(jwt, config.installationId);
-  const parsedExpiresAtEpochMs = Date.parse(tokenData.expires_at);
+  const tokenData = await getInstallationTokenWithMetadata(
+    jwt,
+    config.installationId,
+    resolveUserAgent(env)
+  );
   const cached: CachedInstallationToken = {
     token: tokenData.token,
-    expiresAtEpochMs: Number.isFinite(parsedExpiresAtEpochMs)
-      ? parsedExpiresAtEpochMs
-      : nowEpochMs + INSTALLATION_TOKEN_CACHE_MAX_AGE_MS,
+    expiresAtEpochMs: tokenData.expiresAtEpochMs,
     cachedAtEpochMs: nowEpochMs,
   };
 
   installationTokenMemoryCache.set(cacheKey, cached);
   await writeInstallationTokenToCache(env, cacheKey, cached);
   return cached;
+}
+
+async function getOrRefreshCachedInstallationToken(
+  config: GitHubAppConfig,
+  env?: InstallationTokenCacheBindings,
+  options?: { forceRefresh?: boolean }
+): Promise<CachedInstallationToken> {
+  const cacheKey = getInstallationTokenCacheKey(config);
+  const forceRefresh = options?.forceRefresh ?? false;
+
+  if (!forceRefresh) {
+    const memoryCached = installationTokenMemoryCache.get(cacheKey);
+    if (memoryCached && isTokenUsable(memoryCached)) {
+      return memoryCached;
+    }
+
+    const persistentCached = await readInstallationTokenFromCache(env, cacheKey);
+    if (persistentCached && isTokenUsable(persistentCached)) {
+      installationTokenMemoryCache.set(cacheKey, persistentCached);
+      return persistentCached;
+    }
+
+    const inFlight = installationTokenRefreshInFlight.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+  }
+
+  const refreshPromise = refreshInstallationToken(config, env, cacheKey).finally(() => {
+    installationTokenRefreshInFlight.delete(cacheKey);
+  });
+  installationTokenRefreshInFlight.set(cacheKey, refreshPromise);
+
+  return refreshPromise;
 }
 
 /**
@@ -341,60 +422,27 @@ export async function getCachedInstallationToken(
   env?: InstallationTokenCacheBindings,
   options?: { forceRefresh?: boolean }
 ): Promise<string> {
-  const cacheKey = getInstallationTokenCacheKey(config);
-  const forceRefresh = options?.forceRefresh ?? false;
+  const cached = await getOrRefreshCachedInstallationToken(config, env, options);
+  return cached.token;
+}
 
-  if (!forceRefresh) {
-    const memoryCached = installationTokenMemoryCache.get(cacheKey);
-    if (memoryCached && isTokenUsable(memoryCached)) {
-      return memoryCached.token;
-    }
-
-    const persistentCached = await readInstallationTokenFromCache(env, cacheKey);
-    if (persistentCached && isTokenUsable(persistentCached)) {
-      installationTokenMemoryCache.set(cacheKey, persistentCached);
-      return persistentCached.token;
-    }
-
-    const inFlight = installationTokenRefreshInFlight.get(cacheKey);
-    if (inFlight) {
-      const shared = await inFlight;
-      return shared.token;
-    }
-  }
-
-  const refreshPromise = refreshInstallationToken(config, env, cacheKey).finally(() => {
-    installationTokenRefreshInFlight.delete(cacheKey);
-  });
-  installationTokenRefreshInFlight.set(cacheKey, refreshPromise);
-
-  const refreshed = await refreshPromise;
-  return refreshed.token;
+/**
+ * Like {@link getCachedInstallationToken}, but also returns the absolute epoch
+ * milliseconds at which the token expires. Used by callers that need to
+ * forward the token's lifetime to a client (e.g. the sandbox credential
+ * helper, which caches its own copy until shortly before expiry).
+ */
+export async function getCachedInstallationTokenWithExpiry(
+  config: GitHubAppConfig,
+  env?: InstallationTokenCacheBindings,
+  options?: { forceRefresh?: boolean }
+): Promise<{ token: string; expiresAtEpochMs: number }> {
+  const cached = await getOrRefreshCachedInstallationToken(config, env, options);
+  return { token: cached.token, expiresAtEpochMs: cached.expiresAtEpochMs };
 }
 
 // Re-export from shared for backward compatibility
-export type { InstallationRepository } from "@open-inspect/shared";
-
-/**
- * GitHub API response for installation repositories.
- */
-interface ListInstallationReposResponse {
-  total_count: number;
-  repository_selection: "all" | "selected";
-  repositories: Array<{
-    id: number;
-    name: string;
-    full_name: string;
-    description: string | null;
-    private: boolean;
-    default_branch: string;
-    language: string | null;
-    topics?: string[];
-    owner: {
-      login: string;
-    };
-  }>;
-}
+export type { InstallationRepository } from "@open-inspect/shared/types/repository-catalog";
 
 /**
  * List all repositories accessible to the GitHub App installation.
@@ -418,7 +466,7 @@ export async function listInstallationRepositories(
     Authorization: `Bearer ${token}`,
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "Open-Inspect",
+    "User-Agent": resolveUserAgent(env),
   };
 
   const fetchPage = async (
@@ -437,7 +485,12 @@ export async function listInstallationRepositories(
       );
     }
 
-    const data = (await response.json()) as ListInstallationReposResponse;
+    const raw = await response.json();
+    const parsed = listInstallationReposResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(`Failed to list installation repositories (page ${page}): invalid response`);
+    }
+    const data = parsed.data;
     const fetchMs = Math.round((performance.now() - pageStart) * 100) / 100;
 
     return { data, timing: { page, fetchMs, repoCount: data.repositories.length } };
@@ -451,6 +504,7 @@ export async function listInstallationRepositories(
       fullName: repo.full_name,
       description: repo.description,
       private: repo.private,
+      archived: repo.archived,
       defaultBranch: repo.default_branch,
       language: repo.language,
       topics: repo.topics,
@@ -522,7 +576,7 @@ export async function getInstallationRepository(
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "Open-Inspect",
+        "User-Agent": resolveUserAgent(env),
       },
     });
 
@@ -543,15 +597,12 @@ export async function getInstallationRepository(
     throw new Error(`Failed to fetch repository: ${response.status} ${error}`);
   }
 
-  const data = (await response.json()) as {
-    id: number;
-    name: string;
-    full_name: string;
-    description: string | null;
-    private: boolean;
-    default_branch: string;
-    owner: { login: string };
-  };
+  const raw = await response.json();
+  const parsed = installationRepositorySchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error("Failed to fetch repository: invalid response");
+  }
+  const data = parsed.data;
 
   return {
     id: data.id,
@@ -560,6 +611,7 @@ export async function getInstallationRepository(
     fullName: data.full_name,
     description: data.description,
     private: data.private,
+    archived: data.archived,
     defaultBranch: data.default_branch,
   };
 }
@@ -586,7 +638,7 @@ export async function listRepositoryBranches(
           Authorization: `Bearer ${token}`,
           Accept: "application/vnd.github+json",
           "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "Open-Inspect",
+          "User-Agent": resolveUserAgent(env),
         },
       }
     );
@@ -596,7 +648,12 @@ export async function listRepositoryBranches(
       throw new Error(`Failed to list branches: ${response.status} ${error}`);
     }
 
-    const data = (await response.json()) as { name: string }[];
+    const raw = await response.json();
+    const parsed = repositoryBranchesResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error("Failed to list branches: invalid response");
+    }
+    const data = parsed.data;
     branches.push(...data.map((b) => ({ name: b.name })));
 
     if (data.length < 100) break;

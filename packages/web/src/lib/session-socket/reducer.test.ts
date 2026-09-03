@@ -1,0 +1,751 @@
+import { describe, expect, it } from "vitest";
+import type { SandboxEvent } from "@/types/session";
+import type {
+  ServerMessage,
+  SessionSnapshot,
+  SessionState,
+} from "@open-inspect/shared/types/server-messages";
+import {
+  createSessionSocketState,
+  initialSessionSocketState,
+  sessionSocketReducer,
+  type SessionSocketAction,
+  type SessionSocketState,
+} from "./reducer";
+
+type SubscribedMessage = Extract<ServerMessage, { type: "subscribed" }>;
+
+function createSessionState(overrides: Partial<SessionState> = {}): SessionState {
+  return {
+    id: "session-1",
+    title: "Session 1",
+    repoOwner: "acme",
+    repoName: "web-app",
+    baseBranch: "main",
+    branchName: "feature/original",
+    status: "active",
+    sandboxStatus: "ready",
+    messageCount: 0,
+    createdAt: 1,
+    ...overrides,
+  };
+}
+
+function createSubscribedMessage(overrides: Partial<SubscribedMessage> = {}): SubscribedMessage {
+  return {
+    type: "subscribed",
+    session: createSessionState(),
+    artifacts: [],
+    participantId: "participant-1",
+    participant: { participantId: "participant-1", name: "Test User" },
+    timeline: { events: [], hasMore: false, cursor: null },
+    spawnError: null,
+    promptQueue: [],
+    ...overrides,
+  };
+}
+
+function createSnapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
+  return {
+    session: createSessionState(),
+    artifacts: [],
+    timeline: {
+      events: [
+        {
+          eventId: "event-1",
+          timelineSequence: 1,
+          event: {
+            type: "git_sync",
+            status: "completed",
+            sandboxId: "sb-1",
+            timestamp: 1,
+          },
+        },
+      ],
+      hasMore: true,
+      cursor: { timestamp: 1, id: "event-1", sequence: 1 },
+    },
+    spawnError: null,
+    promptQueue: [],
+    ...overrides,
+  };
+}
+
+function reduce(state: SessionSocketState, ...actions: SessionSocketAction[]): SessionSocketState {
+  return actions.reduce(sessionSocketReducer, state);
+}
+
+function serverMessage(
+  message: Exclude<ServerMessage, { type: "sandbox_event" }>
+): SessionSocketAction {
+  return { type: "server_message", message };
+}
+
+function subscribedState(overrides: Partial<SubscribedMessage> = {}): SessionSocketState {
+  return reduce(initialSessionSocketState, serverMessage(createSubscribedMessage(overrides)));
+}
+
+describe("sessionSocketReducer", () => {
+  describe("snapshot", () => {
+    it("hydrates the authoritative prompt queue", () => {
+      const promptQueue = [
+        {
+          messageId: "message-1",
+          content: "Running",
+          status: "processing" as const,
+        },
+      ];
+      const state = createSessionSocketState({
+        ...createSnapshot(),
+        promptQueue,
+      } as SessionSnapshot);
+      expect(state.promptQueue).toEqual(promptQueue);
+    });
+    it("initializes the rendered state before the socket connects", () => {
+      const state = createSessionSocketState(createSnapshot());
+
+      expect(state.ready).toBe(false);
+      expect(state.presenceSynced).toBe(false);
+      expect(state.events).toHaveLength(1);
+      expect(state.cursor).toEqual({ timestamp: 1, id: "event-1", sequence: 1 });
+    });
+
+    it("collapses snapshot token snapshots to the final text", () => {
+      const state = createSessionSocketState(
+        createSnapshot({
+          timeline: {
+            events: [
+              {
+                eventId: "token-1",
+                timelineSequence: 1,
+                event: {
+                  type: "token",
+                  content: "Partial",
+                  messageId: "msg-1",
+                  sandboxId: "sb-1",
+                  timestamp: 1,
+                },
+              },
+              {
+                eventId: "token-2",
+                timelineSequence: 2,
+                event: {
+                  type: "token",
+                  content: "Final",
+                  messageId: "msg-1",
+                  sandboxId: "sb-1",
+                  timestamp: 2,
+                },
+              },
+              {
+                eventId: "complete-1",
+                timelineSequence: 3,
+                event: {
+                  type: "execution_complete",
+                  messageId: "msg-1",
+                  success: true,
+                  sandboxId: "sb-1",
+                  timestamp: 3,
+                },
+              },
+            ],
+            hasMore: false,
+            cursor: null,
+          },
+        })
+      );
+
+      expect(state.events.map((event) => event.type)).toEqual(["token", "execution_complete"]);
+      expect(state.events[0]).toEqual(expect.objectContaining({ content: "Final" }));
+    });
+  });
+
+  it("replaces the queue from a live prompt_queue_updated message", () => {
+    const queue = [
+      {
+        messageId: "message-2",
+        content: "Next",
+        status: "pending" as const,
+      },
+    ];
+    const state = reduce(
+      subscribedState(),
+      serverMessage({ type: "prompt_queue_updated", promptQueue: queue })
+    );
+    expect(state.promptQueue).toEqual(queue);
+  });
+
+  it("waits for the authoritative queue update after cancellation acknowledgement", () => {
+    const initial = subscribedState({
+      promptQueue: [{ messageId: "message-2", content: "Next", status: "pending" }],
+    });
+    const state = reduce(
+      initial,
+      serverMessage({
+        type: "prompt_cancelled",
+        clientRequestId: "request-1",
+        messageId: "message-2",
+      })
+    );
+    expect(state.promptQueue).toEqual(initial.promptQueue);
+  });
+
+  describe("sandboxError", () => {
+    it("hydrates the spawn error from the snapshot and from subscribed", () => {
+      const reason =
+        'Failed to create E2B sandbox: {"code":400,"message":"Timeout cannot be greater than 1 hours"}';
+
+      expect(createSessionSocketState(createSnapshot({ spawnError: reason })).sandboxError).toBe(
+        reason
+      );
+      expect(subscribedState({ spawnError: reason }).sandboxError).toBe(reason);
+      expect(subscribedState().sandboxError).toBeNull();
+    });
+
+    it("records the reason a live sandbox_error carries", () => {
+      const state = reduce(
+        subscribedState(),
+        serverMessage({ type: "sandbox_error", error: "E2B quota exceeded" })
+      );
+
+      expect(state.sessionState?.sandboxStatus).toBe("failed");
+      expect(state.sandboxError).toBe("E2B quota exceeded");
+    });
+
+    it("clears the reason once a fresh attempt starts or succeeds", () => {
+      const failed = reduce(
+        subscribedState(),
+        serverMessage({ type: "sandbox_error", error: "E2B quota exceeded" })
+      );
+
+      // A retry supersedes the previous failure, so the stale reason must not
+      // linger next to a spawning or ready sandbox.
+      expect(reduce(failed, serverMessage({ type: "sandbox_spawning" })).sandboxError).toBeNull();
+      expect(reduce(failed, serverMessage({ type: "sandbox_warming" })).sandboxError).toBeNull();
+      expect(reduce(failed, serverMessage({ type: "sandbox_ready" })).sandboxError).toBeNull();
+      expect(
+        reduce(failed, serverMessage({ type: "sandbox_status", status: "ready" })).sandboxError
+      ).toBeNull();
+    });
+
+    it("keeps the reason when sandbox_status merely re-asserts failed", () => {
+      const failed = reduce(
+        subscribedState(),
+        serverMessage({ type: "sandbox_error", error: "E2B quota exceeded" }),
+        serverMessage({ type: "sandbox_status", status: "failed" })
+      );
+
+      expect(failed.sandboxError).toBe("E2B quota exceeded");
+    });
+  });
+
+  describe("subscribed", () => {
+    it("hydrates the authoritative projection", () => {
+      const state = subscribedState({
+        session: createSessionState({
+          vncUrl: "https://desktop.example",
+        }),
+        timeline: {
+          events: [
+            {
+              eventId: "evt-1",
+              timelineSequence: 1,
+              event: {
+                type: "context_compacted",
+                messageId: "msg-1",
+                sandboxId: "sb-1",
+                timestamp: 1,
+              },
+            },
+          ],
+          hasMore: true,
+          cursor: { timestamp: 1, id: "evt-1" },
+        },
+      });
+
+      expect(state.sessionState).toEqual(
+        expect.objectContaining({
+          id: "session-1",
+          isProcessing: false,
+          totalCost: 0,
+          vncUrl: "https://desktop.example",
+        })
+      );
+      expect(state.currentParticipantId).toBe("participant-1");
+      expect(state.events).toHaveLength(1);
+      expect(state.hasMoreHistory).toBe(true);
+      expect(state.cursor).toEqual({ timestamp: 1, id: "evt-1" });
+    });
+
+    it("collapses timeline token events to one final token before its completion", () => {
+      const state = subscribedState({
+        timeline: {
+          events: [
+            {
+              eventId: "event-1",
+              timelineSequence: 1,
+              event: {
+                type: "token",
+                content: "Final",
+                messageId: "msg-1",
+                sandboxId: "sb-1",
+                timestamp: 1,
+              },
+            },
+            {
+              eventId: "event-2",
+              timelineSequence: 2,
+              event: {
+                type: "execution_complete",
+                messageId: "msg-1",
+                success: true,
+                sandboxId: "sb-1",
+                timestamp: 2,
+              },
+            },
+          ],
+          hasMore: false,
+          cursor: null,
+        },
+      });
+
+      expect(state.events.map((event) => event.type)).toEqual(["token", "execution_complete"]);
+    });
+
+    it("replaces stale artifacts and events with the subscribed snapshot", () => {
+      const populated = subscribedState({
+        artifacts: [
+          {
+            id: "artifact-pr-1",
+            type: "pr",
+            url: "https://github.com/acme/web-app/pull/1",
+            metadata: { number: 1, state: "open" },
+            createdAt: 100,
+          },
+        ],
+      });
+      expect(populated.artifacts).toHaveLength(1);
+
+      const resynced = reduce(populated, serverMessage(createSubscribedMessage()));
+      expect(resynced.artifacts).toEqual([]);
+      expect(resynced.events).toEqual([]);
+    });
+
+    it("preserves existing isProcessing and totalCost from the snapshot", () => {
+      const state = subscribedState({
+        session: createSessionState({ isProcessing: true, totalCost: 1.25 }),
+      });
+      expect(state.sessionState?.isProcessing).toBe(true);
+      expect(state.sessionState?.totalCost).toBe(1.25);
+    });
+  });
+
+  describe("events_appended", () => {
+    it("appends events in order", () => {
+      const events: SandboxEvent[] = [
+        {
+          type: "context_compacted",
+          messageId: "msg-1",
+          sandboxId: "sb-1",
+          timestamp: 0,
+        },
+        { type: "token", content: "final", messageId: "msg-1", sandboxId: "sb-1", timestamp: 1 },
+        {
+          type: "execution_complete",
+          messageId: "msg-1",
+          success: true,
+          sandboxId: "sb-1",
+          timestamp: 2,
+        },
+      ];
+      const state = reduce(subscribedState(), { type: "events_appended", events });
+      expect(state.events).toEqual(events);
+    });
+
+    it("accumulates step_finish cost onto the session total", () => {
+      const base = subscribedState({ session: createSessionState({ totalCost: 1 }) });
+      const state = reduce(base, {
+        type: "events_appended",
+        events: [
+          { type: "step_finish", cost: 0.5, messageId: "msg-1", sandboxId: "sb-1", timestamp: 1 },
+        ],
+      });
+      expect(state.sessionState?.totalCost).toBe(1.5);
+    });
+
+    it("ignores missing, non-finite, and non-positive costs", () => {
+      const base = subscribedState({ session: createSessionState({ totalCost: 1 }) });
+      const state = reduce(base, {
+        type: "events_appended",
+        events: [
+          { type: "step_finish", messageId: "msg-1", sandboxId: "sb-1", timestamp: 1 },
+          { type: "step_finish", cost: NaN, messageId: "msg-2", sandboxId: "sb-1", timestamp: 2 },
+          { type: "step_finish", cost: -2, messageId: "msg-3", sandboxId: "sb-1", timestamp: 3 },
+          { type: "step_finish", cost: 0, messageId: "msg-4", sandboxId: "sb-1", timestamp: 4 },
+        ],
+      });
+      expect(state.sessionState?.totalCost).toBe(1);
+    });
+  });
+
+  describe("history", () => {
+    it("marks loading on request and prepends the fetched page", () => {
+      const base = reduce(
+        subscribedState({
+          timeline: {
+            events: [
+              {
+                eventId: "evt-10",
+                timelineSequence: 10,
+                event: {
+                  type: "git_sync",
+                  status: "completed",
+                  sandboxId: "sb-1",
+                  timestamp: 10,
+                },
+              },
+            ],
+            hasMore: true,
+            cursor: { timestamp: 10, id: "evt-10", sequence: 10 },
+          },
+        }),
+        { type: "history_requested" }
+      );
+      expect(base.loadingHistory).toBe(true);
+      expect(base.cursor).toEqual({ timestamp: 10, id: "evt-10", sequence: 10 });
+
+      const withLiveEvent = reduce(base, {
+        type: "events_appended",
+        events: [
+          { type: "token", content: "live", messageId: "msg-1", sandboxId: "sb-1", timestamp: 11 },
+        ],
+      });
+
+      const state = reduce(
+        withLiveEvent,
+        serverMessage({
+          type: "history_page",
+          items: [
+            {
+              eventId: "evt-5",
+              timelineSequence: 5,
+              event: {
+                type: "context_compacted",
+                messageId: "msg-1",
+                sandboxId: "sb-1",
+                timestamp: 5,
+              },
+            },
+          ],
+          hasMore: false,
+          cursor: null,
+        })
+      );
+      expect(state.loadingHistory).toBe(false);
+      expect(state.hasMoreHistory).toBe(false);
+      expect(state.cursor).toBeNull();
+      expect(state.events.map((event) => event.timestamp)).toEqual([5, 10, 11]);
+    });
+
+    it("clears a stuck loadingHistory when a new subscribed snapshot arrives", () => {
+      // A fetch_history dropped by a disconnect never gets a history_page;
+      // the reconnect snapshot must unblock loadOlderEvents.
+      const base = reduce(subscribedState(), { type: "history_requested" });
+      expect(base.loadingHistory).toBe(true);
+
+      const state = reduce(base, serverMessage(createSubscribedMessage()));
+      expect(state.loadingHistory).toBe(false);
+    });
+
+    it("resets loading when the server rejects a request with an error", () => {
+      const base = reduce(subscribedState(), { type: "history_requested" });
+      const state = reduce(
+        base,
+        serverMessage({ type: "error", code: "bad_cursor", message: "invalid cursor" })
+      );
+      expect(state.loadingHistory).toBe(false);
+    });
+  });
+
+  describe("presence", () => {
+    it("replaces participants on sync and removes them on leave", () => {
+      const participants = [
+        {
+          participantId: "participant-1",
+          userId: "user-1",
+          name: "A",
+          status: "active" as const,
+          lastSeen: 1,
+        },
+        {
+          participantId: "participant-2",
+          userId: "user-2",
+          name: "B",
+          status: "idle" as const,
+          lastSeen: 2,
+        },
+      ];
+      const synced = reduce(
+        subscribedState(),
+        serverMessage({ type: "presence_sync", participants })
+      );
+      expect(synced.presenceSynced).toBe(true);
+      expect(synced.participants).toEqual(participants);
+
+      const left = reduce(synced, serverMessage({ type: "presence_leave", userId: "user-1" }));
+      expect(left.participants.map((p) => p.userId)).toEqual(["user-2"]);
+    });
+
+    it("marks an empty presence sync as synchronized", () => {
+      const state = reduce(
+        subscribedState(),
+        serverMessage({ type: "presence_sync", participants: [] })
+      );
+
+      expect(state.presenceSynced).toBe(true);
+      expect(state.participants).toEqual([]);
+    });
+
+    it("waits for a new presence sync while reconnecting", () => {
+      const synced = reduce(
+        subscribedState(),
+        serverMessage({
+          type: "presence_sync",
+          participants: [
+            {
+              participantId: "participant-1",
+              userId: "user-1",
+              name: "A",
+              status: "active",
+              lastSeen: 1,
+            },
+          ],
+        })
+      );
+      const disconnected = reduce(synced, { type: "socket_closed" });
+      const resubscribed = reduce(disconnected, serverMessage(createSubscribedMessage()));
+      const resynced = reduce(
+        resubscribed,
+        serverMessage({ type: "presence_sync", participants: [] })
+      );
+
+      expect(disconnected.presenceSynced).toBe(false);
+      expect(disconnected.participants).toEqual([]);
+      expect(resubscribed.presenceSynced).toBe(false);
+      expect(resynced.presenceSynced).toBe(true);
+      expect(resynced.participants).toEqual([]);
+    });
+  });
+
+  describe("sandbox lifecycle", () => {
+    const withAccessState = () =>
+      reduce(
+        subscribedState({
+          session: createSessionState({
+            codeServerUrl: "https://code.example",
+            vncUrl: "https://desktop.example",
+            ttydUrl: "https://ttyd.example",
+          }),
+        }),
+        serverMessage({ type: "tunnel_urls", urls: { "3000": "https://tunnel.example" } }),
+        serverMessage({ type: "sandbox_dashboard_url", url: "https://provider.example" })
+      );
+
+    it("stores non-secret runtime info on the session state", () => {
+      const state = withAccessState();
+      expect(state.sessionState).toEqual(
+        expect.objectContaining({
+          codeServerUrl: "https://code.example",
+          vncUrl: "https://desktop.example",
+          ttydUrl: "https://ttyd.example",
+          tunnelUrls: { "3000": "https://tunnel.example" },
+          sandboxDashboardUrl: "https://provider.example",
+        })
+      );
+    });
+
+    it("clears credentials and the dashboard URL on a replacement start", () => {
+      const state = reduce(
+        withAccessState(),
+        serverMessage({ type: "sandbox_status", status: "spawning" })
+      );
+      expect(state.sessionState?.sandboxStatus).toBe("spawning");
+      expect(state.sessionState?.codeServerUrl).toBeUndefined();
+      expect(state.sessionState?.vncUrl).toBeUndefined();
+      expect(state.sessionState?.ttydUrl).toBeUndefined();
+      expect(state.sessionState?.tunnelUrls).toBeUndefined();
+      expect(state.sessionState?.sandboxDashboardUrl).toBeUndefined();
+    });
+
+    it("clears credentials but keeps the dashboard URL on terminal statuses", () => {
+      for (const status of ["stale", "stopped", "failed"] as const) {
+        const state = reduce(withAccessState(), serverMessage({ type: "sandbox_status", status }));
+        expect(state.sessionState?.sandboxStatus).toBe(status);
+        expect(state.sessionState?.codeServerUrl).toBeUndefined();
+        expect(state.sessionState?.vncUrl).toBeUndefined();
+        expect(state.sessionState?.sandboxDashboardUrl).toBe("https://provider.example");
+      }
+    });
+
+    it("keeps access state for non-clearing statuses", () => {
+      const state = reduce(
+        withAccessState(),
+        serverMessage({ type: "sandbox_status", status: "ready" })
+      );
+      expect(state.sessionState?.codeServerUrl).toBe("https://code.example");
+      expect(state.sessionState?.vncUrl).toBe("https://desktop.example");
+      expect(state.sessionState?.sandboxDashboardUrl).toBe("https://provider.example");
+    });
+
+    it("fails the sandbox and clears credentials on sandbox_error, keeping the dashboard URL", () => {
+      const state = reduce(
+        withAccessState(),
+        serverMessage({ type: "sandbox_error", error: "boom" })
+      );
+      expect(state.sessionState?.sandboxStatus).toBe("failed");
+      expect(state.sessionState?.codeServerUrl).toBeUndefined();
+      expect(state.sessionState?.vncUrl).toBeUndefined();
+      expect(state.sessionState?.sandboxDashboardUrl).toBe("https://provider.example");
+    });
+
+    it("tracks warming, spawning, and ready transitions", () => {
+      let state = reduce(subscribedState(), serverMessage({ type: "sandbox_warming" }));
+      expect(state.sessionState?.sandboxStatus).toBe("warming");
+      state = reduce(state, serverMessage({ type: "sandbox_spawning" }));
+      expect(state.sessionState?.sandboxStatus).toBe("spawning");
+      state = reduce(state, serverMessage({ type: "sandbox_ready" }));
+      expect(state.sessionState?.sandboxStatus).toBe("ready");
+    });
+  });
+
+  describe("session metadata", () => {
+    it("applies title, status, and processing updates", () => {
+      const state = reduce(
+        subscribedState(),
+        serverMessage({ type: "session_title", title: "Generated title" }),
+        serverMessage({ type: "session_status", status: "completed" }),
+        serverMessage({ type: "processing_status", isProcessing: true })
+      );
+      expect(state.sessionState).toEqual(
+        expect.objectContaining({
+          title: "Generated title",
+          status: "completed",
+          isProcessing: true,
+        })
+      );
+    });
+
+    it("ignores an empty title", () => {
+      const state = reduce(subscribedState(), serverMessage({ type: "session_title", title: "" }));
+      expect(state.sessionState?.title).toBe("Session 1");
+    });
+
+    it("upserts artifacts by id, prepending new ones and replacing in place", () => {
+      const pr = (id: string, createdAt: number) => ({
+        id,
+        type: "pr" as const,
+        url: `https://github.com/acme/web-app/pull/${id}`,
+        metadata: { number: 1, state: "open" },
+        createdAt,
+      });
+      let state = reduce(
+        subscribedState(),
+        serverMessage({ type: "artifact_created", artifact: pr("a", 1) }),
+        serverMessage({ type: "artifact_created", artifact: pr("b", 2) })
+      );
+      expect(state.artifacts.map((artifact) => artifact.id)).toEqual(["b", "a"]);
+
+      state = reduce(
+        state,
+        serverMessage({ type: "artifact_updated", artifact: { ...pr("a", 1), updatedAt: 9 } })
+      );
+      expect(state.artifacts.map((artifact) => artifact.id)).toEqual(["b", "a"]);
+      expect(state.artifacts[1].updatedAt).toBe(9);
+    });
+  });
+
+  describe("session_branch", () => {
+    it("updates the scalar branch when no repositories are hydrated", () => {
+      const state = reduce(
+        subscribedState(),
+        serverMessage({ type: "session_branch", branchName: "feature/updated" })
+      );
+      expect(state.sessionState?.branchName).toBe("feature/updated");
+    });
+
+    it("routes a repo-scoped update to the matching member, mirroring the scalar only for the primary", () => {
+      const repositories = [
+        {
+          position: 0,
+          repoOwner: "acme",
+          repoName: "web",
+          repoId: 1,
+          baseBranch: "main",
+          branchName: "open-inspect/session-1",
+          baseSha: null,
+          currentSha: null,
+          prUrl: null,
+        },
+        {
+          position: 1,
+          repoOwner: "acme",
+          repoName: "api",
+          repoId: 2,
+          baseBranch: "main",
+          branchName: null,
+          baseSha: null,
+          currentSha: null,
+          prUrl: null,
+        },
+      ];
+      const base = subscribedState({
+        session: createSessionState({ branchName: "open-inspect/session-1", repositories }),
+      });
+
+      const secondary = reduce(
+        base,
+        serverMessage({
+          type: "session_branch",
+          branchName: "open-inspect/session-1-api",
+          repoOwner: "acme",
+          repoName: "api",
+        })
+      );
+      expect(secondary.sessionState?.repositories?.[1].branchName).toBe(
+        "open-inspect/session-1-api"
+      );
+      expect(secondary.sessionState?.branchName).toBe("open-inspect/session-1");
+
+      const primary = reduce(
+        secondary,
+        serverMessage({
+          type: "session_branch",
+          branchName: "open-inspect/session-1-web",
+          repoOwner: "acme",
+          repoName: "web",
+        })
+      );
+      expect(primary.sessionState?.repositories?.[0].branchName).toBe("open-inspect/session-1-web");
+      expect(primary.sessionState?.branchName).toBe("open-inspect/session-1-web");
+
+      // Unscoped updates on a multi-repo session are anomalous and ignored.
+      const unscoped = reduce(
+        primary,
+        serverMessage({ type: "session_branch", branchName: "orphan" })
+      );
+      expect(unscoped.sessionState).toBe(primary.sessionState);
+    });
+  });
+
+  describe("local actions", () => {
+    it("keeps the socket unready when it closes", () => {
+      const state = reduce(initialSessionSocketState, { type: "socket_closed" });
+      expect(state.ready).toBe(false);
+    });
+
+    it("leaves a null sessionState untouched for state-dependent messages", () => {
+      const state = reduce(initialSessionSocketState, serverMessage({ type: "sandbox_ready" }));
+      expect(state.sessionState).toBeNull();
+    });
+  });
+});

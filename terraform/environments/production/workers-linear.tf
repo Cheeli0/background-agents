@@ -2,32 +2,28 @@
 # Linear Bot Worker
 # =============================================================================
 
-# Build linear-bot worker bundle during plan so cloudflare_worker_version reads
-# stable module content during apply.
-data "external" "linear_bot_build" {
+# Build linear-bot worker bundle (only runs during apply, not plan)
+resource "null_resource" "linear_bot_build" {
   count = var.enable_linear_bot ? 1 : 0
 
-  program = ["bash", "-c", <<-EOF
-    cd ${var.project_root}
-    npm run build -w @open-inspect/shared >&2
-    npm run build -w @open-inspect/linear-bot >&2
-    if command -v sha256sum >/dev/null 2>&1; then
-      hash=$(sha256sum packages/linear-bot/dist/index.js | cut -d' ' -f1)
-    else
-      hash=$(shasum -a 256 packages/linear-bot/dist/index.js | cut -d' ' -f1)
-    fi
-    echo "{\"hash\": \"$hash\"}"
-  EOF
-  ]
+  triggers = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    command     = "npm run build"
+    working_dir = "${var.project_root}/packages/linear-bot"
+  }
 }
 
 module "linear_bot_worker" {
   count  = var.enable_linear_bot ? 1 : 0
   source = "../../modules/cloudflare-worker"
 
-  account_id  = var.cloudflare_account_id
-  worker_name = "open-inspect-linear-bot-${local.name_suffix}"
-  script_path = local.linear_bot_script_path
+  account_id       = var.cloudflare_account_id
+  worker_name      = "open-inspect-linear-bot-${local.name_suffix}"
+  worker_subdomain = var.cloudflare_worker_subdomain
+  script_path      = local.linear_bot_script_path
 
   kv_namespaces = [
     {
@@ -49,21 +45,25 @@ module "linear_bot_worker" {
     { name = "CONTROL_PLANE_URL", value = local.control_plane_url },
     { name = "WEB_APP_URL", value = local.web_app_url },
     { name = "DEPLOYMENT_NAME", value = var.deployment_name },
+    { name = "APP_NAME", value = var.app_name },
     { name = "DEFAULT_MODEL", value = "claude-sonnet-4-6" },
+    { name = "CLASSIFICATION_MODEL", value = var.classification_model },
     { name = "LINEAR_CLIENT_ID", value = var.linear_client_id },
     { name = "WORKER_URL", value = "https://open-inspect-linear-bot-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev" },
   ]
 
-  secrets = [
-    { name = "LINEAR_WEBHOOK_SECRET", value = var.linear_webhook_secret },
-    { name = "LINEAR_CLIENT_SECRET", value = var.linear_client_secret },
-    { name = "INTERNAL_CALLBACK_SECRET", value = var.internal_callback_secret },
-    { name = "ANTHROPIC_API_KEY", value = var.anthropic_api_key },
-    { name = "LINEAR_API_KEY", value = var.linear_api_key },
-  ]
+  secrets = concat(
+    [
+      { name = "LINEAR_WEBHOOK_SECRET", value = var.linear_webhook_secret },
+      { name = "LINEAR_CLIENT_SECRET", value = var.linear_client_secret },
+      { name = "SERVICE_AUTH_SECRET", value = random_password.service_auth_secret_linear_bot.result },
+      { name = "LINEAR_API_KEY", value = var.linear_api_key },
+    ],
+    local.classifier_secret_bindings
+  )
 
   compatibility_date  = "2024-09-23"
   compatibility_flags = ["nodejs_compat"]
 
-  depends_on = [data.external.linear_bot_build[0], module.linear_kv[0]]
+  depends_on = [null_resource.linear_bot_build[0], module.linear_kv[0]]
 }

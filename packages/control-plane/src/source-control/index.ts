@@ -11,8 +11,6 @@ export type {
   SourceControlProviderName,
   SourceControlAuthContext,
   GitPushAuthContext,
-  GetPullRequestChecksConfig,
-  PullRequestChecks,
   BuildManualPullRequestUrlConfig,
   BuildGitPushSpecConfig,
   GitPushSpec,
@@ -20,15 +18,19 @@ export type {
   GetRepositoryConfig,
   CreatePullRequestConfig,
   CreatePullRequestResult,
-  GetPullRequestStatusConfig,
-  PullRequestStatus,
+  PullRequestSnapshot,
   RepositoryAccessResult,
+  ResolvedCommit,
+  RepositoryTree,
+  RepositoryTreeEntry,
+  RepositoryReader,
 } from "./types";
 
 // Errors
 export type { SourceControlErrorType } from "./errors";
 export { SourceControlProviderError } from "./errors";
 export { DEFAULT_SCM_PROVIDER, resolveScmProviderFromEnv } from "./config";
+export { createSourceControlProviderFromEnv } from "./provider-from-env";
 
 // Providers
 export {

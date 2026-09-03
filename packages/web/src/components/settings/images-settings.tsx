@@ -1,39 +1,30 @@
 "use client";
 
 import { useState } from "react";
-import useSWR, { mutate } from "swr";
+import { mutate } from "swr";
+import type { ImageBuildRecordView } from "@open-inspect/shared/types/image-builds";
+import { useImageBuilds } from "@/hooks/use-image-builds";
 import { useRepos } from "@/hooks/use-repos";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { RefreshIcon } from "@/components/ui/icons";
-import { formatRelativeTime } from "@/lib/time";
+import { IMAGE_BUILDS_KEY, formatReadyDetails, parsePrimaryBuildSha } from "@/lib/image-builds";
 import { supportsRepoImages } from "@/lib/sandbox-provider";
+import { ImageBuildStatus } from "./image-build-status";
+import { browserApiFetch } from "@/lib/browser-api-fetch";
+import { useCurrentUserAuthorization } from "@/hooks/use-current-user-authorization";
 
-interface RepoImage {
-  repo_owner: string;
-  repo_name: string;
-  status: "building" | "ready" | "failed";
-  base_sha: string;
-  build_duration_seconds: number;
-  error_message?: string;
-  created_at: number;
-}
-
-interface ImageRegistryData {
-  enabledRepos: string[];
-  images: RepoImage[];
-}
-
-const REPO_IMAGES_KEY = "/api/repo-images";
-
+/**
+ * Displays repository image configuration and limits image mutations to authorized users.
+ */
 export function ImagesSettings() {
+  const { hasPermission } = useCurrentUserAuthorization();
+  const canManage = hasPermission("repositories.images.manage");
   const repoImagesSupported = supportsRepoImages();
   const { repos, loading: reposLoading } = useRepos();
-  const { data, isLoading: imagesLoading } = useSWR<ImageRegistryData>(
-    repoImagesSupported ? REPO_IMAGES_KEY : null
-  );
+  const { data, error: feedError, isLoading: imagesLoading } = useImageBuilds();
   const [togglingRepos, setTogglingRepos] = useState<Set<string>>(new Set());
   const [triggeringRepos, setTriggeringRepos] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
@@ -43,7 +34,8 @@ export function ImagesSettings() {
       <div>
         <h2 className="text-xl font-semibold text-foreground mb-1">Pre-Built Images</h2>
         <p className="text-sm text-muted-foreground">
-          Pre-built images are only available when <code>SANDBOX_PROVIDER=modal</code>.
+          Pre-built images are only available when <code>SANDBOX_PROVIDER=modal</code>,{" "}
+          <code>SANDBOX_PROVIDER=vercel</code>, or <code>SANDBOX_PROVIDER=opencomputer</code>.
         </p>
       </div>
     );
@@ -51,11 +43,16 @@ export function ImagesSettings() {
 
   const loading = reposLoading || imagesLoading;
 
-  const enabledRepos = new Set(data?.enabledRepos ?? []);
+  // Toggle state reads the persisted flags, not `units` — the units feed
+  // resolves scopes through source control and can transiently drop a repo.
+  const enabledRepos = new Set(
+    (data?.enabledRepos ?? []).map((repo) => `${repo.repoOwner}/${repo.repoName}`.toLowerCase())
+  );
 
-  const getLatestImage = (owner: string, name: string): RepoImage | undefined => {
+  // Repo scope ids are lowercase `owner/name` pairs.
+  const getLatestImage = (owner: string, name: string): ImageBuildRecordView | undefined => {
     const key = `${owner}/${name}`.toLowerCase();
-    return data?.images.find((img) => `${img.repo_owner}/${img.repo_name}`.toLowerCase() === key);
+    return data?.images.find((img) => img.scopeKind === "repo" && img.scopeId === key);
   };
 
   const handleToggle = async (owner: string, name: string, enabled: boolean) => {
@@ -64,8 +61,8 @@ export function ImagesSettings() {
     setError("");
 
     try {
-      const res = await fetch(
-        `/api/repo-images/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/toggle`,
+      const res = await browserApiFetch(
+        `/api/image-builds/repo/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/toggle`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -77,7 +74,7 @@ export function ImagesSettings() {
         const errBody = await res.json();
         setError(errBody.error || "Failed to toggle image build");
       } else {
-        mutate(REPO_IMAGES_KEY);
+        mutate(IMAGE_BUILDS_KEY);
       }
     } catch {
       setError("Failed to toggle image build");
@@ -96,8 +93,8 @@ export function ImagesSettings() {
     setError("");
 
     try {
-      const res = await fetch(
-        `/api/repo-images/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/trigger`,
+      const res = await browserApiFetch(
+        `/api/image-builds/repo/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/trigger`,
         { method: "POST" }
       );
 
@@ -105,7 +102,7 @@ export function ImagesSettings() {
         const errBody = await res.json();
         setError(errBody.error || "Failed to trigger build");
       } else {
-        mutate(REPO_IMAGES_KEY);
+        mutate(IMAGE_BUILDS_KEY);
       }
     } catch {
       setError("Failed to trigger build");
@@ -123,6 +120,17 @@ export function ImagesSettings() {
       <div className="flex items-center gap-2 text-muted-foreground">
         <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
         Loading image settings...
+      </div>
+    );
+  }
+
+  // Without the feed there is no toggle state to show — rendering the list
+  // would present every repo as disabled and invite state-changing toggles.
+  if (feedError && !data) {
+    return (
+      <div>
+        <h2 className="text-xl font-semibold text-foreground mb-1">Pre-Built Images</h2>
+        <ErrorBanner>Failed to load image build settings.</ErrorBanner>
       </div>
     );
   }
@@ -155,7 +163,7 @@ export function ImagesSettings() {
                   <Switch
                     checked={isEnabled}
                     onCheckedChange={(checked) => handleToggle(repo.owner, repo.name, checked)}
-                    disabled={isToggling}
+                    disabled={!canManage || isToggling}
                     aria-label={`Toggle pre-built images for ${repo.owner}/${repo.name}`}
                   />
                   <span className="text-sm font-medium text-foreground truncate">
@@ -164,16 +172,31 @@ export function ImagesSettings() {
                 </div>
 
                 <div className="flex items-center gap-3 flex-shrink-0 ml-4">
-                  <ImageStatus image={image} isEnabled={isEnabled} />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleTrigger(repo.owner, repo.name)}
-                    disabled={!isEnabled || isTriggering || image?.status === "building"}
-                    title="Rebuild image"
-                  >
-                    <RefreshIcon className={`w-4 h-4 ${isTriggering ? "animate-spin" : ""}`} />
-                  </Button>
+                  <ImageBuildStatus
+                    isEnabled={isEnabled}
+                    image={
+                      image && {
+                        status: image.status,
+                        createdAt: image.createdAt,
+                        readyDetails: formatReadyDetails(
+                          parsePrimaryBuildSha(image.repositoryShas),
+                          image.buildDurationSeconds
+                        ),
+                        errorMessage: image.errorMessage,
+                      }
+                    }
+                  />
+                  {canManage && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleTrigger(repo.owner, repo.name)}
+                      disabled={!isEnabled || isTriggering || image?.status === "building"}
+                      title="Rebuild image"
+                    >
+                      <RefreshIcon className={`w-4 h-4 ${isTriggering ? "animate-spin" : ""}`} />
+                    </Button>
+                  )}
                 </div>
               </div>
             );
@@ -188,70 +211,4 @@ export function ImagesSettings() {
       </div>
     </TooltipProvider>
   );
-}
-
-function ImageStatus({ image, isEnabled }: { image: RepoImage | undefined; isEnabled: boolean }) {
-  if (!isEnabled) {
-    return <span className="text-xs text-muted-foreground">Disabled</span>;
-  }
-
-  if (!image) {
-    return <span className="text-xs text-muted-foreground">No image</span>;
-  }
-
-  if (image.status === "ready") {
-    const sha = image.base_sha ? image.base_sha.slice(0, 7) : "";
-    const duration = image.build_duration_seconds
-      ? `${Math.round(image.build_duration_seconds)}s`
-      : "";
-    const details = [sha, duration].filter(Boolean).join(" · ");
-
-    return (
-      <div className="text-right">
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
-          <span className="text-xs text-foreground">
-            Ready {formatRelativeTime(image.created_at)}
-          </span>
-        </div>
-        {details && <span className="text-xs text-muted-foreground">{details}</span>}
-      </div>
-    );
-  }
-
-  if (image.status === "building") {
-    return (
-      <div className="flex items-center gap-1.5">
-        <span className="w-2 h-2 rounded-full bg-warning animate-pulse flex-shrink-0" />
-        <span className="text-xs text-foreground">
-          Building... {formatRelativeTime(image.created_at)}
-        </span>
-      </div>
-    );
-  }
-
-  if (image.status === "failed") {
-    return (
-      <div className="text-right">
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-destructive flex-shrink-0" />
-          <span className="text-xs text-foreground">Failed</span>
-        </div>
-        {image.error_message && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-xs text-muted-foreground truncate max-w-[200px] block cursor-help">
-                {image.error_message}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-md overflow-visible whitespace-pre-wrap break-words">
-              {image.error_message}
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-    );
-  }
-
-  return null;
 }

@@ -14,6 +14,16 @@ variable "worker_name" {
   type        = string
 }
 
+variable "worker_subdomain" {
+  description = "Cloudflare account workers.dev subdomain label, e.g. 'myaccount' (without '.workers.dev'). worker_url resolves to <worker_name>.<worker_subdomain>.workers.dev."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$", var.worker_subdomain))
+    error_message = "worker_subdomain must be a single workers.dev subdomain label (e.g. 'myaccount'): lowercase alphanumeric and hyphens only, no dots — do not include '.workers.dev'."
+  }
+}
+
 variable "script_path" {
   description = "Path to the bundled JavaScript worker script file"
   type        = string
@@ -51,6 +61,15 @@ variable "r2_buckets" {
   type = list(object({
     binding_name = string
     bucket_name  = string
+  }))
+  default = []
+}
+
+variable "queue_bindings" {
+  description = "List of Queue producer bindings"
+  type = list(object({
+    binding_name = string
+    queue_name   = string
   }))
   default = []
 }
@@ -109,6 +128,12 @@ variable "migration_old_tag" {
 
 variable "new_sqlite_classes" {
   description = "DO class names that are NEW in this migration step. Only these are declared as new_sqlite_classes in the migration (not all durable_objects). If empty, defaults to all durable_objects class names (for fresh deployments)."
+  type        = list(string)
+  default     = []
+}
+
+variable "deleted_classes" {
+  description = "DO class names deleted in this migration step. Requires a new migration tag; surviving bindings remain enabled."
   type        = list(string)
   default     = []
 }

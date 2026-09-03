@@ -1,517 +1,248 @@
-import type { Logger } from "../../../logger";
-import type { ArtifactRow, ParticipantRow, SandboxRow, SessionRow } from "../../types";
-import type { SandboxSettings } from "@open-inspect/shared";
-import type { SandboxStatus, ServerMessage, SessionStatus, SpawnSource } from "../../../types";
-import type { SessionRepository } from "../../repository";
-import type { PullRequestStatus, SourceControlProvider } from "../../../source-control";
-import { getValidModelOrDefault, isValidModel } from "../../../utils/models";
-import { generateInternalToken } from "@open-inspect/shared";
+import type { WebSocketManager } from "../../../sandbox/lifecycle/manager";
+import type { SessionStatus } from "@open-inspect/shared/types/sessions";
+import type { SessionCoreRepository } from "../../session-core-repository";
+import type { SandboxRepository } from "../../sandbox-repository";
+import type { MessageRepository } from "../../message-repository";
+import type { SessionStatusService } from "../../session-status-service";
+import type { SessionTitleService } from "../../title-service";
+import { resolvePublicSessionId } from "../../public-session-id";
+import { normalizeSessionTitle, type SessionTitleUpdateResult } from "../../title";
+import { z } from "zod";
+import { isSessionInactive } from "@open-inspect/shared/types/session-activity";
 
-const TERMINAL_STATUSES = new Set<SessionStatus>(["completed", "archived", "cancelled", "failed"]);
-
-interface LinearCallbackContextLike {
-  agentSessionId?: string;
-  organizationId?: string;
+/**
+ * There is nothing to cancel once a session is no longer live work.
+ *
+ * Expressed as the negation of the shared predicate rather than its own member
+ * list: this site and the two others that asked this question kept separate
+ * copies of an identical set, which bought nothing and could only drift. If
+ * cancellability ever genuinely diverges from liveness, change it here — the
+ * name already says which question is being answered.
+ */
+function isCancellable(status: SessionStatus): boolean {
+  return !isSessionInactive(status);
 }
 
-interface ServiceBinding {
-  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
-}
-
-interface AssociatedPrResponse {
-  pullRequest: {
-    number: number;
-    title: string;
-    url: string;
-    status: "open" | "merged" | "closed" | "draft";
-  } | null;
-}
-
-interface InitRequest {
-  sessionName: string;
-  repoOwner: string;
-  repoName: string;
-  repoId?: number;
-  defaultBranch?: string;
-  branch?: string;
-  title?: string;
-  model?: string;
-  reasoningEffort?: string;
-  userId: string;
-  scmLogin?: string;
-  scmName?: string;
-  scmEmail?: string;
-  scmToken?: string | null;
-  scmTokenEncrypted?: string | null;
-  scmRefreshTokenEncrypted?: string | null;
-  scmTokenExpiresAt?: number | null;
-  scmUserId?: string | null;
-  parentSessionId?: string | null;
-  spawnSource?: SpawnSource;
-  spawnDepth?: number;
-  codeServerEnabled?: boolean;
-  sandboxSettings?: SandboxSettings;
-}
-
-export interface SessionLifecycleHandlerDeps {
-  repository: Pick<
-    SessionRepository,
-    | "upsertSession"
-    | "createSandbox"
-    | "createParticipant"
-    | "updateSessionTitle"
-    | "getLatestLinearCallbackContext"
-    | "listArtifacts"
-  >;
-  getDurableObjectId: () => string;
-  tokenEncryptionKey?: string;
-  encryptToken: (token: string, encryptionKey: string) => Promise<string>;
-  validateReasoningEffort: (model: string, effort: string | undefined) => string | null;
-  generateId: (bytes?: number) => string;
-  now: () => number;
-  scheduleWarmSandbox: () => void;
-  getLog: () => Logger;
-  getSession: () => SessionRow | null;
-  getSandbox: () => SandboxRow | null;
-  getPublicSessionId: (session: SessionRow) => string;
-  getParticipantByUserId: (userId: string) => ParticipantRow | null;
-  transitionSessionStatus: (status: SessionStatus) => Promise<boolean>;
-  syncSessionIndexTitle: (sessionId: string, title: string) => void;
-  stopExecution: (options?: { suppressStatusReconcile?: boolean }) => Promise<void>;
-  getSandboxSocket: () => WebSocket | null;
-  sendToSandbox: (ws: WebSocket, message: string | object) => boolean;
-  updateSandboxStatus: (status: SandboxStatus) => void;
-  broadcast: (message: ServerMessage) => void;
-  linearBot?: ServiceBinding;
-  internalCallbackSecret?: string;
-  sourceControlProvider?: SourceControlProvider;
-}
-
-export interface SessionLifecycleHandler {
-  init: (request: Request) => Promise<Response>;
-  getState: () => Response;
-  getAssociatedPr: () => Promise<Response>;
-  updateTitle: (request: Request) => Promise<Response>;
-  archive: (request: Request) => Promise<Response>;
-  unarchive: (request: Request) => Promise<Response>;
-  cancel: () => Promise<Response>;
-}
-
-function parseUserIdBody(body: unknown): { userId?: string } {
-  return body as { userId?: string };
-}
-
-function parseLinearCallbackContext(
-  raw: string | null | undefined
-): LinearCallbackContextLike | null {
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw) as LinearCallbackContextLike;
-    return typeof parsed === "object" && parsed !== null ? parsed : null;
-  } catch {
-    return null;
+function sessionTitleUpdateStatus(
+  result: Extract<SessionTitleUpdateResult, { ok: false }>
+): 400 | 404 | 409 {
+  switch (result.reason) {
+    case "invalid":
+      return 400;
+    case "not_found":
+      return 404;
+    case "already_set":
+      return 409;
   }
 }
 
-interface PullRequestArtifactMetadata {
-  number?: number;
-  prNumber?: number;
-  state?: "open" | "merged" | "closed" | "draft";
-  prState?: "open" | "merged" | "closed" | "draft";
-}
+const titleUpdateBodySchema = z.object({
+  title: z.string().optional(),
+});
 
-function parsePullRequestArtifactMetadata(raw: string | null): PullRequestArtifactMetadata | null {
-  if (!raw) return null;
+type TitleUpdateBody = z.infer<typeof titleUpdateBodySchema>;
 
-  try {
-    const parsed = JSON.parse(raw) as PullRequestArtifactMetadata;
-    return typeof parsed === "object" && parsed !== null ? parsed : null;
-  } catch {
-    return null;
-  }
-}
+/**
+ * HTTP boundary for the session lifecycle endpoints: init, state reads, title
+ * updates, archive/unarchive, draft expiry, and cancellation.
+ */
+export class SessionLifecycleHandler {
+  /** Create the session lifecycle HTTP handler with its persistence and lifecycle services. */
+  constructor(
+    private readonly sessionCoreRepository: SessionCoreRepository,
+    private readonly sandboxRepository: SandboxRepository,
+    private readonly messageRepository: MessageRepository,
+    private readonly statusService: SessionStatusService,
+    private readonly titleService: SessionTitleService,
+    private readonly sockets: WebSocketManager,
+    private readonly durableObjectId: string,
+    private readonly cancelSession: () => Promise<void>
+  ) {}
 
-function mapPullRequestStatus(
-  status: string | undefined
-): "open" | "merged" | "closed" | "draft" | null {
-  if (status === "open" || status === "merged" || status === "closed" || status === "draft") {
-    return status;
-  }
-  return null;
-}
-
-function parsePullRequestNumberFromUrl(url: string | null): number | null {
-  if (!url) return null;
-  const match = url.match(/\/pull\/(\d+)(?:\/|$)/);
-  if (!match) return null;
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function selectLatestPullRequestArtifact(artifacts: ArtifactRow[]): ArtifactRow | null {
-  const pullRequestArtifacts = artifacts.filter((artifact) => artifact.type === "pr");
-  if (pullRequestArtifacts.length === 0) {
-    return null;
-  }
-
-  return pullRequestArtifacts.reduce((latest, artifact) =>
-    artifact.created_at > latest.created_at ? artifact : latest
-  );
-}
-
-async function resolveArtifactPullRequest(
-  deps: SessionLifecycleHandlerDeps,
-  session: SessionRow | null
-): Promise<AssociatedPrResponse["pullRequest"]> {
-  const artifact = selectLatestPullRequestArtifact(deps.repository.listArtifacts());
-  if (!artifact) {
-    return null;
-  }
-
-  const metadata = parsePullRequestArtifactMetadata(artifact.metadata);
-  const artifactNumber =
-    metadata?.prNumber ?? metadata?.number ?? parsePullRequestNumberFromUrl(artifact.url);
-  if (typeof artifactNumber !== "number") {
-    return null;
-  }
-
-  const artifactStatus = mapPullRequestStatus(metadata?.prState ?? metadata?.state) ?? "open";
-  const fallback: AssociatedPrResponse["pullRequest"] = {
-    number: artifactNumber,
-    title: `PR #${artifactNumber}`,
-    url: artifact.url ?? "",
-    status: artifactStatus,
-  };
-
-  if (!session || !deps.sourceControlProvider?.getPullRequestStatus) {
-    return fallback.url ? fallback : null;
-  }
-
-  try {
-    const live = await deps.sourceControlProvider.getPullRequestStatus({
-      owner: session.repo_owner,
-      name: session.repo_name,
-      pullRequestNumber: artifactNumber,
-    });
-    if (!live) {
-      return fallback.url ? fallback : null;
+  getState(): Response {
+    const session = this.sessionCoreRepository.getSession();
+    if (!session) {
+      return new Response("Session not found", { status: 404 });
     }
 
-    return {
-      number: live.number,
-      title: live.title,
-      url: live.url,
-      status: live.status,
-    } satisfies PullRequestStatus;
-  } catch (error) {
-    deps.getLog().warn("Failed to resolve artifact pull request status", {
-      repo_owner: session.repo_owner,
-      repo_name: session.repo_name,
-      pull_request_number: artifactNumber,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return fallback.url ? fallback : null;
-  }
-}
+    const sandbox = this.sandboxRepository.getSandbox();
 
-export function createSessionLifecycleHandler(
-  deps: SessionLifecycleHandlerDeps
-): SessionLifecycleHandler {
-  return {
-    async init(request: Request): Promise<Response> {
-      const body = (await request.json()) as InitRequest;
-
-      const sessionId = deps.getDurableObjectId();
-      const sessionName = body.sessionName;
-      const now = deps.now();
-
-      let encryptedToken = body.scmTokenEncrypted ?? null;
-      if (body.scmToken && deps.tokenEncryptionKey) {
-        try {
-          encryptedToken = await deps.encryptToken(body.scmToken, deps.tokenEncryptionKey);
-          deps.getLog().debug("Encrypted SCM token for storage");
-        } catch (error) {
-          deps.getLog().error("Failed to encrypt SCM token", {
-            error: error instanceof Error ? error : String(error),
-          });
-        }
-      }
-
-      const model = getValidModelOrDefault(body.model);
-      if (body.model && !isValidModel(body.model)) {
-        deps.getLog().warn("Invalid model name, using default", {
-          requested_model: body.model,
-          default_model: model,
-        });
-      }
-
-      const reasoningEffort = deps.validateReasoningEffort(model, body.reasoningEffort);
-      const baseBranch = body.branch || body.defaultBranch || "main";
-
-      deps.repository.upsertSession({
-        id: sessionId,
-        sessionName,
-        title: body.title ?? null,
-        repoOwner: body.repoOwner,
-        repoName: body.repoName,
-        repoId: body.repoId ?? null,
-        baseBranch,
-        model,
-        reasoningEffort,
-        status: "created",
-        parentSessionId: body.parentSessionId ?? null,
-        spawnSource: body.spawnSource ?? "user",
-        spawnDepth: body.spawnDepth ?? 0,
-        codeServerEnabled: body.codeServerEnabled ?? false,
-        sandboxSettings: body.sandboxSettings ? JSON.stringify(body.sandboxSettings) : null,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      const sandboxId = deps.generateId();
-      deps.repository.createSandbox({
-        id: sandboxId,
-        status: "pending",
-        gitSyncStatus: "pending",
-        createdAt: 0,
-      });
-
-      const participantId = deps.generateId();
-      deps.repository.createParticipant({
-        id: participantId,
-        userId: body.userId,
-        scmUserId: body.scmUserId ?? null,
-        scmLogin: body.scmLogin ?? null,
-        scmName: body.scmName ?? null,
-        scmEmail: body.scmEmail ?? null,
-        scmAccessTokenEncrypted: encryptedToken,
-        scmRefreshTokenEncrypted: body.scmRefreshTokenEncrypted ?? null,
-        scmTokenExpiresAt: body.scmTokenExpiresAt ?? null,
-        role: "owner",
-        joinedAt: now,
-      });
-
-      deps.getLog().info("Triggering sandbox spawn for new session");
-      deps.scheduleWarmSandbox();
-
-      return Response.json({ sessionId, status: "created" });
-    },
-
-    getState(): Response {
-      const session = deps.getSession();
-      if (!session) {
-        return new Response("Session not found", { status: 404 });
-      }
-
-      const sandbox = deps.getSandbox();
-
-      return Response.json({
-        id: deps.getPublicSessionId(session),
-        title: session.title,
-        repoOwner: session.repo_owner,
-        repoName: session.repo_name,
-        baseBranch: session.base_branch,
-        branchName: session.branch_name,
-        baseSha: session.base_sha,
-        currentSha: session.current_sha,
-        opencodeSessionId: session.opencode_session_id,
-        status: session.status,
-        model: session.model,
-        reasoningEffort: session.reasoning_effort ?? undefined,
-        createdAt: session.created_at,
-        updatedAt: session.updated_at,
-        sandbox: sandbox
-          ? {
-              id: sandbox.id,
-              modalSandboxId: sandbox.modal_sandbox_id,
-              status: sandbox.status,
-              gitSyncStatus: sandbox.git_sync_status,
-              lastHeartbeat: sandbox.last_heartbeat,
-            }
-          : null,
-      });
-    },
-
-    async getAssociatedPr(): Promise<Response> {
-      const session = deps.getSession();
-      const artifactPullRequest = await resolveArtifactPullRequest(deps, session);
-      const callbackContext = parseLinearCallbackContext(
-        deps.repository.getLatestLinearCallbackContext()?.callback_context
-      );
-
-      if (!callbackContext?.agentSessionId || !callbackContext.organizationId) {
-        return Response.json({ pullRequest: artifactPullRequest } satisfies AssociatedPrResponse);
-      }
-
-      if (!deps.linearBot || !deps.internalCallbackSecret) {
-        return Response.json({ pullRequest: artifactPullRequest } satisfies AssociatedPrResponse);
-      }
-
-      let linearResponse: Response;
-
-      try {
-        const token = await generateInternalToken(deps.internalCallbackSecret);
-        linearResponse = await deps.linearBot.fetch(
-          `https://internal/internal/agent-sessions/${callbackContext.agentSessionId}/pull-requests?organizationId=${encodeURIComponent(callbackContext.organizationId)}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+    return Response.json({
+      id: resolvePublicSessionId(session, this.durableObjectId),
+      title: session.title,
+      repoOwner: session.repo_owner,
+      repoName: session.repo_name,
+      baseBranch: session.base_branch,
+      branchName: session.branch_name,
+      baseSha: session.base_sha,
+      currentSha: session.current_sha,
+      opencodeSessionId: session.opencode_session_id,
+      status: session.status,
+      model: session.model,
+      reasoningEffort: session.reasoning_effort ?? undefined,
+      createdAt: session.created_at,
+      updatedAt: session.updated_at,
+      sandbox: sandbox
+        ? {
+            id: sandbox.id,
+            modalSandboxId: sandbox.modal_sandbox_id,
+            status: sandbox.status,
+            gitSyncStatus: sandbox.git_sync_status,
+            lastHeartbeat: sandbox.last_heartbeat,
           }
-        );
-      } catch (error) {
-        deps.getLog().warn("Failed to fetch associated Linear pull requests", {
-          agent_session_id: callbackContext.agentSessionId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return Response.json({ pullRequest: artifactPullRequest } satisfies AssociatedPrResponse);
+        : null,
+    });
+  }
+
+  /** Update the title after route-level lifecycle authorization has succeeded. */
+  async updateTitle(request: Request): Promise<Response> {
+    const session = this.sessionCoreRepository.getSession();
+    if (!session) {
+      return Response.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    let raw: unknown;
+    try {
+      raw = await request.json();
+    } catch {
+      return Response.json({ error: "Invalid request body" }, { status: 400 });
+    }
+
+    const parseResult = titleUpdateBodySchema.safeParse(raw);
+    if (!parseResult.success) {
+      return Response.json({ error: "Invalid request body" }, { status: 400 });
+    }
+
+    const body: TitleUpdateBody = parseResult.data;
+
+    const normalizedTitle = normalizeSessionTitle(body.title);
+    if (!normalizedTitle.ok) {
+      return Response.json({ error: normalizedTitle.error }, { status: 400 });
+    }
+
+    const result = this.titleService.applySessionTitleUpdate(normalizedTitle.title, {
+      onlyIfUnset: false,
+    });
+    if (!result.ok) {
+      return Response.json({ error: result.error }, { status: sessionTitleUpdateStatus(result) });
+    }
+
+    return Response.json({ title: result.title });
+  }
+
+  /** Archive the session after route-level lifecycle authorization has succeeded. */
+  async archive(): Promise<Response> {
+    const session = this.sessionCoreRepository.getSession();
+    if (!session) {
+      return Response.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (session.status === "cancelled") {
+      return Response.json({ error: "Cancelled sessions cannot be archived" }, { status: 409 });
+    }
+
+    if (this.messageRepository.getPendingOrProcessingCount() > 0) {
+      return Response.json({ error: "Cannot archive a session with queued work" }, { status: 409 });
+    }
+
+    await this.statusService.transition("archived");
+
+    return Response.json({ status: "archived" });
+  }
+
+  /**
+   * Retire a warm session that never received a prompt.
+   *
+   * The web client warms a session on the first keystroke, so navigating away
+   * without submitting leaves a `created` row whose sandbox idles out — and no
+   * other transition reaches it, because `active` needs an enqueued prompt and
+   * the terminal statuses need a finished execution.
+   *
+   * The sweep selects candidates from the D1 index, which it may have read
+   * before a prompt arrived. Re-checking here is what makes that safe: the
+   * Durable Object is the authority on the session's own state and runs
+   * single-threaded, so a session that started work in the meantime is left
+   * alone rather than archived out from under its author.
+   */
+  async expireDraft(): Promise<Response> {
+    const session = this.sessionCoreRepository.getSession();
+    if (!session) {
+      return Response.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (session.status !== "created") {
+      // Reaching here means the index still reads `created` while this session
+      // has moved on — which is exactly what happens when an earlier
+      // transition's D1 projection failed (they are logged and swallowed).
+      // Repairing the mirror is what stops the row being selected instead of
+      // being retried every sweep forever.
+      await this.statusService.repairIndexStatus();
+      return Response.json({ outcome: "not_draft", status: session.status });
+    }
+
+    if (
+      this.messageRepository.getPendingOrProcessingCount() > 0 ||
+      this.messageRepository.getMessageCount() > 0
+    ) {
+      // A session holding messages while still `created` is a broken aggregate:
+      // enqueueing a prompt inserts the message and transitions to `active` in
+      // the same Durable Object turn, so current code cannot produce this. It
+      // survives only on rows predating that guarantee, and answering without
+      // changing anything is what let them pin the head of the sweep's
+      // oldest-first batch forever. Settle the status to what the messages say
+      // instead. A queued prompt is left for the dispatch timeout rather than
+      // archived: archiving discards a real request, and `archived` is not
+      // promptable, so the author could not resume it either.
+      const settled = await this.statusService.settleFromMessageState();
+      return Response.json({ outcome: "has_work", status: settled });
+    }
+
+    await this.statusService.transition("archived");
+
+    return Response.json({ outcome: "archived", status: "archived" });
+  }
+
+  /** Restore the session after route-level lifecycle authorization has succeeded. */
+  async unarchive(): Promise<Response> {
+    const session = this.sessionCoreRepository.getSession();
+    if (!session) {
+      return Response.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (session.status !== "archived") {
+      return Response.json({ error: "Session is not archived" }, { status: 409 });
+    }
+
+    // Restoring, not starting: unarchive returns the session to whatever its
+    // messages already imply. Asserting "active" here claimed work that does
+    // not exist, and no settle path would ever correct it — they all run off
+    // execution events, so an idle session sat in the in-progress group until
+    // someone prompted it again.
+    const settled = await this.statusService.settleFromMessageState();
+
+    return Response.json({ status: settled });
+  }
+
+  async cancel(): Promise<Response> {
+    const session = this.sessionCoreRepository.getSession();
+    if (!session) {
+      return Response.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (!isCancellable(session.status)) {
+      return Response.json({ error: `Session already ${session.status}` }, { status: 409 });
+    }
+
+    await this.cancelSession();
+
+    const sandbox = this.sandboxRepository.getSandbox();
+    if (sandbox && sandbox.status !== "stopped" && sandbox.status !== "failed") {
+      if (this.sockets.getSandboxWebSocket()) {
+        this.sockets.sendToSandbox({ type: "shutdown" });
       }
+      this.sandboxRepository.updateSandboxStatus("stopped");
+    }
 
-      if (!linearResponse.ok) {
-        deps.getLog().warn("Failed to fetch associated Linear pull requests", {
-          agent_session_id: callbackContext.agentSessionId,
-          status: linearResponse.status,
-        });
-        return Response.json({ pullRequest: artifactPullRequest } satisfies AssociatedPrResponse);
-      }
-
-      const body = (await linearResponse.json()) as {
-        pullRequests?: Array<AssociatedPrResponse["pullRequest"]>;
-      };
-      const pullRequest = Array.isArray(body.pullRequests) ? (body.pullRequests[0] ?? null) : null;
-
-      return Response.json({
-        pullRequest: pullRequest ?? artifactPullRequest,
-      } satisfies AssociatedPrResponse);
-    },
-
-    async updateTitle(request: Request): Promise<Response> {
-      const session = deps.getSession();
-      if (!session) {
-        return Response.json({ error: "Session not found" }, { status: 404 });
-      }
-
-      let body: { userId?: string; title?: string };
-      try {
-        body = (await request.json()) as { userId?: string; title?: string };
-      } catch {
-        return Response.json({ error: "Invalid request body" }, { status: 400 });
-      }
-
-      if (!body.userId) {
-        return Response.json({ error: "userId is required" }, { status: 400 });
-      }
-
-      if (typeof body.title !== "string" || body.title.trim().length === 0) {
-        return Response.json({ error: "title must be a non-empty string" }, { status: 400 });
-      }
-
-      if (body.title.length > 200) {
-        return Response.json({ error: "title must be 200 characters or fewer" }, { status: 400 });
-      }
-
-      const participant = deps.getParticipantByUserId(body.userId);
-      if (!participant) {
-        return Response.json(
-          { error: "Not authorized to update the session title" },
-          { status: 403 }
-        );
-      }
-
-      deps.repository.updateSessionTitle(session.id, body.title, deps.now());
-
-      const publicSessionId = deps.getPublicSessionId(session);
-      deps.syncSessionIndexTitle(publicSessionId, body.title);
-
-      deps.broadcast({
-        type: "session_title",
-        title: body.title,
-      });
-
-      return Response.json({ title: body.title });
-    },
-
-    async archive(request: Request): Promise<Response> {
-      const session = deps.getSession();
-      if (!session) {
-        return Response.json({ error: "Session not found" }, { status: 404 });
-      }
-
-      let body: { userId?: string };
-      try {
-        body = parseUserIdBody(await request.json());
-      } catch {
-        return Response.json({ error: "Invalid request body" }, { status: 400 });
-      }
-
-      if (!body.userId) {
-        return Response.json({ error: "userId is required" }, { status: 400 });
-      }
-
-      const participant = deps.getParticipantByUserId(body.userId);
-      if (!participant) {
-        return Response.json({ error: "Not authorized to archive this session" }, { status: 403 });
-      }
-
-      await deps.transitionSessionStatus("archived");
-
-      return Response.json({ status: "archived" });
-    },
-
-    async unarchive(request: Request): Promise<Response> {
-      const session = deps.getSession();
-      if (!session) {
-        return Response.json({ error: "Session not found" }, { status: 404 });
-      }
-
-      let body: { userId?: string };
-      try {
-        body = parseUserIdBody(await request.json());
-      } catch {
-        return Response.json({ error: "Invalid request body" }, { status: 400 });
-      }
-
-      if (!body.userId) {
-        return Response.json({ error: "userId is required" }, { status: 400 });
-      }
-
-      const participant = deps.getParticipantByUserId(body.userId);
-      if (!participant) {
-        return Response.json(
-          { error: "Not authorized to unarchive this session" },
-          { status: 403 }
-        );
-      }
-
-      await deps.transitionSessionStatus("active");
-
-      return Response.json({ status: "active" });
-    },
-
-    async cancel(): Promise<Response> {
-      const session = deps.getSession();
-      if (!session) {
-        return Response.json({ error: "Session not found" }, { status: 404 });
-      }
-
-      if (TERMINAL_STATUSES.has(session.status)) {
-        return Response.json({ error: `Session already ${session.status}` }, { status: 409 });
-      }
-
-      await deps.stopExecution({ suppressStatusReconcile: true });
-      await deps.transitionSessionStatus("cancelled");
-
-      const sandbox = deps.getSandbox();
-      if (sandbox && sandbox.status !== "stopped" && sandbox.status !== "failed") {
-        const sandboxWs = deps.getSandboxSocket();
-        if (sandboxWs) {
-          deps.sendToSandbox(sandboxWs, { type: "shutdown" });
-        }
-        deps.updateSandboxStatus("stopped");
-      }
-
-      return Response.json({ status: "cancelled" });
-    },
-  };
+    return Response.json({ status: "cancelled" });
+  }
 }

@@ -7,9 +7,12 @@
 
 import { ModalApiError } from "../client";
 import type { ModalClient } from "../client";
+import type { CorrelationContext } from "../../logger";
 import {
   DEFAULT_SANDBOX_TIMEOUT_SECONDS,
   SandboxProviderError,
+  createVncAccess,
+  type ImageBuildProviderTriggerConfig,
   type SandboxProvider,
   type SandboxProviderCapabilities,
   type CreateSandboxConfig,
@@ -20,6 +23,45 @@ import {
   type SnapshotResult,
 } from "../provider";
 
+interface StartModalImageBuildConfig {
+  buildId: string;
+  providerSessionId: string;
+  callbackToken: string;
+  correlation?: CorrelationContext;
+}
+
+/** Modal extends the shared trigger contract with explicit SCM clone identity. */
+export interface ModalImageBuildTriggerConfig extends ImageBuildProviderTriggerConfig {
+  cloneHost?: string;
+  cloneUsername?: string;
+}
+
+export interface TerminateModalImageBuildConfig {
+  buildId: string;
+  providerSessionId: string;
+  reason: string;
+  correlation?: CorrelationContext;
+  signal?: AbortSignal;
+}
+
+export interface SnapshotModalImageBuildConfig {
+  buildId: string;
+  providerSessionId: string;
+  correlation?: CorrelationContext;
+  signal?: AbortSignal;
+}
+
+export interface ModalImageBuildProvider {
+  triggerImageBuild(config: ModalImageBuildTriggerConfig): Promise<void>;
+  terminateImageBuildSandbox(config: TerminateModalImageBuildConfig): Promise<void>;
+  snapshotImageBuildSandbox(config: SnapshotModalImageBuildConfig): Promise<SnapshotResult>;
+  deleteProviderImage(
+    providerImageId: string,
+    correlation?: CorrelationContext,
+    signal?: AbortSignal
+  ): Promise<void>;
+}
+
 /**
  * Modal sandbox provider.
  *
@@ -28,7 +70,7 @@ import {
  *
  * @example
  * ```typescript
- * const client = createModalClient(secret, workspace);
+ * const client = createModalClient(secret, workspace, environmentWebSuffix);
  * const provider = new ModalSandboxProvider(client);
  *
  * try {
@@ -40,13 +82,13 @@ import {
  * }
  * ```
  */
-export class ModalSandboxProvider implements SandboxProvider {
+export class ModalSandboxProvider implements SandboxProvider, ModalImageBuildProvider {
   readonly name = "modal";
 
   readonly capabilities: SandboxProviderCapabilities = {
+    supportsSandboxTimeout: true,
     supportsSnapshots: true,
     supportsRestore: true,
-    supportsWarm: true,
     supportsPersistentResume: false,
     supportsExplicitStop: false,
   };
@@ -70,13 +112,16 @@ export class ModalSandboxProvider implements SandboxProvider {
           provider: config.provider,
           model: config.model,
           userEnvVars: config.userEnvVars,
-          repoImageId: config.repoImageId,
-          repoImageSha: config.repoImageSha,
+          prebuiltImageId: config.prebuiltImageId,
+          prebuiltImageSha: config.prebuiltImageSha,
           timeoutSeconds: config.timeoutSeconds,
           branch: config.branch,
           codeServerEnabled: config.codeServerEnabled,
+          vncEnabled: config.vncEnabled,
+          agentSlackNotifyEnabled: config.agentSlackNotifyEnabled,
           mcpServers: config.mcpServers,
           sandboxSettings: config.sandboxSettings,
+          repositories: config.repositories,
         },
         config.correlation
       );
@@ -84,10 +129,10 @@ export class ModalSandboxProvider implements SandboxProvider {
       return {
         sandboxId: result.sandboxId,
         providerObjectId: result.modalObjectId,
-        status: result.status,
         createdAt: result.createdAt,
         codeServerUrl: result.codeServerUrl,
         codeServerPassword: result.codeServerPassword,
+        vncAccess: createVncAccess(result.vncUrl, result.vncPassword),
         ttydUrl: result.ttydUrl,
         tunnelUrls: result.tunnelUrls,
       };
@@ -116,8 +161,11 @@ export class ModalSandboxProvider implements SandboxProvider {
           timeoutSeconds: config.timeoutSeconds ?? DEFAULT_SANDBOX_TIMEOUT_SECONDS,
           branch: config.branch,
           codeServerEnabled: config.codeServerEnabled,
+          vncEnabled: config.vncEnabled,
+          agentSlackNotifyEnabled: config.agentSlackNotifyEnabled,
           mcpServers: config.mcpServers,
           sandboxSettings: config.sandboxSettings,
+          repositories: config.repositories,
         },
         config.correlation
       );
@@ -129,6 +177,7 @@ export class ModalSandboxProvider implements SandboxProvider {
           providerObjectId: result.modalObjectId,
           codeServerUrl: result.codeServerUrl,
           codeServerPassword: result.codeServerPassword,
+          vncAccess: createVncAccess(result.vncUrl, result.vncPassword),
           ttydUrl: result.ttydUrl,
           tunnelUrls: result.tunnelUrls,
         };
@@ -161,7 +210,7 @@ export class ModalSandboxProvider implements SandboxProvider {
         {
           providerObjectId: config.providerObjectId,
           sessionId: config.sessionId,
-          reason: config.reason,
+          signal: config.signal,
         },
         config.correlation
       );
@@ -180,8 +229,9 @@ export class ModalSandboxProvider implements SandboxProvider {
     } catch (error) {
       if (error instanceof ModalApiError) {
         throw this.classifyErrorWithStatus(
-          `Snapshot failed with HTTP ${error.status}`,
-          error.status
+          `Snapshot failed with HTTP ${error.status}: ${error.message}`,
+          error.status,
+          error
         );
       }
       if (error instanceof SandboxProviderError) {
@@ -191,36 +241,146 @@ export class ModalSandboxProvider implements SandboxProvider {
     }
   }
 
+  async snapshotImageBuildSandbox(config: SnapshotModalImageBuildConfig): Promise<SnapshotResult> {
+    try {
+      const result = await this.client.snapshotBuildSandbox(
+        {
+          buildId: config.buildId,
+          providerSessionId: config.providerSessionId,
+          ...(config.signal ? { signal: config.signal } : {}),
+        },
+        config.correlation
+      );
+      if (result.success && result.imageId) {
+        return { success: true, imageId: result.imageId };
+      }
+      return {
+        success: false,
+        error: result.error || "Unknown image build snapshot error",
+      };
+    } catch (error) {
+      if (error instanceof ModalApiError) {
+        throw this.classifyErrorWithStatus(
+          `Image build snapshot failed with HTTP ${error.status}`,
+          error.status,
+          error
+        );
+      }
+      if (error instanceof SandboxProviderError) throw error;
+      throw this.classifyError("Failed to snapshot image build sandbox", error);
+    }
+  }
+
+  private async createImageBuildSandbox(
+    config: ModalImageBuildTriggerConfig
+  ): Promise<{ providerSessionId: string }> {
+    try {
+      return await this.client.createImageBuildSandbox(
+        {
+          scopeKind: config.scopeKind,
+          scopeId: config.scopeId,
+          buildId: config.buildId,
+          repositories: config.repositories,
+          cloneToken: config.cloneToken,
+          ...(config.cloneHost ? { cloneHost: config.cloneHost } : {}),
+          ...(config.cloneUsername ? { cloneUsername: config.cloneUsername } : {}),
+          callbackUrl: config.callbackUrl,
+          failureCallbackUrl: config.failureCallbackUrl,
+          userEnvVars: config.userEnvVars,
+          buildExecutionTimeoutSeconds: config.buildExecutionTimeoutSeconds,
+          providerSessionTimeoutSeconds: config.providerSessionTimeoutSeconds,
+        },
+        config.correlation
+      );
+    } catch (error) {
+      throw this.classifyImageBuildError("Failed to create Modal image build sandbox", error);
+    }
+  }
+
+  private async startImageBuildSandbox(config: StartModalImageBuildConfig): Promise<void> {
+    try {
+      await this.client.startImageBuildSandbox(config, config.correlation);
+    } catch (error) {
+      throw this.classifyImageBuildError("Failed to start Modal image build sandbox", error);
+    }
+  }
+
+  async triggerImageBuild(config: ModalImageBuildTriggerConfig): Promise<void> {
+    const created = await this.createImageBuildSandbox(config);
+    await config.onProviderSessionCreated(created.providerSessionId);
+    await this.startImageBuildSandbox({
+      buildId: config.buildId,
+      providerSessionId: created.providerSessionId,
+      callbackToken: config.callbackToken,
+      correlation: config.correlation,
+    });
+  }
+
+  async terminateImageBuildSandbox(config: TerminateModalImageBuildConfig): Promise<void> {
+    try {
+      await this.client.terminateImageBuildSandbox(config, config.correlation);
+    } catch (error) {
+      throw this.classifyImageBuildError("Failed to terminate Modal image build sandbox", error);
+    }
+  }
+
+  /**
+   * Deletion is a local no-op for now: Modal's only deletion surface is the
+   * experimental `image_delete` API, whose adoption is deferred until
+   * validated (#1658). The HTTP endpoint this replaced deleted nothing
+   * either, so reaped images were already retained provider-side. Callers
+   * (the image reaper and finalizer) log each attempt and outcome.
+   */
+  async deleteProviderImage(): Promise<void> {}
+
+  private classifyImageBuildError(message: string, error: unknown): SandboxProviderError {
+    if (error instanceof SandboxProviderError) return error;
+    if (error instanceof ModalApiError) {
+      return this.classifyErrorWithStatus(
+        `${message} with HTTP ${error.status}: ${error.message}`,
+        error.status,
+        error
+      );
+    }
+    return this.classifyError(message, error);
+  }
+
   /**
    * Classify an error based on HTTP status code.
    * Uses status code directly for accurate transient/permanent classification.
    */
-  private classifyErrorWithStatus(message: string, status: number): SandboxProviderError {
+  private classifyErrorWithStatus(
+    message: string,
+    status: number,
+    cause?: Error
+  ): SandboxProviderError {
     // Transient: 502, 503, 504 (gateway/availability issues)
     if (status === 502 || status === 503 || status === 504) {
-      return new SandboxProviderError(message, "transient");
+      return new SandboxProviderError(message, "transient", cause);
     }
 
     // Permanent: 4xx (client errors) and other 5xx (server errors)
-    return new SandboxProviderError(message, "permanent");
+    return new SandboxProviderError(message, "permanent", cause);
   }
 
   /**
    * Classify an error as transient or permanent for circuit breaker handling.
    */
   private classifyError(message: string, error: unknown): SandboxProviderError {
+    if (SandboxProviderError.isTransientNetworkError(error)) {
+      return new SandboxProviderError(
+        `${message}: ${error instanceof Error ? error.message : String(error)}`,
+        "transient",
+        error instanceof Error ? error : undefined
+      );
+    }
+
     // Check for fetch/network errors
     if (error instanceof Error) {
       const errorMessage = error.message.toLowerCase();
 
       // Transient network errors
       if (
-        errorMessage.includes("fetch failed") ||
-        errorMessage.includes("etimedout") ||
-        errorMessage.includes("econnreset") ||
-        errorMessage.includes("econnrefused") ||
-        errorMessage.includes("network") ||
-        errorMessage.includes("timeout") ||
         errorMessage.includes("502") ||
         errorMessage.includes("503") ||
         errorMessage.includes("504") ||

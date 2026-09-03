@@ -1,233 +1,146 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import console from "node:console";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
 
-const MODAL_COMMAND_CANDIDATES =
-  process.platform === "win32" ? ["modal.exe", "modal.cmd", "modal"] : ["modal"];
+const UV_COMMANDS = process.platform === "win32" ? ["uv.exe", "uv.cmd", "uv"] : ["uv"];
+const SECRET_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const ENVIRONMENT_KEY_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
-function fail(message) {
-  console.error(message);
-  process.exit(1);
-}
-
-function requireEnv(name) {
+function requireEnvironment(name) {
   const value = process.env[name];
-  if (!value) {
-    throw new Error(`Error: ${name} environment variable is not set`);
-  }
+  if (!value) throw new Error(`${name} environment variable is not set`);
   return value;
 }
 
-function runModal(args, { allowFailure = false, cwd, extraEnv = {} } = {}) {
-  const env = {
-    ...process.env,
-    ...extraEnv,
-  };
+export function parseSecrets(value) {
+  let secrets;
+  try {
+    secrets = JSON.parse(value);
+  } catch {
+    throw new Error("SECRETS_JSON is not valid JSON");
+  }
+  if (!Array.isArray(secrets)) throw new Error("SECRETS_JSON must be a JSON array");
 
-  for (const command of MODAL_COMMAND_CANDIDATES) {
-    const result = spawnSync(command, args, {
-      encoding: "utf8",
-      cwd,
-      env,
+  return secrets.map((secret) => {
+    if (!SECRET_NAME_PATTERN.test(secret?.name ?? "")) {
+      throw new Error(`Invalid secret name '${secret?.name ?? ""}'`);
+    }
+    if (!secret.values || typeof secret.values !== "object" || Array.isArray(secret.values)) {
+      throw new Error(`Secret '${secret.name}' must contain a values object`);
+    }
+    for (const key of Object.keys(secret.values)) {
+      if (!ENVIRONMENT_KEY_PATTERN.test(key)) throw new Error(`Invalid key name '${key}'`);
+    }
+    return secret;
+  });
+}
+
+export function buildSecretSteps(secrets, deployPath) {
+  return secrets.map((secret) => ({
+    label: `secret ${secret.name}`,
+    args: [
+      "run",
+      "--directory",
+      deployPath,
+      "modal",
+      "secret",
+      "create",
+      secret.name,
+      ...Object.entries(secret.values).map(([key, value]) => `${key}=${String(value)}`),
+      "--force",
+    ],
+  }));
+}
+
+export function buildDeploySteps(deployModule) {
+  const steps = [{ label: "dependency sync", args: ["sync", "--frozen"] }];
+  if (deployModule === "deploy" || deployModule === "src") {
+    steps.push({
+      label: "sandbox image build",
+      args: ["run", "python", "deploy.py", "--build-sandbox-image"],
     });
-
-    if (result.error?.code === "ENOENT") {
-      continue;
-    }
-
-    if (result.stdout) {
-      process.stdout.write(result.stdout);
-    }
-
-    if (result.stderr) {
-      process.stderr.write(result.stderr);
-    }
-
-    if (result.error) {
-      throw result.error;
-    }
-
-    if (result.status !== 0 && !allowFailure) {
-      throw new Error(`Modal command failed: ${command} ${args.join(" ")}`);
-    }
-
-    return result;
   }
-
-  throw new Error("Error: Could not find the `modal` CLI in PATH");
+  const target =
+    deployModule === "deploy"
+      ? ["deploy.py"]
+      : deployModule === "src"
+        ? ["-m", "src"]
+        : [deployModule];
+  steps.push({ label: "Modal deployment", args: ["run", "modal", "deploy", ...target] });
+  return steps;
 }
 
-function validateSecretName(secretName) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(secretName)) {
-    throw new Error(
-      `Error: Invalid secret name '${secretName}'. Only alphanumeric, underscore, and hyphen allowed.`
-    );
-  }
+export function buildChildEnvironment(baseEnvironment = process.env) {
+  return {
+    ...baseEnvironment,
+    PYTHONIOENCODING: "utf-8",
+    PYTHONUTF8: "1",
+  };
 }
 
-function validateEnvKey(key) {
-  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
-    throw new Error(`Error: Invalid key name '${key}'. Must be a valid environment variable name.`);
+function runUv(args, options = {}) {
+  for (const command of UV_COMMANDS) {
+    const result = spawnSync(command, args, {
+      cwd: options.cwd,
+      env: buildChildEnvironment(),
+      encoding: "utf8",
+      stdio: "inherit",
+    });
+    if (result.error?.code === "ENOENT") continue;
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(`${options.label ?? "uv command"} failed with status ${result.status}`);
+    }
+    return;
   }
+  throw new Error("Could not find the uv CLI in PATH");
+}
+
+function validateCommonEnvironment() {
+  requireEnvironment("MODAL_TOKEN_ID");
+  requireEnvironment("MODAL_TOKEN_SECRET");
+  requireEnvironment("MODAL_ENVIRONMENT");
 }
 
 function createSecrets() {
-  console.log("Creating/updating Modal secrets...");
-
-  const modalTokenId = requireEnv("MODAL_TOKEN_ID");
-  const modalTokenSecret = requireEnv("MODAL_TOKEN_SECRET");
-  const secretsJson = requireEnv("SECRETS_JSON");
-
-  let secrets;
-  try {
-    secrets = JSON.parse(secretsJson);
-  } catch {
-    throw new Error("Error: SECRETS_JSON is not valid JSON");
-  }
-
-  if (!Array.isArray(secrets)) {
-    throw new Error("Error: SECRETS_JSON must be a JSON array");
-  }
-
-  let hasFailures = false;
-
-  for (const secret of secrets) {
-    const secretName = secret?.name;
-    const values = secret?.values;
-
-    if (typeof secretName !== "string") {
-      throw new Error("Error: Each secret must include a string `name`");
-    }
-
-    if (!values || typeof values !== "object" || Array.isArray(values)) {
-      throw new Error(`Error: Secret '${secretName}' must include a key/value map in \`values\``);
-    }
-
-    validateSecretName(secretName);
-    console.log(`Processing secret: ${secretName}`);
-
-    const secretArgs = ["secret", "create", secretName];
-
-    for (const [key, value] of Object.entries(values)) {
-      validateEnvKey(key);
-      secretArgs.push(`${key}=${String(value)}`);
-    }
-
-    secretArgs.push("--force");
-
-    const result = runModal(secretArgs, {
-      allowFailure: true,
-      extraEnv: {
-        MODAL_TOKEN_ID: modalTokenId,
-        MODAL_TOKEN_SECRET: modalTokenSecret,
-      },
-    });
-
-    if (result.status === 0) {
-      console.log(`Secret ${secretName} created/updated successfully`);
-    } else {
-      hasFailures = true;
-      console.warn(`Warning: Failed to create secret ${secretName}`);
-    }
-  }
-
-  if (hasFailures) {
-    throw new Error("Error: One or more Modal secrets failed to create or update");
-  }
-
-  console.log("All Modal secrets processed successfully");
-}
-
-function createVolume(volumeName) {
-  if (!volumeName) {
-    throw new Error("Error: Volume name argument is required");
-  }
-
-  const result = runModal(["volume", "create", volumeName], {
-    allowFailure: true,
-  });
-
-  if (result.status === 0) {
-    return;
-  }
-
-  const combinedOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.toLowerCase();
-  if (combinedOutput.includes("already exists")) {
-    console.log(`Volume ${volumeName} already exists`);
-    return;
-  }
-
-  throw new Error(`Error: Failed to create Modal volume ${volumeName}`);
+  validateCommonEnvironment();
+  const deployPath = requireEnvironment("DEPLOY_PATH");
+  const secrets = parseSecrets(requireEnvironment("SECRETS_JSON"));
+  for (const step of buildSecretSteps(secrets, deployPath)) runUv(step.args, step);
 }
 
 function deploy() {
-  const modalTokenId = requireEnv("MODAL_TOKEN_ID");
-  const modalTokenSecret = requireEnv("MODAL_TOKEN_SECRET");
-  const appName = requireEnv("APP_NAME");
-  const deployPath = requireEnv("DEPLOY_PATH");
-  const deployModule = requireEnv("DEPLOY_MODULE");
-
-  console.log(`Deploying Modal app: ${appName}`);
-  console.log(`Deploy path: ${deployPath}`);
-  console.log(`Deploy module: ${deployModule}`);
-
-  const extraEnv = {
-    MODAL_TOKEN_ID: modalTokenId,
-    MODAL_TOKEN_SECRET: modalTokenSecret,
-    PYTHONUTF8: "1",
-    PYTHONIOENCODING: "utf-8",
-  };
-
-  let modalArgs;
-  if (deployModule === "deploy") {
-    modalArgs = ["deploy", "deploy.py"];
-  } else if (deployModule === "src") {
-    modalArgs = ["deploy", "-m", "src"];
-  } else {
-    modalArgs = ["deploy", deployModule];
+  validateCommonEnvironment();
+  const appName = requireEnvironment("APP_NAME");
+  const deployPath = requireEnvironment("DEPLOY_PATH");
+  const deployModule = requireEnvironment("DEPLOY_MODULE");
+  console.log(`Deploying Modal app ${appName} in environment ${process.env.MODAL_ENVIRONMENT}`);
+  for (const step of buildDeploySteps(deployModule)) {
+    runUv(step.args, { ...step, cwd: deployPath });
   }
-
-  const result = runModal(modalArgs, {
-    cwd: deployPath,
-    extraEnv,
-  });
-
-  if (result.status !== 0) {
-    throw new Error(`Error: Modal deployment failed for ${appName}`);
-  }
-
-  console.log(`Modal app ${appName} deployed successfully`);
 }
 
-function printAppInfo(appName) {
-  if (!appName) {
-    throw new Error("Error: App name argument is required");
-  }
-
+function appInfo(appName) {
+  if (!appName) throw new Error("App name argument is required");
   process.stdout.write(`${JSON.stringify({ app_name: appName, status: "deployed" })}\n`);
 }
 
-const command = process.argv[2];
+function main() {
+  const command = process.argv[2];
+  if (command === "create-secrets") createSecrets();
+  else if (command === "deploy") deploy();
+  else if (command === "app-info") appInfo(process.argv[3]);
+  else throw new Error(`Unsupported Modal helper command '${command ?? ""}'`);
+}
 
-try {
-  switch (command) {
-    case "create-secrets":
-      createSecrets();
-      break;
-    case "create-volume":
-      createVolume(process.argv[3]);
-      break;
-    case "deploy":
-      deploy();
-      break;
-    case "app-info":
-      printAppInfo(process.argv[3]);
-      break;
-    default:
-      fail(
-        `Error: Unsupported modal helper command '${command}'. Expected one of create-secrets, create-volume, deploy, app-info.`
-      );
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
   }
-} catch (error) {
-  fail(error instanceof Error ? error.message : String(error));
 }

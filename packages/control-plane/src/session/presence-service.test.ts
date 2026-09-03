@@ -24,6 +24,7 @@ function createMockClient(overrides?: Partial<ClientInfo>): ClientInfo {
     status: "active",
     lastSeen: 1000,
     clientId: "client-1",
+    authorizationExpiresAt: Date.now() + 300_000,
     ws: {} as WebSocket,
     ...overrides,
   };
@@ -35,8 +36,7 @@ function createTestHarness() {
 
   const deps: PresenceServiceDeps = {
     getAuthenticatedClients: vi.fn(() => clients.values()),
-    getClientInfo: vi.fn(() => null),
-    broadcast: vi.fn(),
+    messenger: { broadcast: vi.fn(), sendToSandbox: vi.fn(async () => {}) },
     send: vi.fn(() => true),
     getSandboxSocket: vi.fn(() => null),
     isSpawning: vi.fn(() => false),
@@ -107,6 +107,74 @@ describe("PresenceService", () => {
       const result = harness.service.getPresenceList();
       expect(result).toEqual([]);
     });
+
+    it("dedupes by participantId when the same user is connected on multiple sockets", () => {
+      // Same user connected from two tabs → two ClientInfo entries sharing one participantId.
+      // Presence should report the participant exactly once so the UI doesn't render
+      // duplicate avatars / log a React duplicate-key warning.
+      const tab1 = createMockClient({
+        participantId: "part-1",
+        userId: "user-1",
+        name: "Alice",
+        status: "idle",
+        lastSeen: 1000,
+        clientId: "client-tab-1",
+      });
+      const tab2 = createMockClient({
+        participantId: "part-1",
+        userId: "user-1",
+        name: "Alice",
+        status: "active",
+        lastSeen: 5000,
+        clientId: "client-tab-2",
+      });
+      harness.clients.push(tab1, tab2);
+
+      const result = harness.service.getPresenceList();
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual({
+        participantId: "part-1",
+        userId: "user-1",
+        name: "Alice",
+        avatar: "https://example.com/avatar.png",
+        // any socket being active → participant is active
+        status: "active",
+        // most recent socket activity wins
+        lastSeen: 5000,
+      });
+    });
+
+    it("keeps distinct participants distinct while deduping shared ones", () => {
+      const aliceTab1 = createMockClient({
+        participantId: "part-1",
+        userId: "user-1",
+        name: "Alice",
+        status: "idle",
+        lastSeen: 1000,
+      });
+      const aliceTab2 = createMockClient({
+        participantId: "part-1",
+        userId: "user-1",
+        name: "Alice",
+        status: "active",
+        lastSeen: 2000,
+      });
+      const bob = createMockClient({
+        participantId: "part-2",
+        userId: "user-2",
+        name: "Bob",
+        status: "idle",
+        lastSeen: 3000,
+      });
+      harness.clients.push(aliceTab1, aliceTab2, bob);
+
+      const result = harness.service.getPresenceList();
+
+      expect(result).toHaveLength(2);
+      const ids = result.map((p) => p.participantId).sort();
+      expect(ids).toEqual(["part-1", "part-2"]);
+    });
   });
 
   describe("sendPresence", () => {
@@ -140,7 +208,7 @@ describe("PresenceService", () => {
 
       harness.service.broadcastPresence();
 
-      expect(harness.deps.broadcast).toHaveBeenCalledWith({
+      expect(harness.deps.messenger.broadcast).toHaveBeenCalledWith({
         type: "presence_update",
         participants: [
           {
@@ -159,23 +227,12 @@ describe("PresenceService", () => {
   describe("updatePresence", () => {
     it("updates client status/lastSeen and broadcasts", () => {
       const client = createMockClient({ status: "active", lastSeen: 1000 });
-      vi.mocked(harness.deps.getClientInfo).mockReturnValue(client);
-      const ws = {} as WebSocket;
 
-      harness.service.updatePresence(ws, { status: "idle" });
+      harness.service.updatePresence(client, { status: "idle" });
 
       expect(client.status).toBe("idle");
       expect(client.lastSeen).toBeGreaterThan(1000);
-      expect(harness.deps.broadcast).toHaveBeenCalled();
-    });
-
-    it("skips when client not found (no broadcast)", () => {
-      vi.mocked(harness.deps.getClientInfo).mockReturnValue(null);
-      const ws = {} as WebSocket;
-
-      harness.service.updatePresence(ws, { status: "idle" });
-
-      expect(harness.deps.broadcast).not.toHaveBeenCalled();
+      expect(harness.deps.messenger.broadcast).toHaveBeenCalled();
     });
   });
 
@@ -186,7 +243,7 @@ describe("PresenceService", () => {
 
       await harness.service.handleTyping();
 
-      expect(harness.deps.broadcast).toHaveBeenCalledWith({ type: "sandbox_warming" });
+      expect(harness.deps.messenger.broadcast).toHaveBeenCalledWith({ type: "sandbox_warming" });
       expect(harness.deps.spawnSandbox).toHaveBeenCalled();
     });
 
@@ -195,7 +252,7 @@ describe("PresenceService", () => {
       vi.mocked(harness.deps.isSpawning).mockReturnValue(false);
 
       const callOrder: string[] = [];
-      vi.mocked(harness.deps.broadcast).mockImplementation(() => {
+      vi.mocked(harness.deps.messenger.broadcast).mockImplementation(() => {
         callOrder.push("broadcast");
       });
       vi.mocked(harness.deps.spawnSandbox).mockImplementation(async () => {
@@ -213,7 +270,7 @@ describe("PresenceService", () => {
 
       await harness.service.handleTyping();
 
-      expect(harness.deps.broadcast).not.toHaveBeenCalled();
+      expect(harness.deps.messenger.broadcast).not.toHaveBeenCalled();
       expect(harness.deps.spawnSandbox).not.toHaveBeenCalled();
     });
 
@@ -222,7 +279,7 @@ describe("PresenceService", () => {
 
       await harness.service.handleTyping();
 
-      expect(harness.deps.broadcast).not.toHaveBeenCalled();
+      expect(harness.deps.messenger.broadcast).not.toHaveBeenCalled();
       expect(harness.deps.spawnSandbox).not.toHaveBeenCalled();
     });
   });

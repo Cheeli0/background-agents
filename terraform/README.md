@@ -5,13 +5,14 @@ Terraform.
 
 ## Architecture Overview
 
-The infrastructure spans three cloud providers:
+The infrastructure spans multiple cloud providers:
 
-| Provider       | Resources                                            | Terraform Support                |
-| -------------- | ---------------------------------------------------- | -------------------------------- |
-| **Cloudflare** | Workers, KV Namespaces, Durable Objects, D1 Database | Native provider                  |
-| **Vercel**     | Next.js Web App                                      | Native provider                  |
-| **Modal**      | Sandbox Infrastructure                               | CLI wrapper (no provider exists) |
+| Provider       | Resources                                            | Terraform Support                   |
+| -------------- | ---------------------------------------------------- | ----------------------------------- |
+| **Cloudflare** | Workers, KV Namespaces, Durable Objects, D1 Database | Native provider                     |
+| **Vercel**     | Next.js Web App, optional sandbox sessions           | Native provider + Sandbox API calls |
+| **Modal**      | Optional sandbox infrastructure                      | CLI wrapper (no provider exists)    |
+| **Daytona**    | Optional sandbox snapshots                           | REST API wrapper                    |
 
 ## Directory Structure
 
@@ -22,6 +23,7 @@ terraform/
 ├── modules/                      # Reusable Terraform modules
 │   ├── cloudflare-kv/           # KV namespace management
 │   ├── cloudflare-worker/       # Worker deployment with bindings (KV, DO, D1)
+│   ├── daytona-infra/           # Daytona snapshot bootstrap wrapper
 │   ├── vercel-project/          # Vercel project + environment vars
 │   └── modal-app/               # Modal CLI wrapper
 │       └── scripts/             # Deployment scripts
@@ -33,6 +35,7 @@ terraform/
 │       ├── d1.tf                # D1 database + migrations
 │       ├── workers-*.tf         # Worker builds/deployments per service
 │       ├── web-*.tf             # Web app resources (Vercel/OpenNext)
+│       ├── daytona.tf           # Daytona snapshot resources
 │       ├── modal.tf             # Modal infrastructure
 │       ├── checks.tf            # Terraform check blocks
 │       ├── moved.tf             # State move declarations
@@ -67,6 +70,7 @@ brew install node@22
      - Workers KV Storage: **Edit**
      - Workers R2 Storage: **Edit**
      - D1: **Edit**
+     - Queues: **Edit** (required for durable image-build finalization)
    - If you manage Cloudflare routes/custom domains through Terraform, also add:
      - Workers Routes: **Edit**
 
@@ -80,24 +84,38 @@ brew install node@22
 
 1. **Create API Token** at [Vercel Account Settings](https://vercel.com/account/tokens)
 2. **Note your Team ID** (found in team settings URL)
+3. If using `sandbox_provider = "vercel"`, also note the Project ID for the Vercel project that will
+   own sandbox sessions.
+4. Terraform builds an immutable Vercel base-runtime snapshot from the local checkout and passes a
+   deterministic snapshot name into the control-plane Worker. `VERCEL_BASE_SNAPSHOT_ID` is only
+   needed as a manual override.
 
 ### 4. Modal Setup
 
 1. **Sign up** at [Modal](https://modal.com)
 2. **Create API Token** at Modal Settings
 
-### 5. GitHub Apps
+### 5. Sign-In Providers and GitHub Repository Access
 
-1. **OAuth App** - For user authentication
-   - Create at: https://github.com/settings/developers
-   - Callback URL: `https://<your-vercel-app>.vercel.app/api/auth/callback/github`
+A GitHub App installation is always required for repository access in sandboxes. Create it at
+https://github.com/settings/apps and convert its private key to PKCS#8:
 
-2. **GitHub App** - For repository access in sandboxes
-   - Create at: https://github.com/settings/apps
-   - Convert private key to PKCS#8 format:
-     ```bash
-     openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in key.pem -out key-pkcs8.pem
-     ```
+```bash
+openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in key.pem -out key-pkcs8.pem
+```
+
+Choose at least one sign-in provider:
+
+- **GitHub sign-in:** set the GitHub App client ID and client secret together, and configure
+  `/api/auth/callback/github`.
+- **Google sign-in:** set the Google OAuth client ID and client secret together, and configure
+  `/api/auth/callback/google`.
+- Configure both pairs to offer both providers. Google-only is supported, but the GitHub App
+  repository credentials remain required.
+
+Google sign-in requires provider-neutral admission through an exact email/domain allowlist, unless
+the deployment explicitly opts into unsafe allow-all. GitHub-only admission may also use GitHub
+usernames or organizations.
 
 ### 6. Slack App
 
@@ -105,6 +123,17 @@ Create at [Slack API](https://api.slack.com/apps) and note:
 
 - Bot OAuth Token (`xoxb-...`)
 - Signing Secret
+
+The bot token requires `assistant:write`, `app_mentions:read`, `chat:write`, `channels:history`,
+`channels:read`, `groups:history`, `groups:read`, `im:history`, `files:read`, `files:write`,
+`reactions:write`, `users:read`, and `users:read.email`. Reinstall the app after changing scopes.
+The complete app configuration is available in
+[`packages/slack-bot/slack-app-manifest.yaml`](../packages/slack-bot/slack-app-manifest.yaml).
+
+Before upgrading any deployment, add **Queues: Edit** to the Cloudflare API token before running
+`terraform apply`; image-build finalization now provisions a Queue and dead-letter Queue. For Slack
+deployments, also add `files:write` and `files:read`, reinstall the Slack app, and update the
+deployed bot token if Slack issued a replacement before deploying this version.
 
 ## Quick Start
 
@@ -137,6 +166,14 @@ terraform init \
 
 ### 3. Plan Changes
 
+Terraform generates and persists a dedicated provider-account credential encryption key by default.
+Existing local installations may set `provider_accounts_encryption_key` in `terraform.tfvars` to
+retain their current key; Actions deployments use the `PROVIDER_ACCOUNTS_ENCRYPTION_KEY` repository
+or production-environment secret instead. Do not change this value after storing provider account
+credentials unless every credential has first been re-encrypted and verified through the documented
+old-key-to-new-key migration before the Worker binding is updated. Back up the remote Terraform
+state because it is the recovery source for an automatically generated key.
+
 ```bash
 terraform plan
 ```
@@ -167,20 +204,49 @@ DEPLOYMENT_NAME          # Unique name for your deployment (e.g., 'acme', 'johnd
 # Cloudflare
 CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
+CLOUDFLARE_WORKER_SUBDOMAIN
 R2_ACCESS_KEY_ID
 R2_SECRET_ACCESS_KEY
+WEB_PLATFORM # Optional; defaults to vercel
 
-# Vercel
+# Vercel web app (only if WEB_PLATFORM=vercel)
 VERCEL_API_TOKEN
 VERCEL_TEAM_ID
+VERCEL_PROJECT_ID
 
 # Modal
 MODAL_TOKEN_ID
 MODAL_TOKEN_SECRET
+MODAL_WORKSPACE
+MODAL_ENVIRONMENT # Optional; defaults to main
+MODAL_ENVIRONMENT_WEB_SUFFIX # Optional; lowercase letters, digits, dashes; empty for workspace--... endpoints
+MODAL_API_SECRET
 
-# GitHub OAuth App
+# Sandbox provider
+SANDBOX_PROVIDER
+
+# Daytona (only if SANDBOX_PROVIDER=daytona)
+DAYTONA_API_URL
+DAYTONA_API_KEY
+DAYTONA_BASE_SNAPSHOT
+DAYTONA_TARGET # Optional
+
+# Vercel Sandboxes (only if SANDBOX_PROVIDER=vercel)
+VERCEL_SANDBOX_TOKEN
+VERCEL_SANDBOX_PROJECT_ID
+VERCEL_SANDBOX_TEAM_ID # Optional
+VERCEL_BASE_SNAPSHOT_ID # Optional manual fallback; skips Terraform-managed snapshot builds
+VERCEL_SANDBOX_RUNTIME # Optional; defaults to node24
+VERCEL_SNAPSHOT_EXPIRATION_MS # Optional; defaults to 0
+VERCEL_SANDBOX_API_BASE_URL # Optional advanced Vercel Sandbox API base URL override
+
+# Optional GitHub sign-in pair (set both or neither)
 GH_OAUTH_CLIENT_ID
 GH_OAUTH_CLIENT_SECRET
+
+# Optional Google sign-in pair (set both or neither)
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
 
 # GitHub App
 GH_APP_ID
@@ -188,17 +254,39 @@ GH_APP_PRIVATE_KEY
 GH_APP_INSTALLATION_ID
 
 # Slack
+ENABLE_SLACK_BOT # Optional; defaults to true
 SLACK_BOT_TOKEN
 SLACK_SIGNING_SECRET
 
+# GitHub bot
+ENABLE_GITHUB_BOT # Optional; defaults to false
+GH_WEBHOOK_SECRET
+GH_BOT_USERNAME
+
+# Linear bot
+ENABLE_LINEAR_BOT # Optional; defaults to false
+LINEAR_CLIENT_ID
+LINEAR_CLIENT_SECRET
+LINEAR_WEBHOOK_SECRET
+
 # API Keys
 ANTHROPIC_API_KEY
+CLASSIFICATION_OPENAI_API_KEY # Required when classification_model is an OpenAI model and the Slack or Linear bot is enabled
 
 # Security Secrets
 TOKEN_ENCRYPTION_KEY
 REPO_SECRETS_ENCRYPTION_KEY
-INTERNAL_CALLBACK_SECRET
-NEXTAUTH_SECRET
+PROVIDER_ACCOUNTS_ENCRYPTION_KEY # Optional existing provider-account key override
+NEXTAUTH_SECRET # Browser-auth secret; legacy Actions secret name
+
+# Access control
+ALLOWED_USERS
+ALLOWED_EMAIL_DOMAINS
+ENABLE_DURABLE_OBJECT_BINDINGS # Optional; defaults to true
+
+# Branding
+APP_NAME # Optional; defaults to Open-Inspect
+APP_ICON_URL
 ```
 
 ## Module Reference
@@ -301,9 +389,12 @@ module "modal" {
   modal_token_id     = var.modal_token_id
   modal_token_secret = var.modal_token_secret
 
-  app_name      = "my-app"
-  deploy_path   = "${path.root}/../../../packages/modal-infra"
-  deploy_module = "deploy"
+  app_name                     = "my-app"
+  workspace                    = "my-workspace"
+  modal_environment            = "main"
+  modal_environment_web_suffix = ""
+  deploy_path                  = "${path.root}/../../../packages/modal-infra"
+  deploy_module                = "deploy"
 
   secrets = [
     {
@@ -326,15 +417,20 @@ module "modal" {
 Durable Object migrations are applied with deployments. This means you can't bind to a Durable
 Object in a Version if a deployment doesn't exist (i.e., migrations haven't been applied).
 
-**First-time deployment with Durable Objects:**
+**First-time deployment with Durable Objects and service bindings:**
 
-The first `terraform apply` may fail due to the chicken-and-egg problem. Workaround:
+Use the built-in two-phase flags instead of editing Terraform modules:
 
-1. Comment out the `durable_objects` binding block in the module
-2. Run `terraform apply` to create the worker and deployment
-3. Uncomment the `durable_objects` binding
-4. Comment out the `migrations` block
-5. Run `terraform apply` again
+1. Set `enable_durable_object_bindings = false` and `enable_service_bindings = false`.
+2. Run `terraform apply` to create the initial workers and migrations.
+3. Set both values back to `true`.
+4. Run `terraform apply` again to attach the Durable Object and service bindings.
+
+Class removal does not disable surviving bindings. Remove the retired binding, set a new migration
+tag and previous tag, list the class in `control_plane_deleted_classes`, and apply with
+`enable_durable_object_bindings = true`. The migration and surviving bindings are emitted together.
+The production workflow stages the `SchedulerDO` v2-to-v3 deletion only when Terraform state still
+reports v2, so the release-specific migration is not a permanent default for fresh deployments.
 
 See
 [Cloudflare's documentation](https://developers.cloudflare.com/workers/platform/infrastructure-as-code/)
@@ -366,11 +462,15 @@ terraform output verification_commands
 # 1. Health check control plane
 curl https://open-inspect-control-plane-prod.<subdomain>.workers.dev/health
 
-# 2. Health check Modal (replace <workspace> with your Modal workspace)
-curl https://<workspace>--open-inspect-api-health.modal.run
+# 2. Sandbox backend health check
+# Modal exposes a health endpoint. Prefer the exact URL from terraform output verification_commands.
+# Manual form: https://<workspace>[-<modal_environment_web_suffix>]--open-inspect-api-health.modal.run
+MODAL_WORKSPACE_SLUG="<workspace>" # or "<workspace>-<modal_environment_web_suffix>"
+curl https://${MODAL_WORKSPACE_SLUG}--open-inspect-api-health.modal.run
+# Daytona and Vercel use their provider APIs directly, so there is no Open-Inspect shim health URL.
 
-# 3. Verify Vercel deployment (replace with your Vercel app URL)
-curl https://<your-vercel-app>.vercel.app
+# 3. Verify the web deployment
+curl -I "$(terraform output -raw web_app_url)"
 
 # 4. Test authenticated endpoint (should return 401)
 curl https://open-inspect-control-plane-prod.<subdomain>.workers.dev/sessions
@@ -406,6 +506,7 @@ variables.
    - `Workers KV Storage: Edit`
    - `Workers R2 Storage: Edit`
    - `D1: Edit`
+   - `Queues: Edit`
    - `Workers Routes: Edit` if you manage routes/custom domains through Terraform
 
 ## Adding New Environments

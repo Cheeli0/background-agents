@@ -1,5 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { generateAppJwt, postReaction, checkSenderPermission } from "../src/github-auth";
+import {
+  generateAppJwt,
+  generateInstallationToken,
+  postReaction,
+  checkSenderPermission,
+  GITHUB_API_REQUEST_TIMEOUT_MS,
+} from "../src/github-auth";
+
+function stalledFetch() {
+  return vi.mocked(globalThis.fetch).mockImplementation(
+    (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })
+  );
+}
 
 /** Generate a PKCS#8 PEM RSA key pair for testing. */
 async function generateTestKeyPair(): Promise<{ privateKeyPem: string }> {
@@ -62,6 +77,7 @@ describe("postReaction", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   it("calls fetch with correct parameters", async () => {
@@ -79,6 +95,7 @@ describe("postReaction", () => {
         "User-Agent": "Open-Inspect",
       },
       body: JSON.stringify({ content: "eyes" }),
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -105,6 +122,116 @@ describe("postReaction", () => {
     const result = await postReaction("tok", "https://api.github.com/test", "eyes");
     expect(result).toBe(false);
   });
+
+  it("uses the configured User-Agent when one is provided", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(new Response("", { status: 201 }));
+    await postReaction("tok", "https://api.github.com/test", "eyes", "Acme Bot");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://api.github.com/test",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "User-Agent": "Acme Bot" }),
+      })
+    );
+  });
+
+  it("defaults the User-Agent to Open-Inspect when omitted", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(new Response("", { status: 201 }));
+    await postReaction("tok", "https://api.github.com/test", "eyes");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://api.github.com/test",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "User-Agent": "Open-Inspect" }),
+      })
+    );
+  });
+
+  it("returns false when a stalled reaction reaches its deadline", async () => {
+    const timeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
+    stalledFetch();
+
+    const resultPromise = postReaction("tok", "https://api.github.com/test", "eyes");
+    timeout.abort(new DOMException("deadline exceeded", "TimeoutError"));
+
+    await expect(resultPromise).resolves.toBe(false);
+    expect(timeoutSpy).toHaveBeenCalledWith(GITHUB_API_REQUEST_TIMEOUT_MS);
+  });
+});
+
+describe("generateInstallationToken", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("returns the token from a valid GitHub response", async () => {
+    const { privateKeyPem } = await generateTestKeyPair();
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ token: "installation-token" }), { status: 201 })
+    );
+
+    await expect(
+      generateInstallationToken({
+        appId: "12345",
+        privateKey: privateKeyPem,
+        installationId: "67890",
+      })
+    ).resolves.toBe("installation-token");
+  });
+
+  it("rejects a malformed GitHub token response", async () => {
+    const { privateKeyPem } = await generateTestKeyPair();
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ id: "not-a-token" }), { status: 201 })
+    );
+
+    await expect(
+      generateInstallationToken({
+        appId: "12345",
+        privateKey: privateKeyPem,
+        installationId: "67890",
+      })
+    ).rejects.toThrow("Failed to get installation token: invalid response");
+  });
+
+  it("rejects an invalid JSON GitHub token response", async () => {
+    const { privateKeyPem } = await generateTestKeyPair();
+    vi.mocked(globalThis.fetch).mockResolvedValue(new Response("not json", { status: 201 }));
+
+    await expect(
+      generateInstallationToken({
+        appId: "12345",
+        privateKey: privateKeyPem,
+        installationId: "67890",
+      })
+    ).rejects.toThrow("Failed to get installation token: invalid response");
+  });
+
+  it("rejects when a stalled installation-token request reaches its deadline", async () => {
+    const { privateKeyPem } = await generateTestKeyPair();
+    const timeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
+    stalledFetch();
+
+    const tokenPromise = generateInstallationToken({
+      appId: "12345",
+      privateKey: privateKeyPem,
+      installationId: "67890",
+    });
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+    timeout.abort(new DOMException("deadline exceeded", "TimeoutError"));
+
+    await expect(tokenPromise).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(timeoutSpy).toHaveBeenCalledWith(GITHUB_API_REQUEST_TIMEOUT_MS);
+  });
 });
 
 describe("checkSenderPermission", () => {
@@ -116,6 +243,7 @@ describe("checkSenderPermission", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   it("returns hasPermission true for write permission", async () => {
@@ -158,6 +286,14 @@ describe("checkSenderPermission", () => {
     expect(result).toEqual({ hasPermission: false });
   });
 
+  it("returns error flag on malformed permission response", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ user: { login: "alice" } }), { status: 200 })
+    );
+    const result = await checkSenderPermission("tok", "acme", "widgets", "alice");
+    expect(result).toEqual({ hasPermission: false, error: true });
+  });
+
   it("returns error flag on API error (404)", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(new Response("Not Found", { status: 404 }));
     const result = await checkSenderPermission("tok", "acme", "widgets", "alice");
@@ -185,7 +321,34 @@ describe("checkSenderPermission", () => {
           "X-GitHub-Api-Version": "2022-11-28",
           "User-Agent": "Open-Inspect",
         },
+        signal: expect.any(AbortSignal),
       }
     );
+  });
+
+  it("uses the configured User-Agent when one is provided", async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ permission: "write" }), { status: 200 })
+    );
+    await checkSenderPermission("tok", "acme", "widgets", "alice", "Acme Bot");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({ "User-Agent": "Acme Bot" }),
+      })
+    );
+  });
+
+  it("fails closed when a stalled permission check reaches its deadline", async () => {
+    const timeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
+    stalledFetch();
+
+    const resultPromise = checkSenderPermission("tok", "acme", "widgets", "alice");
+    timeout.abort(new DOMException("deadline exceeded", "TimeoutError"));
+
+    await expect(resultPromise).resolves.toEqual({ hasPermission: false, error: true });
+    expect(timeoutSpy).toHaveBeenCalledWith(GITHUB_API_REQUEST_TIMEOUT_MS);
   });
 });

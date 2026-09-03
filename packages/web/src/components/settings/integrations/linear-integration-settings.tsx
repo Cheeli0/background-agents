@@ -1,22 +1,27 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import {
+  encodeRepositoryPathSegments,
+  parseRepositoryFullName,
+} from "@open-inspect/shared/types/repositories";
+import type { EnrichedRepository } from "@open-inspect/shared/types/repository-catalog";
+import type {
+  LinearBotSettings,
+  LinearGlobalConfig,
+} from "@open-inspect/shared/types/integrations";
+import {
   MODEL_REASONING_CONFIG,
-  MODEL_OPTIONS,
-  SUPPORTED_CLASSIFIER_MODELS,
   isValidReasoningEffort,
-  type EnrichedRepository,
-  type LinearBotSettings,
-  type LinearGlobalConfig,
   type ModelCategory,
   type ValidModel,
-} from "@open-inspect/shared";
+} from "@open-inspect/shared/models";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
+import { browserApiFetch } from "@/lib/browser-api-fetch";
 import { IntegrationSettingsSkeleton } from "./integration-settings-skeleton";
-import { ModelOptionLabel } from "../model-option-label";
+import { SettingsCardSection } from "../settings-card-section";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -40,6 +45,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ModelReasoningDefaultsFields } from "./model-reasoning-defaults-fields";
+import { useCurrentUserAuthorization } from "@/hooks/use-current-user-authorization";
 
 const GLOBAL_SETTINGS_KEY = "/api/integration-settings/linear";
 const REPO_SETTINGS_KEY = "/api/integration-settings/linear/repos";
@@ -61,7 +68,13 @@ interface ReposResponse {
   repos: EnrichedRepository[];
 }
 
+/**
+ * Displays Linear integration settings with global and repository edits gated by their respective permissions.
+ */
 export function LinearIntegrationSettings() {
+  const { hasPermission } = useCurrentUserAuthorization();
+  const canManageGlobal = hasPermission("integrations.manage");
+  const canManageRepos = hasPermission("repositories.settings.manage");
   const { data: globalData, isLoading: globalLoading } =
     useSWR<GlobalResponse>(GLOBAL_SETTINGS_KEY);
   const { data: repoSettingsData, isLoading: repoSettingsLoading } =
@@ -79,13 +92,16 @@ export function LinearIntegrationSettings() {
 
   return (
     <div>
-      <h3 className="text-lg font-semibold text-foreground mb-1">Linear Agent</h3>
+      <h2 className="text-lg font-semibold text-foreground mb-1">Linear Agent</h2>
       <p className="text-sm text-muted-foreground mb-6">
-        Configure model defaults, repository targeting, and runtime behavior for Linear-triggered
+        Configure model defaults, repository scope, and runtime behavior for Linear-triggered
         sessions.
       </p>
 
-      <Section title="Connection" description="Linear uses control-plane repository access.">
+      <SettingsCardSection
+        title="Connection"
+        description="Linear uses control-plane repository access."
+      >
         {availableRepos.length > 0 ? (
           <p className="text-sm text-muted-foreground">
             Repository access is available. You can target all repos or limit the integration to a
@@ -97,24 +113,28 @@ export function LinearIntegrationSettings() {
             unavailable until repository access is configured.
           </p>
         )}
-      </Section>
+      </SettingsCardSection>
 
-      <GlobalSettingsSection
-        settings={settings}
-        availableRepos={availableRepos}
-        enabledModelOptions={enabledModelOptions}
-      />
-
-      <Section
-        title="Repository Overrides"
-        description="Override model selection and behavior for specific repositories. Premium badges show Copilot request multipliers."
-      >
-        <RepoOverridesSection
-          overrides={repoOverrides}
+      <fieldset disabled={!canManageGlobal} className="min-w-0">
+        <GlobalSettingsSection
+          settings={settings}
           availableRepos={availableRepos}
           enabledModelOptions={enabledModelOptions}
         />
-      </Section>
+      </fieldset>
+
+      <SettingsCardSection
+        title="Repository Overrides"
+        description="Override model selection and behavior for specific repositories."
+      >
+        <fieldset disabled={!canManageRepos} className="min-w-0">
+          <RepoOverridesSection
+            overrides={repoOverrides}
+            availableRepos={availableRepos}
+            enabledModelOptions={enabledModelOptions}
+          />
+        </fieldset>
+      </SettingsCardSection>
     </div>
   );
 }
@@ -129,9 +149,6 @@ function GlobalSettingsSection({
   enabledModelOptions: ModelCategory[];
 }) {
   const [model, setModel] = useState(settings?.defaults?.model ?? "");
-  const [classificationModel, setClassificationModel] = useState(
-    settings?.defaults?.classificationModel ?? ""
-  );
   const [effort, setEffort] = useState(settings?.defaults?.reasoningEffort ?? "");
   const [enabledRepos, setEnabledRepos] = useState<string[]>(settings?.enabledRepos ?? []);
   const [repoScopeMode, setRepoScopeMode] = useState<"all" | "selected">(
@@ -159,7 +176,6 @@ function GlobalSettingsSection({
     if (settings !== undefined && !initialized) {
       if (settings) {
         setModel(settings.defaults?.model ?? "");
-        setClassificationModel(settings.defaults?.classificationModel ?? "");
         setEffort(settings.defaults?.reasoningEffort ?? "");
         setEnabledRepos(settings.enabledRepos ?? []);
         setRepoScopeMode(settings.enabledRepos === undefined ? "all" : "selected");
@@ -173,8 +189,6 @@ function GlobalSettingsSection({
   }, [settings, initialized]);
 
   const isConfigured = settings !== null && settings !== undefined;
-  const reasoningConfig = model ? MODEL_REASONING_CONFIG[model as ValidModel] : undefined;
-
   const resetNotice =
     "Reset all Linear settings to defaults? This enables both label/user model overrides.";
 
@@ -187,12 +201,11 @@ function GlobalSettingsSection({
     setError("");
 
     try {
-      const res = await fetch(GLOBAL_SETTINGS_KEY, { method: "DELETE" });
+      const res = await browserApiFetch(GLOBAL_SETTINGS_KEY, { method: "DELETE" });
 
       if (res.ok) {
         mutate(GLOBAL_SETTINGS_KEY);
         setModel("");
-        setClassificationModel("");
         setEffort("");
         setEnabledRepos([]);
         setRepoScopeMode("all");
@@ -224,7 +237,6 @@ function GlobalSettingsSection({
     };
 
     if (model) defaults.model = model;
-    if (classificationModel) defaults.classificationModel = classificationModel;
     if (effort) defaults.reasoningEffort = effort;
     if (issueSessionInstructions) defaults.issueSessionInstructions = issueSessionInstructions;
 
@@ -234,7 +246,7 @@ function GlobalSettingsSection({
     }
 
     try {
-      const res = await fetch(GLOBAL_SETTINGS_KEY, {
+      const res = await browserApiFetch(GLOBAL_SETTINGS_KEY, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings: body }),
@@ -265,98 +277,23 @@ function GlobalSettingsSection({
   };
 
   return (
-    <Section
+    <SettingsCardSection
       title="Defaults & Scope"
-      description="Global model, fallback behavior, and repository targeting."
+      description="Global model, fallback behavior, and repository scope."
     >
       {error && <Message tone="error" text={error} />}
 
-      <div className="grid sm:grid-cols-2 gap-3 mb-4">
-        <label className="text-sm">
-          <span className="block text-foreground font-medium mb-1">Default model</span>
-          <Select
-            value={model}
-            onValueChange={(nextModel) => {
-              setModel(nextModel);
-              if (effort && nextModel && !isValidReasoningEffort(nextModel, effort)) {
-                setEffort("");
-              }
-              setDirty(true);
-              setError("");
-            }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Use system default" />
-            </SelectTrigger>
-            <SelectContent>
-              {enabledModelOptions.map((group) => (
-                <SelectGroup key={group.category}>
-                  <SelectLabel>{group.category}</SelectLabel>
-                  {group.models.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      <ModelOptionLabel name={m.name} premiumMultiplier={m.premiumMultiplier} />
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground mt-1">
-            Premium badges show how many requests one run consumes for Copilot-backed models.
-          </p>
-        </label>
-
-        <label className="text-sm">
-          <span className="block text-foreground font-medium mb-1">Classifier model</span>
-          <Select
-            value={classificationModel}
-            onValueChange={(nextModel) => {
-              setClassificationModel(nextModel);
-              setDirty(true);
-              setError("");
-            }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Auto-select based on configured providers" />
-            </SelectTrigger>
-            <SelectContent>
-              {getClassifierModelOptions().map((option) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {option.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground mt-1">
-            Auto uses Copilot `gpt-5-mini` when global Copilot auth is enabled; otherwise it uses
-            Claude Haiku 4.5.
-          </p>
-        </label>
-
-        <label className="text-sm">
-          <span className="block text-foreground font-medium mb-1">Default reasoning effort</span>
-          <Select
-            value={effort}
-            onValueChange={(v) => {
-              setEffort(v);
-              setDirty(true);
-              setError("");
-            }}
-            disabled={!reasoningConfig}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Use model default" />
-            </SelectTrigger>
-            <SelectContent>
-              {(reasoningConfig?.efforts ?? []).map((value) => (
-                <SelectItem key={value} value={value}>
-                  {value}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </label>
-      </div>
+      <ModelReasoningDefaultsFields
+        model={model}
+        reasoningEffort={effort}
+        modelOptions={enabledModelOptions}
+        onChange={(nextModel, nextEffort) => {
+          setModel(nextModel);
+          setEffort(nextEffort);
+          setDirty(true);
+          setError("");
+        }}
+      />
 
       <div className="grid sm:grid-cols-2 gap-2 mb-4">
         <label className="flex items-center justify-between px-3 py-2 border border-border rounded-sm cursor-pointer hover:bg-muted/50 transition text-sm">
@@ -371,7 +308,7 @@ function GlobalSettingsSection({
           />
         </label>
         <label className="flex items-center justify-between px-3 py-2 border border-border rounded-sm cursor-pointer hover:bg-muted/50 transition text-sm">
-          <span>Allow model/provider labels (`model:*`, `provider:*`)</span>
+          <span>Allow model labels (model:*)</span>
           <Checkbox
             checked={allowLabelModelOverride}
             onCheckedChange={(checked) => {
@@ -398,7 +335,10 @@ function GlobalSettingsSection({
       </div>
 
       <div className="mb-4">
-        <label className="block text-sm font-medium text-foreground mb-1">
+        <label
+          htmlFor="linear-issue-session-instructions"
+          className="block text-sm font-medium text-foreground mb-1"
+        >
           Issue Session Instructions
         </label>
         <p className="text-xs text-muted-foreground mb-2">
@@ -407,6 +347,7 @@ function GlobalSettingsSection({
           conventions).
         </p>
         <Textarea
+          id="linear-issue-session-instructions"
           value={issueSessionInstructions}
           onChange={(e) => {
             setIssueSessionInstructions(e.target.value);
@@ -507,7 +448,7 @@ function GlobalSettingsSection({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Section>
+    </SettingsCardSection>
   );
 }
 
@@ -529,14 +470,18 @@ function RepoOverridesSection({
 
   const handleAdd = async () => {
     if (!addingRepo) return;
-    const [owner, name] = addingRepo.split("/");
+    const repository = parseRepositoryFullName(addingRepo);
+    if (!repository) return;
 
     try {
-      const res = await fetch(`/api/integration-settings/linear/repos/${owner}/${name}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings: {} }),
-      });
+      const res = await browserApiFetch(
+        `${REPO_SETTINGS_KEY}/${encodeRepositoryPathSegments(repository)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings: {} }),
+        }
+      );
 
       if (res.ok) {
         mutate(REPO_SETTINGS_KEY);
@@ -623,9 +568,9 @@ function RepoOverrideRow({
   };
 
   const handleSave = async () => {
+    const repository = parseRepositoryFullName(entry.repo);
+    if (!repository) return;
     setSaving(true);
-
-    const [owner, name] = entry.repo.split("/");
     const settings: LinearBotSettings = {
       allowUserPreferenceOverride,
       allowLabelModelOverride,
@@ -635,11 +580,14 @@ function RepoOverrideRow({
     if (effort) settings.reasoningEffort = effort;
 
     try {
-      const res = await fetch(`/api/integration-settings/linear/repos/${owner}/${name}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings }),
-      });
+      const res = await browserApiFetch(
+        `${REPO_SETTINGS_KEY}/${encodeRepositoryPathSegments(repository)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings }),
+        }
+      );
 
       if (res.ok) {
         mutate(REPO_SETTINGS_KEY);
@@ -657,12 +605,16 @@ function RepoOverrideRow({
   };
 
   const handleDelete = async () => {
-    const [owner, name] = entry.repo.split("/");
+    const repository = parseRepositoryFullName(entry.repo);
+    if (!repository) return;
 
     try {
-      const res = await fetch(`/api/integration-settings/linear/repos/${owner}/${name}`, {
-        method: "DELETE",
-      });
+      const res = await browserApiFetch(
+        `${REPO_SETTINGS_KEY}/${encodeRepositoryPathSegments(repository)}`,
+        {
+          method: "DELETE",
+        }
+      );
 
       if (res.ok) {
         mutate(REPO_SETTINGS_KEY);
@@ -691,7 +643,7 @@ function RepoOverrideRow({
                 <SelectLabel>{group.category}</SelectLabel>
                 {group.models.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
-                    <ModelOptionLabel name={m.name} premiumMultiplier={m.premiumMultiplier} />
+                    {m.name}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -767,26 +719,6 @@ function RepoOverrideRow({
   );
 }
 
-function Section({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="border border-border-muted rounded-md p-5 mb-5">
-      <h4 className="text-sm font-semibold uppercase tracking-wider text-foreground mb-1">
-        {title}
-      </h4>
-      <p className="text-sm text-muted-foreground mb-4">{description}</p>
-      {children}
-    </section>
-  );
-}
-
 function Message({ tone, text }: { tone: "error" | "success"; text: string }) {
   const classes =
     tone === "error"
@@ -797,17 +729,5 @@ function Message({ tone, text }: { tone: "error" | "success"; text: string }) {
     <div className={classes} aria-live="polite">
       {text}
     </div>
-  );
-}
-
-function getClassifierModelOptions() {
-  const supportedModels = new Set<string>(SUPPORTED_CLASSIFIER_MODELS);
-  return MODEL_OPTIONS.flatMap((group) =>
-    group.models
-      .filter((model) => supportedModels.has(model.id))
-      .map((model) => ({
-        id: model.id,
-        name: model.name,
-      }))
   );
 }

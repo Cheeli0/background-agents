@@ -1,5 +1,5 @@
 import useSWR from "swr";
-import { useSession } from "next-auth/react";
+import { useAuthSession } from "@/lib/auth-session";
 
 export interface Repo {
   id: number;
@@ -15,13 +15,21 @@ interface ReposResponse {
   repos: Repo[];
 }
 
-export function useRepos() {
-  const { data: session } = useSession();
+/**
+ * Loads repositories for an authenticated user when enabled, allowing callers to suppress unauthorized requests.
+ */
+export function useRepos(enabled = true) {
+  const { data: session, status } = useAuthSession();
 
-  const { data, isLoading } = useSWR<ReposResponse>(session ? "/api/repos" : null);
+  const { data, isLoading, error } = useSWR<ReposResponse>(
+    enabled && session ? "/api/repos" : null
+  );
 
   return {
     repos: data?.repos ?? [],
-    loading: isLoading,
+    // The fetch is gated on the auth session, so the list is still loading
+    // while the session itself resolves — don't report an authoritative [].
+    loading: enabled && (status === "loading" || isLoading),
+    error,
   };
 }

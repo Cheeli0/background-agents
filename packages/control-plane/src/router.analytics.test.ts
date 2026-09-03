@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { generateInternalToken } from "./auth/internal";
 import { handleRequest } from "./router";
+import {
+  signedServiceRequest,
+  TEST_BACKGROUND_TASK_CONTEXT,
+  TEST_SERVICE_SECRETS,
+} from "./router.test-support";
 
 const mockStore = {
   getSummary: vi.fn(),
@@ -12,7 +16,9 @@ vi.mock("./db/analytics-store", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    AnalyticsStore: vi.fn().mockImplementation(() => mockStore),
+    AnalyticsStore: vi.fn().mockImplementation(function () {
+      return mockStore;
+    }),
   };
 });
 
@@ -21,7 +27,7 @@ describe("analytics router integration", () => {
     vi.clearAllMocks();
   });
 
-  it("serves analytics routes even when the SCM provider is not github", async () => {
+  it("does not let an actorless service read analytics", async () => {
     mockStore.getSummary.mockResolvedValue({
       totalSessions: 1,
       activeUsers: 1,
@@ -39,7 +45,7 @@ describe("analytics router integration", () => {
     });
 
     const env = {
-      INTERNAL_CALLBACK_SECRET: "test-secret",
+      ...TEST_SERVICE_SECRETS,
       SCM_PROVIDER: "gitlab",
       DB: {
         prepare: vi.fn(),
@@ -49,31 +55,16 @@ describe("analytics router integration", () => {
       },
     };
 
-    const token = await generateInternalToken(env.INTERNAL_CALLBACK_SECRET);
     const response = await handleRequest(
-      new Request("https://test.local/analytics/summary", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      await signedServiceRequest("https://test.local/analytics/summary", {
+        service: "linear-bot",
       }),
-      env as never
+      env as never,
+      TEST_BACKGROUND_TASK_CONTEXT
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      totalSessions: 1,
-      activeUsers: 1,
-      totalCost: 0,
-      avgCost: 0,
-      totalPrs: 0,
-      statusBreakdown: {
-        created: 1,
-        active: 0,
-        completed: 0,
-        failed: 0,
-        archived: 0,
-        cancelled: 0,
-      },
-    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: "service_actor_required" });
+    expect(mockStore.getSummary).not.toHaveBeenCalled();
   });
 });

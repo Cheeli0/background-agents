@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from sandbox_runtime.constants import TTYD_PORT
+from sandbox_runtime.constants import NOVNC_PORT, TTYD_PORT
 from src.sandbox.manager import (
     CODE_SERVER_PORT,
     TTYD_PROXY_PORT,
@@ -18,7 +18,13 @@ class TestCollectExposedPortsTerminal:
 
     def test_terminal_enabled_includes_proxy_port(self):
         exposed, _extra = SandboxManager._collect_exposed_ports(
-            code_server_enabled=False, terminal_enabled=True, settings=None
+            code_server_enabled=False,
+            vnc_enabled=False,
+            terminal_enabled=True,
+            settings=None,
+            code_server_port=CODE_SERVER_PORT,
+            novnc_port=NOVNC_PORT,
+            ttyd_proxy_port=TTYD_PROXY_PORT,
         )
         assert TTYD_PROXY_PORT in exposed
         # ttyd raw port should NOT be exposed (only the proxy port)
@@ -26,13 +32,25 @@ class TestCollectExposedPortsTerminal:
 
     def test_terminal_disabled_excludes_proxy_port(self):
         exposed, _extra = SandboxManager._collect_exposed_ports(
-            code_server_enabled=False, terminal_enabled=False, settings=None
+            code_server_enabled=False,
+            vnc_enabled=False,
+            terminal_enabled=False,
+            settings=None,
+            code_server_port=CODE_SERVER_PORT,
+            novnc_port=NOVNC_PORT,
+            ttyd_proxy_port=TTYD_PROXY_PORT,
         )
         assert TTYD_PROXY_PORT not in exposed
 
     def test_terminal_and_code_server_both_enabled(self):
         exposed, _extra = SandboxManager._collect_exposed_ports(
-            code_server_enabled=True, terminal_enabled=True, settings=None
+            code_server_enabled=True,
+            vnc_enabled=False,
+            terminal_enabled=True,
+            settings=None,
+            code_server_port=CODE_SERVER_PORT,
+            novnc_port=NOVNC_PORT,
+            ttyd_proxy_port=TTYD_PROXY_PORT,
         )
         assert CODE_SERVER_PORT in exposed
         assert TTYD_PROXY_PORT in exposed
@@ -41,7 +59,13 @@ class TestCollectExposedPortsTerminal:
         """If user explicitly lists TTYD_PROXY_PORT in tunnelPorts, it should not duplicate."""
         settings = {"tunnelPorts": [TTYD_PROXY_PORT, 3000]}
         exposed, extra = SandboxManager._collect_exposed_ports(
-            code_server_enabled=False, terminal_enabled=True, settings=settings
+            code_server_enabled=False,
+            vnc_enabled=False,
+            terminal_enabled=True,
+            settings=settings,
+            code_server_port=CODE_SERVER_PORT,
+            novnc_port=NOVNC_PORT,
+            ttyd_proxy_port=TTYD_PROXY_PORT,
         )
         assert exposed.count(TTYD_PROXY_PORT) == 1
         assert 3000 in exposed
@@ -61,20 +85,38 @@ class TestResolveTunnelsTerminal:
         sandbox = MagicMock()
         sandbox.tunnels.return_value = {TTYD_PROXY_PORT: tunnel}
 
-        cs_url, ttyd_url, extra = await SandboxManager._resolve_and_setup_tunnels(
-            sandbox, "sb-123", code_server_enabled=False, terminal_enabled=True, extra_ports=[]
+        cs_url, vnc_url, ttyd_url, extra = await SandboxManager._resolve_and_setup_tunnels(
+            sandbox,
+            "sb-123",
+            code_server_enabled=False,
+            vnc_enabled=False,
+            terminal_enabled=True,
+            extra_ports=[],
+            code_server_port=CODE_SERVER_PORT,
+            novnc_port=NOVNC_PORT,
+            ttyd_proxy_port=TTYD_PROXY_PORT,
         )
         assert cs_url is None
+        assert vnc_url is None
         assert ttyd_url == "https://ttyd.example.com"
         assert extra is None
 
     @pytest.mark.asyncio
     async def test_returns_none_when_terminal_disabled(self):
         sandbox = MagicMock()
-        cs_url, ttyd_url, extra = await SandboxManager._resolve_and_setup_tunnels(
-            sandbox, "sb-123", code_server_enabled=False, terminal_enabled=False, extra_ports=[]
+        cs_url, vnc_url, ttyd_url, extra = await SandboxManager._resolve_and_setup_tunnels(
+            sandbox,
+            "sb-123",
+            code_server_enabled=False,
+            vnc_enabled=False,
+            terminal_enabled=False,
+            extra_ports=[],
+            code_server_port=CODE_SERVER_PORT,
+            novnc_port=NOVNC_PORT,
+            ttyd_proxy_port=TTYD_PROXY_PORT,
         )
         assert cs_url is None
+        assert vnc_url is None
         assert ttyd_url is None
         assert extra is None
 
@@ -91,14 +133,19 @@ class TestResolveTunnelsTerminal:
             TTYD_PROXY_PORT: ttyd_tunnel,
         }
 
-        cs_url, ttyd_url, extra = await SandboxManager._resolve_and_setup_tunnels(
+        cs_url, vnc_url, ttyd_url, extra = await SandboxManager._resolve_and_setup_tunnels(
             sandbox,
             "sb-123",
             code_server_enabled=True,
+            vnc_enabled=False,
             terminal_enabled=True,
             extra_ports=[],
+            code_server_port=CODE_SERVER_PORT,
+            novnc_port=NOVNC_PORT,
+            ttyd_proxy_port=TTYD_PROXY_PORT,
         )
         assert cs_url == "https://cs.example.com"
+        assert vnc_url is None
         assert ttyd_url == "https://ttyd.example.com"
         assert extra is None
 
@@ -127,7 +174,7 @@ class TestCreateSandboxTerminal:
         monkeypatch.setattr(
             SandboxManager,
             "_resolve_and_setup_tunnels",
-            AsyncMock(return_value=(None, "https://ttyd.example.com", None)),
+            AsyncMock(return_value=(None, None, "https://ttyd.example.com", None)),
         )
 
         manager = SandboxManager()
@@ -164,7 +211,7 @@ class TestCreateSandboxTerminal:
         fake_create.aio = fake_create_aio
         monkeypatch.setattr("src.sandbox.manager.modal.Sandbox.create", fake_create)
 
-        tunnel_mock = AsyncMock(return_value=(None, None, None))
+        tunnel_mock = AsyncMock(return_value=(None, None, None, None))
         monkeypatch.setattr(SandboxManager, "_resolve_and_setup_tunnels", tunnel_mock)
 
         manager = SandboxManager()
@@ -213,7 +260,7 @@ class TestRestoreSandboxTerminal:
         monkeypatch.setattr(
             SandboxManager,
             "_resolve_and_setup_tunnels",
-            AsyncMock(return_value=(None, "https://ttyd-restored.example.com", None)),
+            AsyncMock(return_value=(None, None, "https://ttyd-restored.example.com", None)),
         )
 
         manager = SandboxManager()
@@ -260,7 +307,7 @@ class TestRestoreSandboxTerminal:
         fake_create.aio = fake_create_aio
         monkeypatch.setattr("src.sandbox.manager.modal.Image.from_id", fake_from_id)
         monkeypatch.setattr("src.sandbox.manager.modal.Sandbox.create", fake_create)
-        tunnel_mock = AsyncMock(return_value=(None, None, None))
+        tunnel_mock = AsyncMock(return_value=(None, None, None, None))
         monkeypatch.setattr(SandboxManager, "_resolve_and_setup_tunnels", tunnel_mock)
 
         manager = SandboxManager()

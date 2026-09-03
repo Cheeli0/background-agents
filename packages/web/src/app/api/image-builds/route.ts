@@ -1,0 +1,67 @@
+import { NextResponse } from "next/server";
+import { getServerAuthSession } from "@/lib/server-auth-session";
+import { controlPlaneUserFetch } from "@/lib/control-plane";
+import {
+  excludeSupersededBuilds,
+  imageBuildsEnabledReposResponseSchema,
+  imageBuildsEnabledResponseSchema,
+  imageBuildsStatusResponseSchema,
+} from "@/lib/image-builds";
+import { REPO_IMAGES_UNSUPPORTED_MESSAGE, supportsRepoImages } from "@/lib/sandbox-provider";
+
+/**
+ * Unified image-build feed: every prebuild-enabled scope plus the cross-scope
+ * build status — non-superseded, so failed builds are visible. One call for
+ * the settings pages and the session-target picker.
+ */
+export async function GET() {
+  const session = await getServerAuthSession();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!supportsRepoImages()) {
+    return NextResponse.json({ error: REPO_IMAGES_UNSUPPORTED_MESSAGE }, { status: 501 });
+  }
+
+  try {
+    const [enabledResponse, enabledReposResponse, statusResponse] = await Promise.all([
+      controlPlaneUserFetch("/image-builds/enabled"),
+      controlPlaneUserFetch("/image-builds/enabled-repos"),
+      controlPlaneUserFetch("/image-builds/status"),
+    ]);
+
+    if (!enabledResponse.ok || !enabledReposResponse.ok || !statusResponse.ok) {
+      return NextResponse.json({ error: "Failed to fetch image builds" }, { status: 502 });
+    }
+
+    const [enabledData, enabledReposData, statusData] = await Promise.all([
+      enabledResponse.json(),
+      enabledReposResponse.json(),
+      statusResponse.json(),
+    ]);
+    const parsedEnabled = imageBuildsEnabledResponseSchema.safeParse(enabledData);
+    const parsedEnabledRepos = imageBuildsEnabledReposResponseSchema.safeParse(enabledReposData);
+    const parsedStatus = imageBuildsStatusResponseSchema.safeParse(statusData);
+    if (!parsedEnabled.success || !parsedEnabledRepos.success || !parsedStatus.success) {
+      return NextResponse.json({ error: "Failed to fetch image builds" }, { status: 502 });
+    }
+
+    // Serve the enabled scope identities and current fingerprints that the
+    // status fold keys on.
+    const units = parsedEnabled.data.units.map((unit) => ({
+      scopeKind: unit.scopeKind,
+      scopeId: unit.scopeId,
+      repositoriesFingerprint: unit.repositoriesFingerprint,
+    }));
+    // Persisted repo flags, unlike units, never drop a scope on a transient
+    // resolution failure — the settings toggles read these.
+    const enabledRepos = parsedEnabledRepos.data.repos;
+    const images = excludeSupersededBuilds(parsedStatus.data.images);
+
+    return NextResponse.json({ units, enabledRepos, images });
+  } catch (error) {
+    console.error("Failed to fetch image builds:", error);
+    return NextResponse.json({ error: "Failed to fetch image builds" }, { status: 500 });
+  }
+}

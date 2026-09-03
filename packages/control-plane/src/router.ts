@@ -2,154 +2,76 @@
  * API router for Open-Inspect Control Plane.
  */
 
-import type {
-  ArtifactResponse,
-  Env,
-  CreateSessionRequest,
-  CreateSessionResponse,
-  SpawnSource,
-} from "./types";
-import { generateId, encryptTokenPair } from "./auth/crypto";
-import { verifyInternalToken } from "./auth/internal";
-import {
-  buildMediaObjectKey,
-  detectScreenshotFileType,
-  isMultipartFile,
-  isSupportedScreenshotMimeType,
-  type MultipartFieldValue,
-  parseOptionalBoolean,
-  parseOptionalViewport,
-  SCREENSHOT_MAX_BYTES,
-  SCREENSHOT_UPLOAD_LIMIT_PER_SESSION,
-} from "./media";
+import type { Env } from "./types";
+import { authenticate, isAuthError } from "./auth/authenticate";
+import type { Principal } from "./auth/principal";
+import { getUserAuth, getUserAuthRuntime } from "./auth/user/runtime";
 import {
   resolveScmProviderFromEnv,
   SourceControlProviderError,
   type SourceControlProviderName,
 } from "./source-control";
-import { IntegrationSettingsStore } from "./db/integration-settings";
-import { SessionIndexStore } from "./db/session-index";
-import { UserScmTokenStore, DEFAULT_TOKEN_LIFETIME_MS } from "./db/user-scm-tokens";
-import { UserStore, type ProviderIdentity } from "./db/user-store";
-import { buildSessionInternalUrl, SessionInternalPaths } from "./session/contracts";
+import { SessionInternalPaths } from "./session/contracts";
+import { createSessionRuntimeClient } from "./session/runtime-client";
 
-import {
-  getValidModelOrDefault,
-  isValidModel,
-  isValidReasoningEffort,
-  VALID_MODELS,
-  type CodeServerSettings,
-  type SandboxSettings,
-  type ScreenshotArtifactMetadata,
-  type SessionStatus,
-  type CallbackContext,
-  type SpawnChildSessionRequest,
-  type SpawnContext,
-} from "@open-inspect/shared";
 import { createRequestMetrics, instrumentD1 } from "./db/instrumented-d1";
-import { createLogger } from "./logger";
-import { validateModelCredentialsForRepo } from "./model-credentials";
+import { UserStore } from "./db/user-store";
+import { AutomationStore } from "./db/automation-store";
+import { AuthorizationError, AuthorizationService } from "./authorization/service";
+import { serviceAllowsPermission } from "./authorization/service-permissions";
 import {
+  auditRouteAuthorizationDecision,
+  shouldAuditAllowedDecision,
+  type AuthorizationDecisionRequirement,
+  type RouteAuthorizationDecision,
+} from "./authorization/request-audit";
+import {
+  SCOPED_PERMISSION_PAIRS,
+  resolveScopedPermission,
+  type PermissionId,
+} from "@open-inspect/shared/rbac";
+import { createLogger } from "./logger";
+import type { BackgroundTasks } from "./platform-ports";
+import {
+  type ActorlessServiceGrant,
   type Route,
+  type RouteAuthentication,
+  type RouteAuthorizationRequirement,
   type RequestContext,
+  defineRoute,
+  GITHUB_SANDBOX_FALLBACK_ROUTE,
+  NO_AUTHORIZATION,
   parsePattern,
+  requirePermission,
   json,
   error,
-  resolveRepoOrError,
+  HttpError,
 } from "./routes/shared";
+import { browserAuthRoutes } from "./routes/browser-auth";
+import { signInProviderRoutes } from "./routes/sign-in-providers";
 import { integrationSettingsRoutes } from "./routes/integration-settings";
-import { classifierConfigRoutes } from "./routes/classifier-config";
+import { commitSigningRoutes } from "./routes/commit-signing";
+import { scmSettingsRoutes } from "./routes/scm-settings";
 import { modelPreferencesRoutes } from "./routes/model-preferences";
 import { reposRoutes } from "./routes/repos";
-import { repoImageRoutes } from "./routes/repo-images";
 import { secretsRoutes } from "./routes/secrets";
+import { environmentRoutes } from "./routes/environments";
+import { environmentSecretsRoutes } from "./routes/environment-secrets";
+import { imageBuildRoutes } from "./routes/image-builds";
 import { automationRoutes } from "./routes/automations";
 import { mcpServerRoutes } from "./routes/mcp-servers";
 import { analyticsRoutes } from "./routes/analytics";
+import { auditEventRoutes } from "./routes/audit-events";
+import { autofixRoutes } from "./routes/autofix";
+import { skillRoutes } from "./routes/skills";
+import { keyboardShortcutRoutes } from "./routes/keyboard-shortcuts";
+import { rbacRoutes } from "./routes/rbac";
+import { sessionRoutes } from "./routes/sessions";
+import { modelProviderAccountRoutes } from "./routes/model-provider-accounts";
+import { handleSlackNotify } from "./routes/slack-notify";
 import { webhookRoutes } from "./webhooks";
 
 const logger = createLogger("router");
-
-// Guardrail constants for agent-spawned child sessions
-const MAX_SPAWN_DEPTH = 2;
-const MAX_CONCURRENT_CHILDREN = 5;
-const MAX_TOTAL_CHILDREN = 15;
-
-/**
- * Resolve whether code-server should be enabled for a given repo,
- * checking both the `enabled` setting and the `enabledRepos` allowlist.
- */
-async function resolveCodeServerEnabled(
-  db: D1Database | undefined,
-  repoOwner: string,
-  repoName: string
-): Promise<boolean> {
-  if (!db) return false;
-  const repo = `${repoOwner}/${repoName}`;
-  try {
-    const store = new IntegrationSettingsStore(db);
-    const { enabledRepos, settings } = await store.getResolvedConfig("code-server", repo);
-    const csSettings = settings as CodeServerSettings;
-    if (csSettings.enabled !== true) return false;
-    // enabledRepos: null → all repos, [] → none, [...] → allowlist
-    if (enabledRepos !== null && !enabledRepos.includes(repo)) return false;
-    return true;
-  } catch (e) {
-    logger.warn("Failed to resolve code-server integration settings, defaulting to disabled", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-    return false;
-  }
-}
-
-/**
- * Resolve sandbox settings for a given repo, merging global defaults with per-repo overrides.
- */
-async function resolveSandboxSettings(
-  db: D1Database | undefined,
-  repoOwner: string,
-  repoName: string
-): Promise<SandboxSettings> {
-  if (!db) return {};
-  const repo = `${repoOwner}/${repoName}`;
-  try {
-    const store = new IntegrationSettingsStore(db);
-    const { enabledRepos, settings } = await store.getResolvedConfig("sandbox", repo);
-    // enabledRepos: null → all repos, [] → none, [...] → allowlist
-    if (enabledRepos !== null && !enabledRepos.includes(repo)) return {};
-    return settings as SandboxSettings;
-  } catch (e) {
-    logger.warn("Failed to resolve sandbox settings, using defaults", {
-      error: e instanceof Error ? e.message : String(e),
-    });
-    return {};
-  }
-}
-
-const SESSION_STATUSES: SessionStatus[] = [
-  "created",
-  "active",
-  "completed",
-  "failed",
-  "archived",
-  "cancelled",
-];
-
-function parseSessionStatus(value: string | null): SessionStatus | undefined {
-  if (!value) return undefined;
-  return SESSION_STATUSES.includes(value as SessionStatus) ? (value as SessionStatus) : undefined;
-}
-
-/**
- * Create a Request to a Durable Object stub with correlation headers.
- * Ensures trace_id and request_id propagate into the DO.
- */
-function internalRequest(url: string, init: RequestInit | undefined, ctx: RequestContext): Request {
-  const headers = new Headers(init?.headers);
-  headers.set("x-trace-id", ctx.trace_id);
-  headers.set("x-request-id", ctx.request_id);
-  return new Request(url, { ...init, headers });
-}
 
 function withCorsAndTraceHeaders(response: Response, ctx: RequestContext): Response {
   const headers = new Headers(response.headers);
@@ -163,40 +85,16 @@ function withCorsAndTraceHeaders(response: Response, ctx: RequestContext): Respo
   });
 }
 
-/**
- * Get Durable Object stub for a session.
- * Returns the stub or null if session ID is missing.
- */
-function getSessionStub(env: Env, match: RegExpMatchArray): DurableObjectStub | null {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return null;
-
-  const doId = env.SESSION.idFromName(sessionId);
-  return env.SESSION.get(doId);
+function withRouteCachePolicy(response: Response, route: Route): Response {
+  if (!route.cacheControl) return response;
+  const headers = new Headers(response.headers);
+  headers.set("Cache-Control", route.cacheControl);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
-
-/**
- * Routes that do not require authentication.
- */
-const PUBLIC_ROUTES: RegExp[] = [
-  /^\/health$/,
-  /^\/webhooks\/sentry\/[^/]+$/,
-  /^\/webhooks\/automation\/[^/]+$/,
-];
-
-/**
- * Routes that accept sandbox authentication.
- * These are session-specific routes that can be called by sandboxes using their auth token.
- * The sandbox token is validated by the Durable Object.
- */
-const SANDBOX_AUTH_ROUTES: RegExp[] = [
-  /^\/sessions\/[^/]+\/pr$/, // PR creation from sandbox
-  /^\/sessions\/[^/]+\/openai-token-refresh$/, // OpenAI token refresh from sandbox
-  /^\/sessions\/[^/]+\/media$/, // Media upload from sandbox
-  /^\/sessions\/[^/]+\/children$/, // POST spawn, GET list
-  /^\/sessions\/[^/]+\/children\/[^/]+$/, // GET child detail
-  /^\/sessions\/[^/]+\/children\/[^/]+\/cancel$/, // POST cancel child
-];
 
 type CachedScmProvider =
   | {
@@ -238,32 +136,15 @@ function resolveDeploymentScmProvider(env: Env): SourceControlProviderName {
   return cachedScmProvider.provider;
 }
 
-/**
- * Check if a path matches any public route pattern.
- */
-function isPublicRoute(path: string): boolean {
-  return PUBLIC_ROUTES.some((pattern) => pattern.test(path));
-}
-
-/**
- * Check if a path matches any sandbox auth route pattern.
- */
-function isSandboxAuthRoute(path: string): boolean {
-  return SANDBOX_AUTH_ROUTES.some((pattern) => pattern.test(path));
-}
-
-function isScmAgnosticRoute(path: string): boolean {
-  return /^\/analytics\/(summary|timeseries|breakdown)$/.test(path);
-}
-
 function enforceImplementedScmProvider(
+  route: Route,
   path: string,
   env: Env,
   ctx: RequestContext
 ): Response | null {
   try {
     const provider = resolveDeploymentScmProvider(env);
-    if (provider !== "github" && !isPublicRoute(path) && !isScmAgnosticRoute(path)) {
+    if (route.supportedScmProviders !== "all" && !route.supportedScmProviders.includes(provider)) {
       logger.warn("SCM provider not implemented", {
         event: "scm.provider_not_implemented",
         scm_provider: provider,
@@ -301,6 +182,9 @@ function enforceImplementedScmProvider(
  * Validate sandbox authentication by checking with the Durable Object.
  * The DO stores the expected sandbox auth token.
  *
+ * On success, sets the sandbox principal on the request context — this is
+ * the single place a sandbox principal is assembled.
+ *
  * @param request - The incoming request
  * @param env - Environment bindings
  * @param sessionId - Session ID extracted from path
@@ -320,20 +204,15 @@ async function verifySandboxAuth(
 
   const token = authHeader.slice(7); // Remove "Bearer " prefix
 
-  // Ask the Durable Object to validate this sandbox token
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const verifyResponse = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.verifySandboxToken),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      },
-      ctx
-    )
+  // Ask the Session runtime to validate this sandbox token.
+  const verifyResponse = await createSessionRuntimeClient(env, ctx).fetch(
+    sessionId,
+    SessionInternalPaths.verifySandboxToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    }
   );
 
   if (!verifyResponse.ok) {
@@ -349,188 +228,581 @@ async function verifySandboxAuth(
     return error("Unauthorized: Invalid sandbox token", 401);
   }
 
+  ctx.principal = { kind: "sandbox", sessionId };
   return null; // Auth passed
 }
 
-/**
- * Require internal API authentication for service-to-service calls.
- * Fails closed: returns error response if secret is not configured or token is invalid.
- *
- * @param request - The incoming request
- * @param env - Environment bindings
- * @param path - Request path for logging
- * @param ctx - Request correlation context
- * @returns null if authentication passes, or an error Response to return immediately
- */
-async function requireInternalAuth(
+async function verifySandboxAuthSafely(
   request: Request,
   env: Env,
-  path: string,
+  sessionId: string,
   ctx: RequestContext
 ): Promise<Response | null> {
-  if (!env.INTERNAL_CALLBACK_SECRET) {
-    logger.error("INTERNAL_CALLBACK_SECRET not configured - rejecting request", {
-      event: "auth.misconfigured",
+  try {
+    return await verifySandboxAuth(request, env, sessionId, ctx);
+  } catch (cause) {
+    logger.error("Sandbox authentication unavailable", {
+      event: "auth.sandbox_unavailable",
+      session_id: sessionId,
+      error: cause instanceof Error ? cause : String(cause),
       request_id: ctx.request_id,
       trace_id: ctx.trace_id,
     });
-    return error("Internal authentication not configured", 500);
+    return error("Sandbox authentication unavailable", 503);
   }
+}
 
-  const isValid = await verifyInternalToken(
-    request.headers.get("Authorization"),
-    env.INTERNAL_CALLBACK_SECRET
+/**
+ * Emit the per-request `auth.principal` line: who is acting, as a verified
+ * identity — never token material.
+ */
+function logPrincipal(principal: Principal, ctx: RequestContext, path: string): void {
+  const fields: Record<string, string | undefined> = { principal_kind: principal.kind };
+  switch (principal.kind) {
+    case "service":
+      fields.auth_scheme = "per-service";
+      fields.service = principal.service;
+      fields.actor = principal.actor?.participantUserId;
+      break;
+    case "sandbox":
+      fields.session_id = principal.sessionId;
+      break;
+    case "user":
+      fields.user_id = principal.userId;
+      break;
+  }
+  logger.info("auth.principal", {
+    event: "auth.principal",
+    ...fields,
+    http_path: path,
+    request_id: ctx.request_id,
+    trace_id: ctx.trace_id,
+  });
+}
+
+function logRequest(
+  response: Response,
+  ctx: RequestContext,
+  method: string,
+  path: string,
+  startTime: number
+): void {
+  logger.info("http.request", {
+    event: "http.request",
+    request_id: ctx.request_id,
+    trace_id: ctx.trace_id,
+    http_method: method,
+    http_path: path,
+    http_status: response.status,
+    duration_ms: Date.now() - startTime,
+    outcome: response.status >= 500 ? "error" : "success",
+    ...ctx.metrics.summarize(),
+  });
+}
+
+type AllowedAuthorizationDecision = Extract<RouteAuthorizationDecision, { kind: "allowed" }>;
+type DeniedAuthorizationDecision = Extract<RouteAuthorizationDecision, { kind: "denied" }>;
+
+interface AuthorizationFailure {
+  response: Response;
+  decision?: DeniedAuthorizationDecision;
+}
+
+type RouteAuthorizationResult =
+  | { kind: "allowed"; decision: AllowedAuthorizationDecision }
+  | { kind: "denied"; response: Response; decision: DeniedAuthorizationDecision }
+  | { kind: "error"; response: Response };
+
+interface AuthorizationEvidence {
+  requirements: AuthorizationDecisionRequirement[];
+  effectivePermissions: PermissionId[];
+}
+
+function authorizationDenial(
+  response: Response,
+  evidence: AuthorizationEvidence,
+  failedRequirement: AuthorizationDecisionRequirement,
+  reasonCode: string,
+  reason: string,
+  failedPermission?: PermissionId
+): AuthorizationFailure {
+  return {
+    response,
+    decision: {
+      kind: "denied",
+      ...evidence,
+      requirements: [...evidence.requirements, failedRequirement],
+      reasonCode,
+      reason,
+      ...(failedPermission ? { failedPermission } : {}),
+    },
+  };
+}
+
+function resultForFailure(
+  failure: AuthorizationFailure
+): Exclude<RouteAuthorizationResult, { kind: "allowed" }> {
+  return failure.decision
+    ? { kind: "denied", response: failure.response, decision: failure.decision }
+    : { kind: "error", response: failure.response };
+}
+
+export function enforceRoutePrincipal(
+  authentication: RouteAuthentication,
+  principal: Principal,
+  evidence: AuthorizationEvidence = { requirements: [], effectivePermissions: [] }
+): AuthorizationFailure | null {
+  if (
+    authentication.kind === "web-service" &&
+    (principal.kind !== "service" || principal.service !== "web")
+  ) {
+    return { response: error("Unauthorized", 401) };
+  }
+  if (authentication.kind === "user" && principal.kind !== "user") {
+    return authorizationDenial(
+      error("Human user authentication required", 403),
+      evidence,
+      { kind: "principal-type" },
+      "principal_type_required",
+      "Human user authentication required"
+    );
+  }
+  if (authentication.kind === "service" && principal.kind !== "service") {
+    return authorizationDenial(
+      error("Service authentication required", 403),
+      evidence,
+      { kind: "principal-type" },
+      "principal_type_required",
+      "Service authentication required"
+    );
+  }
+  return null;
+}
+
+async function enforceActiveUser(
+  route: Route,
+  ctx: RequestContext,
+  evidence: AuthorizationEvidence
+): Promise<AuthorizationFailure | null> {
+  if (
+    route.authorization.kind !== "active-user" &&
+    route.authorization.kind !== "active-self" &&
+    route.authorization.kind !== "active-global"
+  ) {
+    return null;
+  }
+  let resolvedServiceUserId: string | null = null;
+  if (
+    ctx.principal?.kind === "service" &&
+    ctx.principal.actor &&
+    !ctx.principal.actor.canonicalUserId
+  ) {
+    try {
+      const user = await new UserStore(ctx.db).resolveOrCreateUser({
+        provider: ctx.principal.actor.provider,
+        providerUserId: ctx.principal.actor.providerUserId,
+      });
+      resolvedServiceUserId = user.id;
+    } catch {
+      return {
+        response: json(
+          { error: "Authorization unavailable", code: "authorization_unavailable" },
+          503
+        ),
+      };
+    }
+  }
+  const userId =
+    ctx.principal?.kind === "user"
+      ? ctx.principal.userId
+      : ctx.principal?.kind === "service"
+        ? (ctx.principal.actor?.canonicalUserId ?? resolvedServiceUserId)
+        : null;
+  if (!userId) return null;
+  const requirement = { kind: "active-user" } as const;
+  try {
+    const authorization = await new AuthorizationService(ctx.db).getEffectiveAuthorization(userId);
+    ctx.authorization = authorization;
+    if (authorization.suspendedAt !== null) {
+      return authorizationDenial(
+        json({ error: "Forbidden", code: "active_user_required" }, 403),
+        evidence,
+        requirement,
+        "active_user_required",
+        "Forbidden"
+      );
+    }
+    evidence.requirements.push(requirement);
+    return null;
+  } catch (cause) {
+    if (cause instanceof AuthorizationError) {
+      return authorizationDenial(
+        json({ error: "Forbidden", code: cause.code }, cause.status),
+        evidence,
+        requirement,
+        cause.code,
+        "Forbidden",
+        cause.permission
+      );
+    }
+    return {
+      response: json(
+        { error: "Authorization unavailable", code: "authorization_unavailable" },
+        503
+      ),
+    };
+  }
+}
+
+function authorizationUserId(ctx: RequestContext): string | null {
+  if (ctx.principal?.kind === "user") return ctx.principal.userId;
+  if (ctx.principal?.kind === "service") {
+    return ctx.principal.actor?.canonicalUserId ?? ctx.authorization?.userId ?? null;
+  }
+  return null;
+}
+
+function actorlessGrantMatches(
+  grant: ActorlessServiceGrant,
+  service: string,
+  match: RegExpMatchArray
+): boolean {
+  if (grant.service !== service) return false;
+  return Object.entries(grant.pathParams ?? {}).every(([name, expected]) => {
+    const value = match.groups?.[name];
+    if (value === undefined) return false;
+    try {
+      return decodeURIComponent(value) === expected;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function enforceServiceRouteAuthorization(
+  route: Route,
+  match: RegExpMatchArray,
+  ctx: RequestContext,
+  evidence: AuthorizationEvidence
+): AuthorizationFailure | null {
+  const principal = ctx.principal;
+  const authorization = route.authorization;
+  const requirement = { kind: "service-capability" } as const;
+  if (authorization.kind === "service") {
+    if (principal?.kind !== "service") {
+      return authorizationDenial(
+        json({ error: "Forbidden", code: "service_capability_required" }, 403),
+        evidence,
+        requirement,
+        "service_capability_required",
+        "Forbidden"
+      );
+    }
+    if (!authorization.services.some((service) => service === principal.service)) {
+      return authorizationDenial(
+        json({ error: "Forbidden", code: "service_capability_required" }, 403),
+        evidence,
+        requirement,
+        "service_capability_required",
+        "Forbidden"
+      );
+    }
+    if (authorization.actor === "required" && !principal.actor) {
+      return authorizationDenial(
+        json({ error: "Forbidden", code: "service_actor_required" }, 403),
+        evidence,
+        requirement,
+        "service_actor_required",
+        "Forbidden"
+      );
+    }
+    evidence.requirements.push(requirement);
+    return null;
+  }
+  if (principal?.kind !== "service") return null;
+  if (route.authentication.kind === "web-service" && principal.service === "web") return null;
+  if (
+    (authorization.kind !== "active-user" && authorization.kind !== "active-global") ||
+    authorization.service.kind === "deny"
+  ) {
+    return authorizationDenial(
+      json({ error: "Forbidden", code: "service_capability_required" }, 403),
+      evidence,
+      requirement,
+      "service_capability_required",
+      "Forbidden"
+    );
+  }
+  if (principal.actor) {
+    evidence.requirements.push(requirement);
+    return null;
+  }
+  const granted = authorization.service.actorlessGrants?.some((grant) =>
+    actorlessGrantMatches(grant, principal.service, match)
   );
+  if (granted) {
+    evidence.requirements.push({ kind: "actorless-service-grant", service: principal.service });
+    return null;
+  }
+  return authorizationDenial(
+    json({ error: "Forbidden", code: "service_actor_required" }, 403),
+    evidence,
+    requirement,
+    "service_actor_required",
+    "Forbidden"
+  );
+}
 
-  if (!isValid) {
-    const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
-    logger.warn("Auth failed: HMAC", {
-      event: "auth.hmac_failed",
-      http_path: path,
-      client_ip: clientIP,
-      request_id: ctx.request_id,
-      trace_id: ctx.trace_id,
-    });
-    return error("Unauthorized", 401);
+async function enforcePermissionRequirement(
+  requirement: Extract<RouteAuthorizationRequirement, { kind: "permission" }>,
+  ctx: RequestContext,
+  evidence: AuthorizationEvidence
+): Promise<AuthorizationFailure | null> {
+  if (
+    ctx.principal?.kind === "service" &&
+    !serviceAllowsPermission(ctx.principal.service, requirement.permission)
+  ) {
+    return authorizationDenial(
+      json({ error: "Forbidden", code: "service_capability_required" }, 403),
+      evidence,
+      requirement,
+      "service_capability_required",
+      "Forbidden",
+      requirement.permission
+    );
+  }
+  const userId = authorizationUserId(ctx);
+  if (!userId) {
+    evidence.requirements.push(requirement);
+    return null;
+  }
+  if (ctx.authorization?.permissions.includes(requirement.permission)) {
+    evidence.requirements.push(requirement);
+    evidence.effectivePermissions.push(requirement.permission);
+    return null;
+  }
+  return authorizationDenial(
+    json(
+      { error: "Forbidden", code: "permission_required", permission: requirement.permission },
+      403
+    ),
+    evidence,
+    requirement,
+    "permission_required",
+    "Forbidden",
+    requirement.permission
+  );
+}
+
+async function enforceScopedPermissionRequirement(
+  requirement: Extract<RouteAuthorizationRequirement, { kind: "scoped-permission" }>,
+  ctx: RequestContext,
+  evidence: AuthorizationEvidence
+): Promise<AuthorizationFailure | null> {
+  const pair = SCOPED_PERMISSION_PAIRS[requirement.stem];
+  if (
+    ctx.principal?.kind === "service" &&
+    !serviceAllowsPermission(ctx.principal.service, pair.own)
+  ) {
+    return authorizationDenial(
+      json({ error: "Forbidden", code: "service_capability_required" }, 403),
+      evidence,
+      requirement,
+      "service_capability_required",
+      "Forbidden",
+      pair.own
+    );
+  }
+  const userId = authorizationUserId(ctx);
+  if (!userId) {
+    evidence.requirements.push(requirement);
+    return null;
+  }
+  const scope = ctx.authorization
+    ? resolveScopedPermission(requirement.stem, ctx.authorization.permissions)
+    : null;
+  if (scope) {
+    evidence.requirements.push(requirement);
+    evidence.effectivePermissions.push(pair[scope]);
+    return null;
+  }
+  return authorizationDenial(
+    json({ error: "Forbidden", code: "permission_required", permission: pair.own }, 403),
+    evidence,
+    requirement,
+    "permission_required",
+    "Forbidden",
+    pair.own
+  );
+}
+
+async function enforceAutomationRequirement(
+  requirement: Extract<RouteAuthorizationRequirement, { kind: "automation" }>,
+  match: RegExpMatchArray,
+  ctx: RequestContext,
+  evidence: AuthorizationEvidence
+): Promise<AuthorizationFailure | null> {
+  if (ctx.principal?.kind !== "user") return null;
+  const encodedAutomationId = match.groups?.[requirement.automationIdParam];
+  if (!encodedAutomationId) return { response: json({ error: "Invalid automation route" }, 400) };
+  let automationId: string;
+  try {
+    automationId = decodeURIComponent(encodedAutomationId);
+  } catch {
+    return { response: json({ error: "Invalid automation route" }, 400) };
   }
 
-  return null; // Auth passed
+  try {
+    const authorization = ctx.authorization;
+    if (!authorization) throw new Error("Missing request authorization");
+    const store = new AutomationStore(ctx.db);
+    const storedAutomation = await store.getById(automationId);
+    if (!storedAutomation) return { response: error("Automation not found", 404) };
+    const automation = await store.resolveCanonicalOwner(storedAutomation);
+
+    const permissionStem = `automations.${requirement.operation}` as const;
+    const pair = SCOPED_PERMISSION_PAIRS[permissionStem];
+    const isOwner = automation.user_id === ctx.principal.userId;
+    const scope = resolveScopedPermission(permissionStem, authorization.permissions);
+    if (!scope || (scope === "own" && !isOwner)) {
+      return authorizationDenial(
+        json(
+          {
+            error: "Forbidden",
+            code: "permission_required",
+            permission: pair.own,
+          },
+          403
+        ),
+        evidence,
+        requirement,
+        "permission_required",
+        "Forbidden",
+        pair.own
+      );
+    }
+
+    evidence.requirements.push(requirement);
+    evidence.effectivePermissions.push(pair[scope]);
+    ctx.automationAdmission = { automation };
+    return null;
+  } catch {
+    return {
+      response: json(
+        { error: "Authorization unavailable", code: "authorization_unavailable" },
+        503
+      ),
+    };
+  }
+}
+
+async function enforceRouteAuthorization(
+  route: Route,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<RouteAuthorizationResult> {
+  const evidence: AuthorizationEvidence = { requirements: [], effectivePermissions: [] };
+  const principal = ctx.principal;
+  if (!principal) {
+    return {
+      kind: "allowed",
+      decision: {
+        kind: "allowed",
+        admission: "user",
+        auditAllowed: route.authorization.auditAllowed,
+        ...evidence,
+      },
+    };
+  }
+
+  const principalFailure = enforceRoutePrincipal(route.authentication, principal, evidence);
+  if (principalFailure) return resultForFailure(principalFailure);
+
+  if (
+    principal.kind === "sandbox" &&
+    route.authentication.kind === "user-or-service-with-sandbox-fallback"
+  ) {
+    evidence.requirements.push({ kind: "sandbox-admission", sessionId: principal.sessionId });
+    return {
+      kind: "allowed",
+      decision: {
+        kind: "allowed",
+        admission: "sandbox",
+        auditAllowed: route.authorization.auditAllowed,
+        ...evidence,
+      },
+    };
+  }
+
+  const serviceFailure = enforceServiceRouteAuthorization(route, match, ctx, evidence);
+  if (serviceFailure) return resultForFailure(serviceFailure);
+
+  const activeUserFailure = await enforceActiveUser(route, ctx, evidence);
+  if (activeUserFailure) return resultForFailure(activeUserFailure);
+
+  if (route.authorization.kind === "active-user") {
+    for (const requirement of route.authorization.allOf) {
+      let failure: AuthorizationFailure | null;
+      switch (requirement.kind) {
+        case "permission":
+          failure = await enforcePermissionRequirement(requirement, ctx, evidence);
+          break;
+        case "scoped-permission":
+          failure = await enforceScopedPermissionRequirement(requirement, ctx, evidence);
+          break;
+        case "automation":
+          failure = await enforceAutomationRequirement(requirement, match, ctx, evidence);
+          break;
+      }
+      if (failure) return resultForFailure(failure);
+    }
+  }
+  return {
+    kind: "allowed",
+    decision: {
+      kind: "allowed",
+      admission:
+        principal.kind === "service"
+          ? "service"
+          : principal.kind === "sandbox"
+            ? "sandbox"
+            : "user",
+      auditAllowed: route.authorization.auditAllowed,
+      ...evidence,
+    },
+  };
 }
 
 /**
  * Routes definition.
  */
-const routes: Route[] = [
+export const routes: Route[] = [
   // Health check
   {
+    authentication: { kind: "public" },
+    supportedScmProviders: "all",
     method: "GET",
     pattern: parsePattern("/health"),
-    handler: async () => json({ status: "healthy", service: "open-inspect-control-plane" }),
+    authorization: NO_AUTHORIZATION,
+    handler: async () =>
+      json({
+        status: "healthy",
+        service: "open-inspect-control-plane",
+      }),
   },
+
+  ...browserAuthRoutes,
+  ...signInProviderRoutes,
 
   // Session management
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions"),
-    handler: handleListSessions,
-  },
-  {
+  ...sessionRoutes,
+  // Agent-initiated Slack notification (sandbox-authenticated)
+  defineRoute(GITHUB_SANDBOX_FALLBACK_ROUTE, {
     method: "POST",
-    pattern: parsePattern("/sessions"),
-    handler: handleCreateSession,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id"),
-    handler: handleGetSession,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/associated-pr"),
-    handler: handleSessionAssociatedPr,
-  },
-  {
-    method: "DELETE",
-    pattern: parsePattern("/sessions/:id"),
-    handler: handleDeleteSession,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/prompt"),
-    handler: handleSessionPrompt,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/stop"),
-    handler: handleSessionStop,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/events"),
-    handler: handleSessionEvents,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/artifacts"),
-    handler: handleSessionArtifacts,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/participants"),
-    handler: handleSessionParticipants,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/participants"),
-    handler: handleAddParticipant,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/messages"),
-    handler: handleSessionMessages,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/pr"),
-    handler: handleCreatePR,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/media"),
-    handler: handleMediaUpload,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/media/:artifactId"),
-    handler: handleMediaGet,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/openai-token-refresh"),
-    handler: handleOpenAITokenRefresh,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/ws-token"),
-    handler: handleSessionWsToken,
-  },
-  {
-    method: "PATCH",
-    pattern: parsePattern("/sessions/:id/title"),
-    handler: handleUpdateSessionTitle,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/archive"),
-    handler: handleArchiveSession,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/unarchive"),
-    handler: handleUnarchiveSession,
-  },
-
-  // Child session management (sandbox-authenticated)
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/children"),
-    handler: handleSpawnChild,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/children"),
-    handler: handleListChildren,
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/sessions/:id/children/:childId"),
-    handler: handleGetChild,
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/sessions/:id/children/:childId/cancel"),
-    handler: handleCancelChild,
-  },
+    pattern: parsePattern("/sessions/:id/slack-notify"),
+    authorization: requirePermission("sessions.collaborate"),
+    handler: handleSlackNotify,
+  }),
 
   // Repository management
   ...reposRoutes,
@@ -538,17 +810,27 @@ const routes: Route[] = [
   // Secrets
   ...secretsRoutes,
 
+  // Environments (Phase-2 session target; internal-HMAC only, web BFF proxied)
+  ...environmentRoutes,
+  ...environmentSecretsRoutes,
+
+  // Image builds (scope-generic)
+  ...imageBuildRoutes,
+
   // Model preferences
   ...modelPreferencesRoutes,
 
-  // Classifier config
-  ...classifierConfigRoutes,
+  // Subscription provider account management and sandbox access broker
+  ...modelProviderAccountRoutes,
 
   // Integration settings
   ...integrationSettingsRoutes,
 
-  // Repo image builds
-  ...repoImageRoutes,
+  // Deployment-wide commit signing identity
+  ...commitSigningRoutes,
+
+  // SCM (source-control) settings
+  ...scmSettingsRoutes,
 
   // Automations
   ...automationRoutes,
@@ -558,6 +840,21 @@ const routes: Route[] = [
 
   // Analytics
   ...analyticsRoutes,
+
+  // Workspace audit log
+  ...auditEventRoutes,
+
+  // Pull request feedback Autofix activity
+  ...autofixRoutes,
+
+  // Installation-wide managed skills and personal profiles
+  ...skillRoutes,
+
+  // Personal keyboard shortcuts
+  ...keyboardShortcutRoutes,
+
+  // Workspace roles, members, and current-user authorization
+  ...rbacRoutes,
 
   // Webhooks (public routes — auth handled per-route)
   ...webhookRoutes,
@@ -569,31 +866,52 @@ const routes: Route[] = [
 export async function handleRequest(
   request: Request,
   env: Env,
-  executionCtx?: ExecutionContext
+  executionCtx: BackgroundTasks
 ): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
   const startTime = Date.now();
 
-  // Build correlation context with per-request metrics
+  // The DB binding is required (types.ts) and the control plane cannot serve
+  // requests without it. Reject a missing binding once here — the single
+  // honest boundary — so ctx.db is genuinely always present in handlers and
+  // no per-route degraded-mode guards are needed.
+  // eslint-disable-next-line no-restricted-syntax -- composition root: the one route-layer env.DB read
+  if (!env.DB) {
+    logger.error("DB binding is not configured; refusing request", { http_path: path });
+    return new Response(JSON.stringify({ error: "Database not configured" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Build correlation context with per-request metrics and the instrumented
+  // database handle. Handlers use ctx.db (never env.DB) so all queries are
+  // automatically timed.
   const metrics = createRequestMetrics();
   const ctx: RequestContext = {
     trace_id: request.headers.get("x-trace-id") || crypto.randomUUID(),
     request_id: crypto.randomUUID().slice(0, 8),
     metrics,
+    // eslint-disable-next-line no-restricted-syntax -- composition root: the one route-layer env.DB read
+    db: instrumentD1(env.DB, metrics),
+    // env.DB (not the per-request instrumented wrapper) keys the memoized
+    // Better Auth runtime: the canonical adapter accepts any SqlDatabase, but
+    // cache identity requires the stable object.
+    // eslint-disable-next-line no-restricted-syntax -- composition root: stable cache key for the auth runtime
+    getUserAuth: () => getUserAuth(env, env.DB),
+    // eslint-disable-next-line no-restricted-syntax -- composition root owns normalized auth runtime construction
+    getUserAuthRuntime: () => getUserAuthRuntime(env, env.DB),
     executionCtx,
   };
-
-  // Instrument D1 so all queries are automatically timed
-  const instrumentedEnv: Env = { ...env, DB: instrumentD1(env.DB, metrics) };
 
   // CORS preflight
   if (method === "OPTIONS") {
     return new Response(null, {
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
         "Access-Control-Max-Age": "86400",
         "x-request-id": ctx.request_id,
@@ -602,1657 +920,145 @@ export async function handleRequest(
     });
   }
 
-  // Require authentication for non-public routes
-  if (!isPublicRoute(path)) {
-    // First try HMAC auth (for web app, slack bot, etc.)
-    const hmacAuthError = await requireInternalAuth(request, env, path, ctx);
+  const matchedRoute = routes
+    .filter((route) => route.method === method)
+    .map((route) => ({ route, match: path.match(route.pattern) }))
+    .find(
+      (candidate): candidate is { route: Route; match: RegExpMatchArray } =>
+        candidate.match !== null
+    );
+  if (!matchedRoute) {
+    return withCorsAndTraceHeaders(error("Not found", 404), ctx);
+  }
 
-    if (hmacAuthError) {
-      // HMAC auth failed - check if this route accepts sandbox auth
-      if (isSandboxAuthRoute(path)) {
-        // Extract session ID from path (e.g., /sessions/abc123/pr -> abc123)
-        const sessionIdMatch = path.match(/^\/sessions\/([^/]+)\//);
-        if (sessionIdMatch) {
-          const sessionId = sessionIdMatch[1];
-          const sandboxAuthError = await verifySandboxAuth(request, env, sessionId, ctx);
-          if (!sandboxAuthError) {
-            // Sandbox auth passed, continue to route handler
-          } else {
-            // Both HMAC and sandbox auth failed
-            return withCorsAndTraceHeaders(sandboxAuthError, ctx);
-          }
+  const authentication = matchedRoute.route.authentication;
+  if (authentication.kind !== "public" && authentication.kind !== "handler-authenticated") {
+    let authError: Response | null;
+
+    const sandboxSessionId =
+      authentication.kind === "sandbox" ||
+      authentication.kind === "user-or-service-with-sandbox-fallback"
+        ? authentication.getSessionId(matchedRoute.match)
+        : null;
+
+    if (authentication.kind === "sandbox") {
+      authError = sandboxSessionId
+        ? await verifySandboxAuthSafely(request, env, sandboxSessionId, ctx)
+        : error("Unauthorized: Invalid session path", 401);
+    } else {
+      const authResult = await authenticate(request, env, ctx, {
+        webService:
+          authentication.kind === "web-service" || authentication.kind === "service"
+            ? "service"
+            : "user",
+      });
+
+      if (isAuthError(authResult)) {
+        // A service-credential attempt is terminal; only a request with no
+        // recognized credential may still be a sandbox-token call on a
+        // sandbox-accepting route.
+        authError = error(authResult.reason, authResult.status);
+
+        if (
+          authResult.failedScheme === "none" &&
+          authentication.kind === "user-or-service-with-sandbox-fallback" &&
+          sandboxSessionId
+        ) {
+          authError = await verifySandboxAuthSafely(request, env, sandboxSessionId, ctx);
         }
       } else {
-        // Not a sandbox auth route, return HMAC auth error
-        return withCorsAndTraceHeaders(hmacAuthError, ctx);
+        authError = null;
+        ctx.principal = authResult.principal;
+        ctx.authentication = authResult.authentication;
+        request = authResult.request;
       }
+    }
+
+    if (authError) {
+      if (ctx.principal) {
+        logPrincipal(ctx.principal, ctx, path);
+        logRequest(authError, ctx, method, path, startTime);
+      }
+      return withCorsAndTraceHeaders(withRouteCachePolicy(authError, matchedRoute.route), ctx);
+    }
+
+    if (ctx.principal) {
+      logPrincipal(ctx.principal, ctx, path);
     }
   }
 
-  const providerCheck = enforceImplementedScmProvider(path, env, ctx);
-  if (providerCheck) {
-    return providerCheck;
+  const authorizationResult = await enforceRouteAuthorization(
+    matchedRoute.route,
+    matchedRoute.match,
+    ctx
+  );
+  if (authorizationResult.kind !== "allowed") {
+    if (authorizationResult.kind === "denied") {
+      await auditRouteAuthorizationDecision({
+        ctx,
+        method,
+        path,
+        response: authorizationResult.response,
+        decision: authorizationResult.decision,
+      });
+    }
+    logRequest(authorizationResult.response, ctx, method, path, startTime);
+    return withCorsAndTraceHeaders(
+      withRouteCachePolicy(authorizationResult.response, matchedRoute.route),
+      ctx
+    );
   }
 
-  // Find matching route
-  for (const route of routes) {
-    if (route.method !== method) continue;
+  const providerCheck = enforceImplementedScmProvider(matchedRoute.route, path, env, ctx);
+  if (providerCheck) {
+    return withRouteCachePolicy(providerCheck, matchedRoute.route);
+  }
 
-    const match = path.match(route.pattern);
-    if (match) {
-      let response: Response;
-      let outcome: "success" | "error";
-      try {
-        response = await route.handler(request, instrumentedEnv, match, ctx);
-        outcome = response.status >= 500 ? "error" : "success";
-      } catch (e) {
-        const durationMs = Date.now() - startTime;
-        logger.error("http.request", {
-          event: "http.request",
-          request_id: ctx.request_id,
-          trace_id: ctx.trace_id,
-          http_method: method,
-          http_path: path,
-          http_status: 500,
-          duration_ms: durationMs,
-          outcome: "error",
-          error: e instanceof Error ? e : String(e),
-          ...ctx.metrics.summarize(),
-        });
-        return error("Internal server error", 500);
-      }
-
+  let response: Response;
+  try {
+    response = await matchedRoute.route.handler(request, env, matchedRoute.match, ctx);
+  } catch (e) {
+    if (e instanceof HttpError) {
+      response = error(e.message, e.status);
+    } else {
       const durationMs = Date.now() - startTime;
-      logger.info("http.request", {
+      logger.error("http.request", {
         event: "http.request",
         request_id: ctx.request_id,
         trace_id: ctx.trace_id,
         http_method: method,
         http_path: path,
-        http_status: response.status,
+        http_status: 500,
         duration_ms: durationMs,
-        outcome,
+        outcome: "error",
+        error: e instanceof Error ? e : String(e),
         ...ctx.metrics.summarize(),
       });
-
-      return withCorsAndTraceHeaders(response, ctx);
-    }
-  }
-
-  return error("Not found", 404);
-}
-
-// Session handlers
-
-async function handleListSessions(
-  request: Request,
-  env: Env,
-  _match: RegExpMatchArray,
-  _ctx: RequestContext
-): Promise<Response> {
-  const url = new URL(request.url);
-  const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
-  const offset = parseInt(url.searchParams.get("offset") || "0");
-  const statusParam = url.searchParams.get("status");
-  const excludeStatusParam = url.searchParams.get("excludeStatus");
-  const status = parseSessionStatus(statusParam);
-  const excludeStatus = parseSessionStatus(excludeStatusParam);
-
-  if (statusParam && !status) {
-    return error("Invalid status", 400);
-  }
-
-  if (excludeStatusParam && !excludeStatus) {
-    return error("Invalid excludeStatus", 400);
-  }
-
-  const store = new SessionIndexStore(env.DB);
-  const result = await store.list({ status, excludeStatus, limit, offset });
-
-  return json({
-    sessions: result.sessions,
-    total: result.total,
-    hasMore: result.hasMore,
-  });
-}
-
-/**
- * Derives a ProviderIdentity from spawnSource and the request body.
- * For GitHub-based callers (web + github-bot), reuses existing scm* fields.
- * For Slack/Linear bots, uses the actor* fields.
- *
- * Returns null when the caller hasn't supplied the required provider-specific
- * ID (scmUserId for GitHub, actorUserId for Slack/Linear). This is expected
- * during the phased rollout: Phase 2 wires this plumbing, Phase 4 updates
- * each bot to send identity fields. Until then, bot sessions get user_id = NULL.
- */
-function resolveProviderIdentity(
-  spawnSource: SpawnSource,
-  body: {
-    scmUserId?: string;
-    scmLogin?: string;
-    scmName?: string;
-    scmEmail?: string;
-    scmAvatarUrl?: string;
-    actorUserId?: string;
-    actorDisplayName?: string;
-    actorEmail?: string;
-    actorAvatarUrl?: string;
-  }
-): ProviderIdentity | null {
-  switch (spawnSource) {
-    case "user":
-    case "github-bot":
-      return body.scmUserId
-        ? {
-            provider: "github",
-            providerUserId: body.scmUserId,
-            providerLogin: body.scmLogin,
-            providerEmail: body.scmEmail,
-            displayName: body.scmName || body.scmLogin,
-            avatarUrl: body.scmAvatarUrl,
-          }
-        : null;
-
-    case "slack-bot":
-      return body.actorUserId
-        ? {
-            provider: "slack",
-            providerUserId: body.actorUserId,
-            providerEmail: body.actorEmail,
-            displayName: body.actorDisplayName,
-            avatarUrl: body.actorAvatarUrl,
-          }
-        : null;
-
-    case "linear-bot":
-      return body.actorUserId
-        ? {
-            provider: "linear",
-            providerUserId: body.actorUserId,
-            providerEmail: body.actorEmail,
-            displayName: body.actorDisplayName,
-          }
-        : null;
-
-    default:
-      return null;
-  }
-}
-
-/**
- * Parse a bot-format authorId into provider + providerUserId.
- * Returns null for web client authorIds (plain user IDs without a prefix).
- */
-export function parseAuthorId(
-  authorId: string
-): { provider: string; providerUserId: string } | null {
-  const match = authorId.match(/^(github|slack|linear):(.+)$/);
-  if (!match) return null;
-  return { provider: match[1], providerUserId: match[2] };
-}
-
-/**
- * Construct a canonical userId from the bot's identity fields, matching the
- * format each bot uses for prompt `authorId`. This ensures the owner
- * participant created at init is findable when the bot later sends a prompt.
- */
-export function deriveUserId(body: {
-  userId?: string;
-  spawnSource?: SpawnSource;
-  scmUserId?: string;
-  actorUserId?: string;
-}): string {
-  switch (body.spawnSource) {
-    case "github-bot":
-      return body.scmUserId ? `github:${body.scmUserId}` : "anonymous";
-    case "slack-bot":
-      return body.actorUserId ? `slack:${body.actorUserId}` : "anonymous";
-    case "linear-bot":
-      return body.actorUserId ? `linear:${body.actorUserId}` : "anonymous";
-    default:
-      return body.userId || "anonymous";
-  }
-}
-
-interface GitHubEnrichment {
-  scmUserId: string;
-  scmLogin?: string;
-  displayName?: string;
-  email?: string;
-  accessTokenEncrypted?: string;
-  refreshTokenEncrypted?: string;
-  tokenExpiresAt?: number;
-}
-
-/**
- * Given a resolved D1 user, find their linked GitHub identity and return
- * enrichment data (display name, email, OAuth tokens). Returns null if no
- * GitHub identity is linked. Parallelizes independent D1 lookups.
- */
-async function resolveGitHubEnrichment(
-  env: Env,
-  userStore: UserStore,
-  userId: string
-): Promise<GitHubEnrichment | null> {
-  const identities = await userStore.getIdentitiesForUser(userId);
-  const githubIdentity = identities.find((i) => i.provider === "github");
-  if (!githubIdentity) return null;
-
-  const [user, tokens] = await Promise.all([
-    userStore.getUserById(userId),
-    env.TOKEN_ENCRYPTION_KEY
-      ? new UserScmTokenStore(env.DB, env.TOKEN_ENCRYPTION_KEY).getEncryptedTokens(
-          githubIdentity.providerUserId
-        )
-      : null,
-  ]);
-
-  const email =
-    githubIdentity.providerEmail ??
-    (githubIdentity.providerLogin
-      ? `${githubIdentity.providerUserId}+${githubIdentity.providerLogin}@users.noreply.github.com`
-      : undefined);
-
-  return {
-    scmUserId: githubIdentity.providerUserId,
-    scmLogin: githubIdentity.providerLogin ?? undefined,
-    displayName: user?.displayName ?? githubIdentity.providerLogin ?? undefined,
-    email,
-    accessTokenEncrypted: tokens?.accessTokenEncrypted,
-    refreshTokenEncrypted: tokens?.refreshTokenEncrypted,
-    tokenExpiresAt: tokens?.expiresAt,
-  };
-}
-
-async function handleCreateSession(
-  request: Request,
-  env: Env,
-  _match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const body = (await request.json()) as CreateSessionRequest & {
-    scmToken?: string;
-    scmRefreshToken?: string;
-    scmTokenExpiresAt?: number;
-    scmUserId?: string;
-    userId?: string;
-    scmLogin?: string;
-    scmName?: string;
-    scmEmail?: string;
-    spawnSource?: SpawnSource;
-    actorUserId?: string;
-    actorDisplayName?: string;
-    actorEmail?: string;
-    actorAvatarUrl?: string;
-  };
-
-  if (!body.repoOwner || !body.repoName) {
-    return error("repoOwner and repoName are required");
-  }
-
-  // Validate branch name if provided (defense in depth)
-  if (body.branch && !/^[\w.\-/]+$/.test(body.branch)) {
-    return error("Invalid branch name");
-  }
-
-  // Normalize repo identifiers to lowercase for consistent storage
-  const repoOwner = body.repoOwner.toLowerCase();
-  const repoName = body.repoName.toLowerCase();
-
-  const resolved = await resolveRepoOrError(env, repoOwner, repoName, ctx, logger);
-  if (resolved instanceof Response) return resolved;
-
-  const { repoId, defaultBranch } = resolved;
-
-  const userId = deriveUserId(body);
-
-  // Resolve canonical user model ID (for D1 session index).
-  // Best-effort: if resolution fails, the session is created without a user_id.
-  const userStore = new UserStore(env.DB);
-  let resolvedUserId: string | null = null;
-  const providerIdentity = resolveProviderIdentity(body.spawnSource ?? "user", body);
-  if (providerIdentity) {
-    try {
-      const resolvedUser = await userStore.resolveOrCreateUser(providerIdentity);
-      resolvedUserId = resolvedUser.id;
-    } catch (e) {
-      logger.warn("Failed to resolve user identity, session will have no user_id", {
-        error: e instanceof Error ? e : String(e),
-        provider: providerIdentity.provider,
-      });
-    }
-  }
-
-  let scmLogin = body.scmLogin;
-  let scmName = body.scmName;
-  let scmEmail = body.scmEmail;
-  const scmToken = body.scmToken;
-  const scmRefreshToken = body.scmRefreshToken;
-  let scmTokenExpiresAt = body.scmTokenExpiresAt;
-  let scmUserId = body.scmUserId;
-  let scmTokenEncrypted: string | null = null;
-  let scmRefreshTokenEncrypted: string | null = null;
-
-  if (env.TOKEN_ENCRYPTION_KEY) {
-    try {
-      ({
-        accessTokenEncrypted: scmTokenEncrypted,
-        refreshTokenEncrypted: scmRefreshTokenEncrypted,
-      } = await encryptTokenPair(scmToken, scmRefreshToken, env.TOKEN_ENCRYPTION_KEY));
-    } catch (e) {
-      logger.error("Failed to encrypt SCM token", {
-        error: e instanceof Error ? e.message : String(e),
-      });
-      return error("Failed to process SCM token", 500);
-    }
-  }
-
-  // Enrich owner participant with linked GitHub identity from D1.
-  // Fills in SCM fields the bot didn't provide (email, display name, OAuth tokens).
-  if (resolvedUserId) {
-    try {
-      const enrichment = await resolveGitHubEnrichment(env, userStore, resolvedUserId);
-      if (enrichment) {
-        scmUserId ??= enrichment.scmUserId;
-        scmLogin ??= enrichment.scmLogin;
-        scmName ??= enrichment.displayName;
-        scmEmail ??= enrichment.email;
-        if (!scmTokenEncrypted) {
-          scmTokenEncrypted = enrichment.accessTokenEncrypted ?? null;
-          scmRefreshTokenEncrypted = enrichment.refreshTokenEncrypted ?? null;
-          scmTokenExpiresAt = enrichment.tokenExpiresAt;
-        }
+      response = error("Internal server error", 500);
+      if (shouldAuditAllowedDecision(authorizationResult.decision)) {
+        await auditRouteAuthorizationDecision({
+          ctx,
+          method,
+          path,
+          response,
+          decision: authorizationResult.decision,
+        });
       }
-    } catch (e) {
-      logger.warn("Failed to enrich session with GitHub identity", {
-        error: e instanceof Error ? e : String(e),
-      });
+      return withCorsAndTraceHeaders(withRouteCachePolicy(response, matchedRoute.route), ctx);
     }
   }
 
-  // Generate session ID
-  const sessionId = generateId();
+  logRequest(response, ctx, method, path, startTime);
 
-  // Get Durable Object
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  // Validate model and reasoning effort once for both DO init and D1 index
-  const model = getValidModelOrDefault(body.model);
-  const reasoningEffort =
-    body.reasoningEffort && isValidReasoningEffort(model, body.reasoningEffort)
-      ? body.reasoningEffort
-      : null;
-
-  try {
-    const credentialError = await validateModelCredentialsForRepo(env, model, {
-      repoId,
-      repoOwner,
-      repoName,
+  if (shouldAuditAllowedDecision(authorizationResult.decision)) {
+    await auditRouteAuthorizationDecision({
+      ctx,
+      method,
+      path,
+      response,
+      decision: authorizationResult.decision,
     });
-    if (credentialError) {
-      return error(credentialError, 422);
-    }
-  } catch (e) {
-    logger.error("Failed to validate model credentials", {
-      error: e instanceof Error ? e.message : String(e),
-      repo_owner: repoOwner,
-      repo_name: repoName,
-      model,
-    });
-    return error("Failed to validate model credentials", 500);
   }
 
-  // Resolve code-server integration setting and sandbox settings for this repo
-  const [codeServerEnabled, sandboxSettings] = await Promise.all([
-    resolveCodeServerEnabled(env.DB, repoOwner, repoName),
-    resolveSandboxSettings(env.DB, repoOwner, repoName),
-  ]);
-
-  // Store session in D1 before initializing the SessionDO. SessionDO init starts
-  // sandbox warming, so D1 failures must fail before any sandbox can be spawned.
-  const now = Date.now();
-  const sessionStore = new SessionIndexStore(env.DB);
-  await sessionStore.create({
-    id: sessionId,
-    title: body.title || null,
-    repoOwner,
-    repoName,
-    model,
-    reasoningEffort,
-    baseBranch: body.branch || defaultBranch || "main",
-    branchName: null,
-    status: "created",
-    creationSource: body.creationSource ?? "web",
-    spawnSource: body.spawnSource,
-    scmLogin: scmLogin || null,
-    userId: resolvedUserId,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  // Initialize session with user info and optional encrypted token
-  const initResponse = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.init),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionName: sessionId, // Pass the session name for WebSocket routing
-          repoOwner,
-          repoName,
-          repoId,
-          defaultBranch,
-          branch: body.branch,
-          title: body.title,
-          model,
-          reasoningEffort,
-          userId,
-          scmLogin,
-          scmName,
-          scmEmail,
-          scmTokenEncrypted,
-          scmRefreshTokenEncrypted,
-          scmTokenExpiresAt,
-          scmUserId,
-          codeServerEnabled,
-          sandboxSettings,
-          spawnSource: body.spawnSource,
-        }),
-      },
-      ctx
-    )
-  );
-
-  if (!initResponse.ok) {
-    return error("Failed to create session", 500);
-  }
-
-  // Populate D1 with the user's SCM tokens (non-blocking) so centralized refresh works
-  if (scmUserId && scmToken && scmRefreshToken && env.TOKEN_ENCRYPTION_KEY) {
-    ctx.executionCtx?.waitUntil(
-      new UserScmTokenStore(env.DB, env.TOKEN_ENCRYPTION_KEY)
-        .upsertTokens(
-          scmUserId,
-          scmToken,
-          scmRefreshToken,
-          scmTokenExpiresAt ?? Date.now() + DEFAULT_TOKEN_LIFETIME_MS,
-          resolvedUserId
-        )
-        .catch((e) =>
-          logger.error("Failed to write tokens to D1", {
-            error: e instanceof Error ? e : String(e),
-          })
-        )
-    );
-  }
-
-  const result: CreateSessionResponse = {
-    sessionId,
-    status: "created",
-  };
-
-  return json(result, 201);
-}
-
-async function handleGetSession(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const response = await stub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.state), undefined, ctx)
-  );
-
-  if (!response.ok) {
-    return error("Session not found", 404);
-  }
-
-  return response;
-}
-
-async function handleDeleteSession(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  _ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  // Delete from D1 index
-  const sessionStore = new SessionIndexStore(env.DB);
-  await sessionStore.delete(sessionId);
-
-  // Note: Durable Object data will be garbage collected by Cloudflare
-  // when no longer referenced. We could also call a cleanup method on the DO.
-
-  return json({ status: "deleted", sessionId });
-}
-
-async function handleSessionAssociatedPr(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const stub = getSessionStub(env, match);
-  if (!stub) return error("Session ID required");
-
-  return stub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.associatedPr), undefined, ctx)
-  );
-}
-
-async function handleSessionPrompt(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  const body = (await request.json()) as {
-    content: string;
-    authorId?: string;
-    source?: string;
-    model?: string;
-    reasoningEffort?: string;
-    attachments?: Array<{ type: string; name: string; url?: string }>;
-    callbackContext?: CallbackContext;
-  };
-
-  if (!body.content) {
-    return error("content is required");
-  }
-
-  const authorId = body.authorId || "anonymous";
-
-  // Enrich bot-originated prompts with linked GitHub identity from D1.
-  // Web client authorIds have no provider prefix — parseAuthorId returns null, skipping this.
-  let enrichment: GitHubEnrichment | undefined;
-  const parsed = parseAuthorId(authorId);
-  if (parsed) {
-    try {
-      const userStore = new UserStore(env.DB);
-      const identity = await userStore.getIdentity(parsed.provider, parsed.providerUserId);
-      if (identity) {
-        enrichment = (await resolveGitHubEnrichment(env, userStore, identity.userId)) ?? undefined;
-      }
-    } catch (e) {
-      logger.warn("Failed to enrich prompt with GitHub identity", {
-        error: e instanceof Error ? e : String(e),
-        authorId,
-      });
-    }
-  }
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const response = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.prompt),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: body.content,
-          authorId,
-          source: body.source || "web",
-          model: body.model,
-          reasoningEffort: body.reasoningEffort,
-          attachments: body.attachments,
-          callbackContext: body.callbackContext,
-          authorDisplayName: enrichment?.displayName,
-          authorEmail: enrichment?.email,
-          authorLogin: enrichment?.scmLogin,
-          scmUserId: enrichment?.scmUserId,
-          scmAccessTokenEncrypted: enrichment?.accessTokenEncrypted,
-          scmRefreshTokenEncrypted: enrichment?.refreshTokenEncrypted,
-          scmTokenExpiresAt: enrichment?.tokenExpiresAt,
-        }),
-      },
-      ctx
-    )
-  );
-
-  // Background: update D1 timestamp so session bubbles to top of sidebar
-  const store = new SessionIndexStore(env.DB);
-  ctx.executionCtx?.waitUntil(
-    store.touchUpdatedAt(sessionId).catch((error) => {
-      logger.error("session_index.touch_updated_at.background_error", {
-        session_id: sessionId,
-        trace_id: ctx.trace_id,
-        request_id: ctx.request_id,
-        error,
-      });
-    })
-  );
-
-  return response;
-}
-
-async function handleSessionStop(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const stub = getSessionStub(env, match);
-  if (!stub) return error("Session ID required");
-
-  return stub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.stop), { method: "POST" }, ctx)
-  );
-}
-
-async function handleSessionEvents(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const stub = getSessionStub(env, match);
-  if (!stub) return error("Session ID required");
-
-  const url = new URL(request.url);
-  return stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.events, url.search),
-      undefined,
-      ctx
-    )
-  );
-}
-
-async function handleSessionArtifacts(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const stub = getSessionStub(env, match);
-  if (!stub) return error("Session ID required");
-
-  return stub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.artifacts), undefined, ctx)
-  );
-}
-
-function getRequiredFormString(value: MultipartFieldValue | null, name: string): string | Response {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    return error(`${name} is required`, 400);
-  }
-
-  return value.trim();
-}
-
-function getOptionalFormString(value: MultipartFieldValue | null): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-async function listSessionArtifactsFromDo(
-  stub: DurableObjectStub,
-  ctx: RequestContext
-): Promise<ArtifactResponse[] | Response> {
-  const response = await stub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.artifacts), undefined, ctx)
-  );
-  if (!response.ok) {
-    return response.status === 404
-      ? error("Session not found", 404)
-      : error("Failed to list session artifacts", 500);
-  }
-
-  const data = (await response.json()) as { artifacts: ArtifactResponse[] };
-  return data.artifacts;
-}
-
-async function getSessionArtifactFromDo(
-  stub: DurableObjectStub,
-  artifactId: string,
-  ctx: RequestContext
-): Promise<ArtifactResponse | null | Response> {
-  const response = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(
-        SessionInternalPaths.artifacts,
-        `?artifactId=${encodeURIComponent(artifactId)}`
-      ),
-      undefined,
-      ctx
-    )
-  );
-  if (!response.ok) {
-    return response.status === 404
-      ? error("Session not found", 404)
-      : error("Failed to fetch session artifact", 500);
-  }
-
-  const data = (await response.json()) as { artifact: ArtifactResponse | null };
-  return data.artifact;
-}
-
-function getScreenshotMimeType(
-  artifact: Pick<ArtifactResponse, "metadata">
-): "image/png" | "image/jpeg" | "image/webp" | null {
-  const mimeType = artifact.metadata?.mimeType;
-  return typeof mimeType === "string" && isSupportedScreenshotMimeType(mimeType) ? mimeType : null;
-}
-
-function getContentTypeFromHeaders(
-  headers: Headers
-): "image/png" | "image/jpeg" | "image/webp" | null {
-  const contentType = headers.get("Content-Type");
-  return contentType && isSupportedScreenshotMimeType(contentType) ? contentType : null;
-}
-
-async function handleMediaUpload(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  let formData: FormData;
-  try {
-    formData = await request.formData();
-  } catch {
-    return error("Invalid multipart form data", 400);
-  }
-
-  const fileEntry = formData.get("file");
-  if (!isMultipartFile(fileEntry)) {
-    return error("file is required", 400);
-  }
-
-  const artifactTypeField = getRequiredFormString(formData.get("artifactType"), "artifactType");
-  if (artifactTypeField instanceof Response) return artifactTypeField;
-  if (artifactTypeField !== "screenshot") {
-    return error("Only screenshot uploads are supported", 400);
-  }
-
-  if (fileEntry.size <= 0) {
-    return error("Uploaded file is empty", 400);
-  }
-
-  if (fileEntry.size > SCREENSHOT_MAX_BYTES) {
-    return error(`Screenshot uploads must be ${SCREENSHOT_MAX_BYTES} bytes or smaller`, 400);
-  }
-
-  if (
-    fileEntry.type &&
-    fileEntry.type !== "image/png" &&
-    fileEntry.type !== "image/jpeg" &&
-    fileEntry.type !== "image/webp"
-  ) {
-    return error("Unsupported screenshot MIME type", 400);
-  }
-
-  let fullPage: boolean | undefined;
-  let annotated: boolean | undefined;
-  let viewport: { width: number; height: number } | undefined;
-  try {
-    fullPage = parseOptionalBoolean(formData.get("fullPage"));
-    annotated = parseOptionalBoolean(formData.get("annotated"));
-    viewport = parseOptionalViewport(formData.get("viewport"));
-  } catch (fieldError) {
-    return error(
-      fieldError instanceof Error ? fieldError.message : "Invalid screenshot metadata",
-      400
-    );
-  }
-
-  const caption = getOptionalFormString(formData.get("caption"));
-  const sourceUrl = getOptionalFormString(formData.get("sourceUrl"));
-  if (sourceUrl) {
-    try {
-      new URL(sourceUrl);
-    } catch {
-      return error("sourceUrl must be a valid URL", 400);
-    }
-  }
-
-  const bytes = new Uint8Array(await fileEntry.arrayBuffer());
-  const detectedFileType = detectScreenshotFileType(bytes);
-  if (!detectedFileType) {
-    return error("Uploaded file is not a supported screenshot format", 400);
-  }
-
-  if (fileEntry.type && fileEntry.type !== detectedFileType.mimeType) {
-    return error("Uploaded file MIME type does not match file contents", 400);
-  }
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-  const artifactsResult = await listSessionArtifactsFromDo(stub, ctx);
-  if (artifactsResult instanceof Response) return artifactsResult;
-
-  const screenshotCount = artifactsResult.filter(
-    (artifact) => artifact.type === "screenshot"
-  ).length;
-  if (screenshotCount >= SCREENSHOT_UPLOAD_LIMIT_PER_SESSION) {
-    return error(
-      `Session screenshot limit of ${SCREENSHOT_UPLOAD_LIMIT_PER_SESSION} uploads exceeded`,
-      429
-    );
-  }
-
-  const artifactId = generateId();
-  const objectKey = buildMediaObjectKey(sessionId, artifactId, detectedFileType.extension);
-  const metadata: ScreenshotArtifactMetadata = {
-    objectKey,
-    mimeType: detectedFileType.mimeType,
-    sizeBytes: bytes.byteLength,
-    ...(viewport ? { viewport } : {}),
-    ...(sourceUrl ? { sourceUrl } : {}),
-    ...(fullPage !== undefined ? { fullPage } : {}),
-    ...(annotated !== undefined ? { annotated } : {}),
-    ...(caption ? { caption } : {}),
-  };
-
-  await env.MEDIA_BUCKET.put(objectKey, bytes, {
-    httpMetadata: { contentType: detectedFileType.mimeType },
-  });
-
-  const createArtifactResponse = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.createMediaArtifact),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          artifactId,
-          artifactType: "screenshot",
-          objectKey,
-          metadata,
-        }),
-      },
-      ctx
-    )
-  );
-
-  if (!createArtifactResponse.ok) {
-    try {
-      await env.MEDIA_BUCKET.delete(objectKey);
-    } catch (cleanupError) {
-      logger.error("media.upload.cleanup_failed", {
-        session_id: sessionId,
-        artifact_id: artifactId,
-        object_key: objectKey,
-        request_id: ctx.request_id,
-        trace_id: ctx.trace_id,
-        error: cleanupError instanceof Error ? cleanupError : String(cleanupError),
-      });
-    }
-
-    const doErrorText = await createArtifactResponse.text();
-    let doErrorMessage = "Failed to persist media artifact";
-    if (doErrorText) {
-      try {
-        const parsedError = JSON.parse(doErrorText) as { error?: unknown };
-        if (typeof parsedError.error === "string" && parsedError.error.trim()) {
-          doErrorMessage = parsedError.error;
-        } else {
-          doErrorMessage = doErrorText;
-        }
-      } catch {
-        doErrorMessage = doErrorText;
-      }
-    }
-
-    const logData = {
-      session_id: sessionId,
-      artifact_id: artifactId,
-      request_id: ctx.request_id,
-      trace_id: ctx.trace_id,
-      error: doErrorMessage,
-      http_status: createArtifactResponse.status,
-    };
-
-    if (createArtifactResponse.status >= 500) {
-      logger.error("media.upload.create_artifact_failed", logData);
-      return error("Failed to persist media artifact", 500);
-    }
-
-    logger.warn("media.upload.create_artifact_failed", logData);
-    return error(doErrorMessage, createArtifactResponse.status);
-  }
-
-  return json({ artifactId, objectKey }, 201);
-}
-
-async function handleMediaGet(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  const artifactId = match.groups?.artifactId;
-  if (!sessionId || !artifactId) {
-    return error("Session ID and artifact ID are required", 400);
-  }
-  if (!/^[A-Za-z0-9-]+$/.test(artifactId)) {
-    return error("Invalid artifact ID", 400);
-  }
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-  const artifact = await getSessionArtifactFromDo(stub, artifactId, ctx);
-  if (artifact instanceof Response) return artifact;
-  if (!artifact || artifact.type !== "screenshot" || !artifact.url) {
-    return error("Media artifact not found", 404);
-  }
-
-  const object = await env.MEDIA_BUCKET.get(artifact.url);
-  if (!object) {
-    logger.warn("media.stream.object_missing", {
-      session_id: sessionId,
-      artifact_id: artifactId,
-      object_key: artifact.url,
-      request_id: ctx.request_id,
-      trace_id: ctx.trace_id,
-    });
-    return error("Media artifact not found", 404);
-  }
-
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  const contentType = getContentTypeFromHeaders(headers) ?? getScreenshotMimeType(artifact);
-  if (!contentType) {
-    logger.error("media.stream.invalid_metadata", {
-      session_id: sessionId,
-      artifact_id: artifactId,
-      object_key: artifact.url,
-      request_id: ctx.request_id,
-      trace_id: ctx.trace_id,
-    });
-    return error("Media artifact is invalid", 500);
-  }
-
-  headers.set("Content-Type", contentType);
-  headers.set("ETag", object.httpEtag);
-  headers.set("Content-Length", String(object.size));
-
-  return new Response(object.body, { headers });
-}
-
-async function handleSessionParticipants(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const stub = getSessionStub(env, match);
-  if (!stub) return error("Session ID required");
-
-  return stub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.participants), undefined, ctx)
-  );
-}
-
-async function handleAddParticipant(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  const body = await request.json();
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const response = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.participants),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-      ctx
-    )
-  );
-
-  return response;
-}
-
-async function handleSessionMessages(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const stub = getSessionStub(env, match);
-  if (!stub) return error("Session ID required");
-
-  const url = new URL(request.url);
-  return stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.messages, url.search),
-      undefined,
-      ctx
-    )
-  );
-}
-
-async function handleCreatePR(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  const body = (await request.json()) as {
-    title: string;
-    body: string;
-    baseBranch?: string;
-    headBranch?: string;
-  };
-
-  if (
-    typeof body.title !== "string" ||
-    typeof body.body !== "string" ||
-    body.title.trim().length === 0 ||
-    body.body.trim().length === 0
-  ) {
-    return error("title and body are required");
-  }
-
-  if (body.baseBranch != null && typeof body.baseBranch !== "string") {
-    return error("baseBranch must be a string");
-  }
-
-  if (body.headBranch != null && typeof body.headBranch !== "string") {
-    return error("headBranch must be a string");
-  }
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const response = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.createPr),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: body.title,
-          body: body.body,
-          baseBranch: body.baseBranch,
-          headBranch: body.headBranch,
-        }),
-      },
-      ctx
-    )
-  );
-
-  return response;
-}
-
-async function handleOpenAITokenRefresh(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const stub = getSessionStub(env, match);
-  if (!stub) return error("Session ID required");
-
-  return stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.openaiTokenRefresh),
-      { method: "POST" },
-      ctx
-    )
-  );
-}
-
-async function handleSessionWsToken(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  const body = (await request.json()) as {
-    userId: string;
-    scmUserId?: string;
-    scmLogin?: string;
-    scmName?: string;
-    scmEmail?: string;
-    scmToken?: string;
-    scmTokenExpiresAt?: number;
-    scmRefreshToken?: string;
-  };
-
-  if (!body.userId) {
-    return error("userId is required");
-  }
-
-  const scmUserId = body.scmUserId;
-  const scmLogin = body.scmLogin;
-  const scmName = body.scmName;
-  const scmEmail = body.scmEmail;
-  const scmToken = body.scmToken;
-  const scmTokenExpiresAt = body.scmTokenExpiresAt;
-  const scmRefreshToken = body.scmRefreshToken;
-
-  // Encrypt the SCM tokens if provided
-  let scmTokenEncrypted: string | null = null;
-  let scmRefreshTokenEncrypted: string | null = null;
-
-  if (env.TOKEN_ENCRYPTION_KEY) {
-    try {
-      ({
-        accessTokenEncrypted: scmTokenEncrypted,
-        refreshTokenEncrypted: scmRefreshTokenEncrypted,
-      } = await ctx.metrics.time("encrypt_tokens", () =>
-        encryptTokenPair(scmToken, scmRefreshToken, env.TOKEN_ENCRYPTION_KEY!)
-      ));
-    } catch (e) {
-      logger.error("Failed to encrypt SCM tokens", {
-        error: e instanceof Error ? e.message : String(e),
-      });
-      return error("Failed to process SCM tokens", 500);
-    }
-  }
-
-  // Populate D1 with the user's SCM tokens (non-blocking) so centralized refresh works
-  if (scmUserId && scmToken && scmRefreshToken && env.TOKEN_ENCRYPTION_KEY) {
-    ctx.executionCtx?.waitUntil(
-      new UserScmTokenStore(env.DB, env.TOKEN_ENCRYPTION_KEY)
-        .upsertTokens(
-          scmUserId,
-          scmToken,
-          scmRefreshToken,
-          scmTokenExpiresAt ?? Date.now() + DEFAULT_TOKEN_LIFETIME_MS
-        )
-        .catch((e) =>
-          logger.error("Failed to write tokens to D1", {
-            error: e instanceof Error ? e : String(e),
-          })
-        )
-    );
-  }
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const response = await ctx.metrics.time("do_fetch", () =>
-    stub.fetch(
-      internalRequest(
-        buildSessionInternalUrl(SessionInternalPaths.wsToken),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: body.userId,
-            scmUserId,
-            scmLogin,
-            scmName,
-            scmEmail,
-            scmTokenEncrypted,
-            scmRefreshTokenEncrypted,
-            scmTokenExpiresAt,
-          }),
-        },
-        ctx
-      )
-    )
-  );
-
-  return response;
-}
-
-async function handleUpdateSessionTitle(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  let userId: string | undefined;
-  let title: string | undefined;
-
-  try {
-    const body = (await request.json()) as { userId?: string; title?: string };
-    userId = body.userId;
-    title = body.title;
-  } catch (_error) {
-    // Body parsing failed, continue without userId/title
-    userId = undefined;
-    title = undefined;
-  }
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const response = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.updateTitle),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, title }),
-      },
-      ctx
-    )
-  );
-
-  return response;
-}
-
-async function handleArchiveSession(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  // Parse userId from request body for authorization
-  let userId: string | undefined;
-  try {
-    const body = (await request.json()) as { userId?: string };
-    userId = body.userId;
-  } catch {
-    // Body parsing failed, continue without userId
-  }
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const response = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.archive),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
-      },
-      ctx
-    )
-  );
-
-  return response;
-}
-
-async function handleUnarchiveSession(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const sessionId = match.groups?.id;
-  if (!sessionId) return error("Session ID required");
-
-  // Parse userId from request body for authorization
-  let userId: string | undefined;
-  try {
-    const body = (await request.json()) as { userId?: string };
-    userId = body.userId;
-  } catch {
-    // Body parsing failed, continue without userId
-  }
-
-  const doId = env.SESSION.idFromName(sessionId);
-  const stub = env.SESSION.get(doId);
-
-  const response = await stub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.unarchive),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
-      },
-      ctx
-    )
-  );
-
-  return response;
-}
-
-// Child session handlers
-
-async function handleSpawnChild(
-  request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const parentId = match.groups?.id;
-  if (!parentId) return error("Parent session ID required");
-
-  const body = (await request.json()) as SpawnChildSessionRequest;
-
-  if (!body.title || !body.prompt) {
-    return error("title and prompt are required");
-  }
-
-  const sessionStore = new SessionIndexStore(env.DB);
-
-  // Guardrail: depth
-  const parentDepth = await sessionStore.getSpawnDepth(parentId);
-  if (parentDepth >= MAX_SPAWN_DEPTH) {
-    return error(`Maximum spawn depth (${MAX_SPAWN_DEPTH}) exceeded`, 403);
-  }
-
-  // Guardrail: concurrent children
-  const activeCount = await sessionStore.countActiveChildren(parentId);
-  if (activeCount >= MAX_CONCURRENT_CHILDREN) {
-    return error(`Maximum concurrent children (${MAX_CONCURRENT_CHILDREN}) reached`, 429);
-  }
-
-  // Guardrail: total children
-  const totalCount = await sessionStore.countTotalChildren(parentId);
-  if (totalCount >= MAX_TOTAL_CHILDREN) {
-    return error(`Maximum total children (${MAX_TOTAL_CHILDREN}) reached`, 429);
-  }
-
-  // Read parent's canonical user_id from D1 for inheritance
-  const parentSession = await sessionStore.get(parentId);
-  const parentUserId = parentSession?.userId ?? null;
-
-  // Get parent context from parent DO
-  const parentDoId = env.SESSION.idFromName(parentId);
-  const parentStub = env.SESSION.get(parentDoId);
-
-  const spawnContextRes = await parentStub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.spawnContext), undefined, ctx)
-  );
-
-  if (!spawnContextRes.ok) {
-    return error("Failed to get parent session context", 500);
-  }
-
-  const spawnContext = (await spawnContextRes.json()) as SpawnContext;
-
-  // Guardrail: same-repo — reject if either field doesn't match parent
-  if (
-    (body.repoOwner && body.repoOwner.toLowerCase() !== spawnContext.repoOwner.toLowerCase()) ||
-    (body.repoName && body.repoName.toLowerCase() !== spawnContext.repoName.toLowerCase())
-  ) {
-    return error("Child sessions must use the same repository as the parent", 403);
-  }
-
-  // Create child session (same pattern as handleCreateSession)
-  const childId = generateId();
-  const childDoId = env.SESSION.idFromName(childId);
-  const childStub = env.SESSION.get(childDoId);
-
-  // Validate explicit model from the agent; reject invalid names so the agent
-  // can self-correct instead of silently falling back to the default model.
-  const rawModel = body.model ?? spawnContext.model;
-  if (body.model !== undefined && !isValidModel(body.model)) {
-    return error(`Invalid model "${body.model}". Valid models: ${VALID_MODELS.join(", ")}`, 400);
-  }
-  const model = getValidModelOrDefault(rawModel);
-  const reasoningEffort =
-    body.reasoningEffort && isValidReasoningEffort(model, body.reasoningEffort)
-      ? body.reasoningEffort
-      : spawnContext.reasoningEffort;
-
-  try {
-    const credentialError = await validateModelCredentialsForRepo(env, model, {
-      repoId: spawnContext.repoId,
-      repoOwner: spawnContext.repoOwner,
-      repoName: spawnContext.repoName,
-    });
-    if (credentialError) {
-      return error(credentialError, 422);
-    }
-  } catch (e) {
-    logger.error("Failed to validate child session model credentials", {
-      error: e instanceof Error ? e.message : String(e),
-      parent_id: parentId,
-      repo_owner: spawnContext.repoOwner,
-      repo_name: spawnContext.repoName,
-      model,
-    });
-    return error("Failed to validate model credentials", 500);
-  }
-
-  const childDepth = parentDepth + 1;
-
-  logger.info("Spawning child session", {
-    event: "session.spawn_child",
-    parent_id: parentId,
-    child_id: childId,
-    child_depth: childDepth,
-    model,
-  });
-
-  // Resolve code-server integration setting and sandbox settings for child (same repo as parent)
-  const [childCodeServerEnabled, childSandboxSettings] = await Promise.all([
-    resolveCodeServerEnabled(env.DB, spawnContext.repoOwner, spawnContext.repoName),
-    resolveSandboxSettings(env.DB, spawnContext.repoOwner, spawnContext.repoName),
-  ]);
-
-  // Initialize child DO
-  const initResponse = await childStub.fetch(
-    internalRequest(
-      buildSessionInternalUrl(SessionInternalPaths.init),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionName: childId,
-          repoOwner: spawnContext.repoOwner,
-          repoName: spawnContext.repoName,
-          repoId: spawnContext.repoId,
-          title: body.title,
-          model,
-          reasoningEffort,
-          userId: spawnContext.owner.userId,
-          scmLogin: spawnContext.owner.scmLogin,
-          scmName: spawnContext.owner.scmName,
-          scmEmail: spawnContext.owner.scmEmail,
-          scmTokenEncrypted: spawnContext.owner.scmAccessTokenEncrypted,
-          scmRefreshTokenEncrypted: spawnContext.owner.scmRefreshTokenEncrypted,
-          scmTokenExpiresAt: spawnContext.owner.scmTokenExpiresAt,
-          scmUserId: spawnContext.owner.scmUserId,
-          branch: spawnContext.baseBranch ?? "main",
-          parentSessionId: parentId,
-          spawnSource: "agent",
-          creationSource: "agent",
-          spawnDepth: childDepth,
-          codeServerEnabled: childCodeServerEnabled,
-          sandboxSettings: childSandboxSettings,
-        }),
-      },
-      ctx
-    )
-  );
-
-  if (!initResponse.ok) {
-    return error("Failed to create child session", 500);
-  }
-
-  // Store in D1 index
-  const now = Date.now();
-  await sessionStore.create({
-    id: childId,
-    title: body.title,
-    repoOwner: spawnContext.repoOwner,
-    repoName: spawnContext.repoName,
-    model,
-    reasoningEffort,
-    baseBranch: spawnContext.baseBranch ?? "main",
-    branchName: null,
-    status: "created",
-    parentSessionId: parentId,
-    spawnSource: "agent",
-    creationSource: "agent",
-    spawnDepth: childDepth,
-    scmLogin: spawnContext.owner.scmLogin || null,
-    userId: parentUserId,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  // Enqueue the prompt on the child DO
-  let promptResponse: Response;
-  try {
-    promptResponse = await childStub.fetch(
-      internalRequest(
-        buildSessionInternalUrl(SessionInternalPaths.prompt),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: body.prompt,
-            authorId: spawnContext.owner.userId,
-            source: "agent",
-          }),
-        },
-        ctx
-      )
-    );
-  } catch (enqueueError) {
-    logger.error("Failed to enqueue initial prompt for child session", {
-      event: "session.spawn_child_prompt_enqueue_failed",
-      parent_id: parentId,
-      child_id: childId,
-      trace_id: ctx.trace_id,
-      request_id: ctx.request_id,
-      error: enqueueError instanceof Error ? enqueueError.message : String(enqueueError),
-    });
-    await sessionStore.updateStatus(childId, "failed");
-    return error("Failed to enqueue child session prompt", 500);
-  }
-
-  if (!promptResponse.ok) {
-    logger.error("Failed to enqueue initial prompt for child session", {
-      event: "session.spawn_child_prompt_enqueue_failed",
-      parent_id: parentId,
-      child_id: childId,
-      prompt_status: promptResponse.status,
-      trace_id: ctx.trace_id,
-      request_id: ctx.request_id,
-    });
-    await sessionStore.updateStatus(childId, "failed");
-    return error("Failed to enqueue child session prompt", 500);
-  }
-
-  // Notify parent session so connected clients can refresh child list
-  ctx.executionCtx?.waitUntil(
-    parentStub
-      .fetch(
-        internalRequest(
-          buildSessionInternalUrl(SessionInternalPaths.childSessionUpdate),
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              childSessionId: childId,
-              status: "created",
-              title: body.title,
-            }),
-          },
-          ctx
-        )
-      )
-      .catch((err) => {
-        logger.error("session.notify_parent_spawn.failed", { error: err });
-      })
-  );
-
-  return json({ sessionId: childId, status: "created" }, 201);
-}
-
-async function handleListChildren(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  _ctx: RequestContext
-): Promise<Response> {
-  const parentId = match.groups?.id;
-  if (!parentId) return error("Parent session ID required");
-
-  const sessionStore = new SessionIndexStore(env.DB);
-  const children = await sessionStore.listByParent(parentId);
-
-  return json({ children });
-}
-
-async function handleGetChild(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const parentId = match.groups?.id;
-  const childId = match.groups?.childId;
-  if (!parentId || !childId) return error("Parent and child session IDs required");
-
-  const sessionStore = new SessionIndexStore(env.DB);
-  const isChild = await sessionStore.isChildOf(childId, parentId);
-  if (!isChild) {
-    return error("Child session not found", 404);
-  }
-
-  // Fetch child summary from child DO
-  const childDoId = env.SESSION.idFromName(childId);
-  const childStub = env.SESSION.get(childDoId);
-
-  const response = await childStub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.childSummary), undefined, ctx)
-  );
-
-  return response;
-}
-
-async function handleCancelChild(
-  _request: Request,
-  env: Env,
-  match: RegExpMatchArray,
-  ctx: RequestContext
-): Promise<Response> {
-  const parentId = match.groups?.id;
-  const childId = match.groups?.childId;
-  if (!parentId || !childId) return error("Parent and child session IDs required");
-
-  const sessionStore = new SessionIndexStore(env.DB);
-  const isChild = await sessionStore.isChildOf(childId, parentId);
-  if (!isChild) {
-    return error("Child session not found", 404);
-  }
-
-  // Cancel via child DO
-  const childDoId = env.SESSION.idFromName(childId);
-  const childStub = env.SESSION.get(childDoId);
-
-  const response = await childStub.fetch(
-    internalRequest(buildSessionInternalUrl(SessionInternalPaths.cancel), { method: "POST" }, ctx)
-  );
-
-  return response;
+  return withCorsAndTraceHeaders(withRouteCachePolicy(response, matchedRoute.route), ctx);
 }

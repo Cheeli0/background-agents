@@ -1,0 +1,742 @@
+"use client";
+
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { SafeMarkdown } from "@/components/safe-markdown";
+import { ScreenshotArtifactCard } from "@/components/screenshot-artifact-card";
+import { SessionWorkGroup } from "@/components/session-work-group";
+import { TaskActivityItem } from "@/components/task-activity-item";
+import { TimelineRowContent } from "@/components/timeline-row-content";
+import { ToolCallGroup } from "@/components/tool-call-group";
+import { copyToClipboard } from "@/lib/format";
+import {
+  buildSessionTimelineItems,
+  isRenderableTimelineEvent,
+  toolCallKey,
+  type DirectTimelineEventType,
+  type FlatTimelineItem,
+  type RenderableTimelineEvent,
+  type TimelineItem,
+  type ToolCallEvent,
+} from "@/lib/timeline-items";
+import {
+  buildTimelineVirtualRows,
+  estimateTimelineRowSize,
+  TIMELINE_VIRTUALIZER_DEFAULTS,
+  type TimelineVirtualRow,
+} from "@/lib/timeline-virtual-rows";
+import type { Artifact, SandboxEvent } from "@/types/session";
+import type { SessionParticipantProfile } from "@open-inspect/shared/types/sessions";
+import { CheckIcon, CopyIcon, ErrorIcon } from "@/components/ui/icons";
+import { resolveParticipantDisplay } from "@/lib/participant-display";
+import { TerminalMessageReadObserver } from "./terminal-message-read-observer";
+import type { SessionReadAttemptDisposition } from "@/lib/session-read-state";
+import type { PromptQueueItem } from "@open-inspect/shared/types/server-messages";
+
+export function SessionTimeline({
+  events,
+  sessionId,
+  currentParticipantId,
+  participantProfiles,
+  isProcessing,
+  promptQueue = [],
+  loadingHistory,
+  showSkeleton,
+  onLoadOlder,
+  onOpenMedia,
+  terminalMessageReadObservationEnabled = false,
+  onMarkMessageRead,
+}: {
+  events: SandboxEvent[];
+  sessionId: string;
+  currentParticipantId: string | null;
+  participantProfiles: Record<string, SessionParticipantProfile>;
+  isProcessing: boolean;
+  promptQueue?: PromptQueueItem[];
+  loadingHistory: boolean;
+  showSkeleton: boolean;
+  onLoadOlder: () => void;
+  onOpenMedia: (artifactId: string) => void;
+  terminalMessageReadObservationEnabled?: boolean;
+  onMarkMessageRead?: (messageId: string) => Promise<SessionReadAttemptDisposition>;
+}) {
+  const pendingMessageIds = useMemo(
+    () =>
+      new Set(
+        promptQueue.filter((item) => item.status === "pending").map((item) => item.messageId)
+      ),
+    [promptQueue]
+  );
+  const timelineItems = useMemo(
+    () => buildSessionTimelineItems(events, pendingMessageIds),
+    [events, pendingMessageIds]
+  );
+  const [expandedToolGroups, setExpandedToolGroups] = useState<Set<string>>(new Set());
+  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
+  const [expandedWorkGroups, setExpandedWorkGroups] = useState<Set<string>>(new Set());
+  const [expandedTaskSections, setExpandedTaskSections] = useState<Set<string>>(new Set());
+  const latestTerminalMessageId = useMemo(() => {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.type === "execution_complete" && event.messageId) return event.messageId;
+    }
+    return null;
+  }, [events]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+  const hasScrolledRef = useRef(false);
+  const isNearBottomRef = useRef(true);
+  const virtualRows = useMemo(
+    () =>
+      buildTimelineVirtualRows({
+        items: timelineItems,
+        terminalMessageId: onMarkMessageRead ? latestTerminalMessageId : null,
+        loadingHistory,
+        isProcessing,
+      }),
+    [isProcessing, latestTerminalMessageId, loadingHistory, onMarkMessageRead, timelineItems]
+  );
+  const getVirtualRowKey = useCallback(
+    (index: number) => virtualRows[index]?.id ?? index,
+    [virtualRows]
+  );
+  const estimateVirtualRowSize = useCallback(
+    (index: number) => estimateTimelineRowSize(virtualRows[index]),
+    [virtualRows]
+  );
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    ...TIMELINE_VIRTUALIZER_DEFAULTS,
+    count: showSkeleton ? 0 : virtualRows.length,
+    getScrollElement: () => scrollContainerRef.current,
+    getItemKey: getVirtualRowKey,
+    estimateSize: estimateVirtualRowSize,
+  });
+  const totalSize = rowVirtualizer.getTotalSize();
+
+  const handleScroll = useCallback(() => {
+    hasScrolledRef.current = true;
+    const el = scrollContainerRef.current;
+    if (el) {
+      isNearBottomRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight <
+        TIMELINE_VIRTUALIZER_DEFAULTS.scrollEndThreshold;
+    }
+  }, []);
+
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (
+          entry.isIntersecting &&
+          hasScrolledRef.current &&
+          container.scrollHeight > container.clientHeight
+        ) {
+          onLoadOlder();
+        }
+      },
+      { root: container, threshold: 0.1 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [onLoadOlder]);
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      if (isNearBottomRef.current) container.scrollTop = container.scrollHeight;
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (isNearBottomRef.current) {
+      const container = scrollContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    }
+  }, [totalSize]);
+
+  const toggleToolCall = useCallback((event: ToolCallEvent) => {
+    const key = toolCallKey(event);
+    setExpandedToolCalls((expanded) => {
+      const next = new Set(expanded);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const toggleToolGroup = useCallback((events: ToolCallEvent[]) => {
+    const keys = events.map(toolCallKey);
+    setExpandedToolGroups((expanded) => {
+      const next = new Set(expanded);
+      if (keys.some((key) => next.has(key))) {
+        for (const key of keys) next.delete(key);
+      } else {
+        for (const key of keys) next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleWorkGroup = useCallback((messageId: string) => {
+    setExpandedWorkGroups((expanded) => {
+      const next = new Set(expanded);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }, []);
+
+  const toggleTaskSection = useCallback((key: string) => {
+    setExpandedTaskSections((expanded) => {
+      const next = new Set(expanded);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const renderFlatItem = (item: FlatTimelineItem): ReactNode => {
+    if (item.type === "tool_group") {
+      return (
+        <ToolCallGroup
+          key={item.id}
+          events={item.events}
+          isExpanded={item.events.some((event) => expandedToolGroups.has(toolCallKey(event)))}
+          expandedToolCallIds={expandedToolCalls}
+          onToggleGroup={() => toggleToolGroup(item.events)}
+          onToggleTool={toggleToolCall}
+        />
+      );
+    }
+    return (
+      <EventItem
+        key={item.id}
+        event={item.event}
+        sessionId={sessionId}
+        currentParticipantId={currentParticipantId}
+        participantProfiles={participantProfiles}
+        onOpenMedia={onOpenMedia}
+      />
+    );
+  };
+
+  const renderBaseTimelineItem = (item: TimelineItem): ReactNode =>
+    item.type === "task_group" ? (
+      <TaskActivityItem
+        key={item.id}
+        event={item.event}
+        hasActivity={item.activity.length > 0}
+        expansionKey={item.id}
+        expandedSections={expandedTaskSections}
+        onToggleSection={toggleTaskSection}
+      >
+        {item.activity.map(renderFlatItem)}
+      </TaskActivityItem>
+    ) : (
+      renderFlatItem(item)
+    );
+
+  const renderTimelineItem = (item: (typeof timelineItems)[number]): ReactNode =>
+    item.type === "work_group" ? (
+      <SessionWorkGroup
+        key={item.id}
+        durationMs={item.durationMs}
+        isExpanded={expandedWorkGroups.has(item.messageId)}
+        onToggle={() => toggleWorkGroup(item.messageId)}
+      >
+        {item.activity.map(renderBaseTimelineItem)}
+      </SessionWorkGroup>
+    ) : (
+      renderBaseTimelineItem(item)
+    );
+
+  const renderVirtualRow = (row: TimelineVirtualRow): ReactNode => {
+    switch (row.type) {
+      case "loading":
+        return <div className="text-center text-muted-foreground text-sm py-2">Loading...</div>;
+      case "thinking":
+        return <ThinkingIndicator />;
+      case "terminal":
+        if (!onMarkMessageRead) return row.items.map(renderTimelineItem);
+        return (
+          <TerminalMessageReadObserver
+            messageId={row.messageId}
+            enabled={terminalMessageReadObservationEnabled}
+            onMarkMessageRead={onMarkMessageRead}
+          >
+            {row.items.map(renderTimelineItem)}
+          </TerminalMessageReadObserver>
+        );
+      case "item":
+        return renderTimelineItem(row.item);
+    }
+  };
+
+  return (
+    <div
+      ref={scrollContainerRef}
+      onScroll={handleScroll}
+      // `relative` makes this scroller the containing block for
+      // absolutely-positioned descendants (e.g. sr-only live-status spans in
+      // task rows). Without it they anchor to the document, escape every
+      // ancestor overflow clip, and grow the page itself.
+      className="relative h-full overflow-y-auto overflow-x-hidden p-3 sm:p-4"
+    >
+      <div className="relative w-full min-w-0 max-w-3xl mx-auto">
+        <div ref={topSentinelRef} className="absolute left-0 top-0 h-1 w-full" />
+        {showSkeleton ? (
+          <TimelineSkeleton />
+        ) : (
+          <div className="relative w-full" style={{ height: `${totalSize}px` }}>
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const row = virtualRows[virtualRow.index];
+              return (
+                <div
+                  key={virtualRow.key}
+                  ref={rowVirtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  className="absolute left-0 top-0 w-full"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  {renderVirtualRow(row)}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ThinkingIndicator() {
+  return (
+    <div className="bg-card p-4 flex items-center gap-2">
+      <span className="inline-block w-2 h-2 bg-accent rounded-full animate-pulse" />
+      <span className="text-sm text-muted-foreground">Thinking...</span>
+    </div>
+  );
+}
+
+function TimelineSkeleton() {
+  return (
+    <div className="space-y-3 py-2 animate-pulse">
+      <div className="bg-card p-3 space-y-2 sm:p-4">
+        <div className="h-3 w-24 bg-muted rounded" />
+        <div className="h-3 w-full bg-muted rounded" />
+        <div className="h-3 w-5/6 bg-muted rounded" />
+      </div>
+      <div className="bg-accent-muted p-3 space-y-2 sm:ml-8 sm:p-4">
+        <div className="h-3 w-20 bg-muted rounded" />
+        <div className="h-3 w-4/5 bg-muted rounded" />
+      </div>
+      <div className="bg-card p-3 space-y-2 sm:p-4">
+        <div className="h-3 w-32 bg-muted rounded" />
+        <div className="h-3 w-3/4 bg-muted rounded" />
+      </div>
+    </div>
+  );
+}
+
+type EventRendererProps = {
+  event: RenderableTimelineEvent;
+  sessionId: string;
+  currentParticipantId: string | null;
+  participantProfiles: Record<string, SessionParticipantProfile>;
+  copied: boolean;
+  onCopyContent: (content: string) => void;
+  onOpenMedia: (artifactId: string) => void;
+};
+
+type MessageFrameProps = {
+  label: ReactNode;
+  time: string;
+  copied: boolean;
+  content: string;
+  className: string;
+  copyButtonClassName: string;
+  onCopyContent: (content: string) => void;
+  children: ReactNode;
+};
+
+function CopyButton({
+  copied,
+  className,
+  onClick,
+}: {
+  copied: boolean;
+  className: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={className}
+      title={copied ? "Copied" : "Copy markdown"}
+      aria-label={copied ? "Copied" : "Copy markdown"}
+    >
+      {copied ? <CheckIcon className="w-3.5 h-3.5" /> : <CopyIcon className="w-3.5 h-3.5" />}
+    </button>
+  );
+}
+
+function MessageFrame({
+  label,
+  time,
+  copied,
+  content,
+  className,
+  copyButtonClassName,
+  onCopyContent,
+  children,
+}: MessageFrameProps) {
+  return (
+    <div className={`min-w-0 ${className}`}>
+      <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
+        {label}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <CopyButton
+            copied={copied}
+            className={copyButtonClassName}
+            onClick={() => onCopyContent(content)}
+          />
+          <span className="text-xs text-secondary-foreground">{time}</span>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StatusRow({
+  tone,
+  time,
+  children,
+}: {
+  tone: "muted" | "success" | "destructive" | "warning";
+  time: string;
+  children: ReactNode;
+}) {
+  const dotClassName =
+    tone === "success"
+      ? "bg-success"
+      : tone === "destructive"
+        ? "bg-destructive"
+        : tone === "warning"
+          ? "bg-warning"
+          : "bg-accent";
+  const textClassName =
+    tone === "success"
+      ? "text-success"
+      : tone === "destructive"
+        ? "text-destructive"
+        : tone === "warning"
+          ? "text-warning"
+          : "text-muted-foreground";
+
+  return (
+    <div className={`flex min-w-0 items-start gap-2 text-sm ${textClassName}`}>
+      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dotClassName}`} />
+      <TimelineRowContent time={time}>{children}</TimelineRowContent>
+    </div>
+  );
+}
+
+type UserMessageEventData = Extract<SandboxEvent, { type: "user_message" }>;
+type UserMessageAttachment = NonNullable<UserMessageEventData["attachments"]>[number];
+
+function UserMessageAttachments({
+  attachments,
+  sessionId,
+}: {
+  attachments: UserMessageAttachment[];
+  sessionId: string;
+}) {
+  return (
+    <div className="min-w-0 max-w-full flex flex-wrap gap-2 mt-3">
+      {attachments.map((attachment) => {
+        return (
+          <img
+            key={attachment.attachmentId}
+            src={`/api/sessions/${sessionId}/attachments/${attachment.attachmentId}`}
+            alt={attachment.name}
+            title={attachment.name}
+            loading="lazy"
+            decoding="async"
+            className="block h-auto max-h-48 max-w-full border border-border object-contain"
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function UserMessageEvent({
+  event,
+  sessionId,
+  currentParticipantId,
+  participantProfiles,
+  copied,
+  onCopyContent,
+}: EventRendererProps) {
+  if (event.type !== "user_message") return null;
+  const attachments = event.attachments ?? [];
+
+  const isCurrentUser =
+    event.author?.participantId && currentParticipantId
+      ? event.author.participantId === currentParticipantId
+      : !event.author;
+  const profile = event.author?.userId ? participantProfiles[event.author.userId] : undefined;
+  const display = resolveParticipantDisplay(
+    {
+      name: event.author?.name || "Unknown User",
+      avatar: event.author?.avatar,
+    },
+    profile
+  );
+  const authorName = isCurrentUser ? "You" : display.name;
+  const avatar = display.avatar;
+
+  return (
+    <MessageFrame
+      label={
+        <div className="flex min-w-0 items-center gap-2">
+          {!isCurrentUser && avatar && (
+            <img src={avatar} alt={authorName} className="w-5 h-5 rounded-full" />
+          )}
+          <span className="text-xs text-accent">{authorName}</span>
+        </div>
+      }
+      time={formatEventTime(event)}
+      copied={copied}
+      content={event.content}
+      className="group bg-accent-muted p-3 sm:ml-8 sm:p-4"
+      copyButtonClassName="p-1 text-secondary-foreground hover:text-foreground hover:bg-muted/60 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-colors"
+      onCopyContent={onCopyContent}
+    >
+      {event.origin && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border pb-2 text-xs">
+          <span className="font-medium text-accent">Resumed by PR feedback</span>
+          <span className="text-muted-foreground">
+            {event.origin.kind === "pr_comment" ? "PR comment" : "Review"} ·{" "}
+            {event.origin.authorType === "bot" ? "Bot" : "Human"}
+          </span>
+          <a
+            href={event.origin.feedbackUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent hover:underline"
+          >
+            Open feedback
+          </a>
+        </div>
+      )}
+      {event.content && (
+        <pre className="whitespace-pre-wrap text-sm text-foreground [overflow-wrap:anywhere]">
+          {event.content}
+        </pre>
+      )}
+      {attachments.length > 0 && (
+        <UserMessageAttachments attachments={attachments} sessionId={sessionId} />
+      )}
+    </MessageFrame>
+  );
+}
+
+function AssistantMessageEvent({ event, copied, onCopyContent }: EventRendererProps) {
+  if (event.type !== "token") return null;
+
+  return (
+    <MessageFrame
+      label={<span className="text-xs text-muted-foreground">Assistant</span>}
+      time={formatEventTime(event)}
+      copied={copied}
+      content={event.content}
+      className="group bg-card p-3 sm:p-4"
+      copyButtonClassName="p-1 text-secondary-foreground hover:text-foreground hover:bg-muted opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-colors"
+      onCopyContent={onCopyContent}
+    >
+      <SafeMarkdown content={event.content} className="text-sm" />
+    </MessageFrame>
+  );
+}
+
+function ToolResultEvent({ event }: EventRendererProps) {
+  if (event.type !== "tool_result") return null;
+
+  return (
+    <div className="flex min-w-0 items-start gap-2 py-1 text-sm text-destructive">
+      <ErrorIcon className="h-4 w-4 shrink-0" />
+      <TimelineRowContent time={formatEventTime(event)}>{event.error}</TimelineRowContent>
+    </div>
+  );
+}
+
+function GitSyncEvent({ event }: EventRendererProps) {
+  if (event.type !== "git_sync") return null;
+
+  return (
+    <StatusRow tone="muted" time={formatEventTime(event)}>
+      Git sync: {event.status}
+    </StatusRow>
+  );
+}
+
+function ArtifactEvent({ event, sessionId, onOpenMedia }: EventRendererProps) {
+  if (event.type !== "artifact") return null;
+
+  return (
+    <div className="space-y-2 border border-border-muted bg-card p-3 sm:p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">
+          {event.artifactType === "video" ? "Video" : "Screenshot"}
+        </span>
+        <span className="text-xs text-secondary-foreground">{formatEventTime(event)}</span>
+      </div>
+      <ScreenshotArtifactCard
+        sessionId={sessionId}
+        artifactId={event.artifactId}
+        artifactType={event.artifactType}
+        metadata={event.metadata as Artifact["metadata"] | undefined}
+        onOpen={onOpenMedia}
+      />
+    </div>
+  );
+}
+
+function ErrorEvent({ event }: EventRendererProps) {
+  if (event.type !== "error") return null;
+
+  return (
+    <StatusRow tone="destructive" time={formatEventTime(event)}>
+      Error{event.error ? `: ${event.error}` : ""}
+    </StatusRow>
+  );
+}
+
+function WarningEvent({ event }: EventRendererProps) {
+  if (event.type !== "warning") return null;
+
+  return (
+    <StatusRow tone="warning" time={formatEventTime(event)}>
+      {event.message}
+    </StatusRow>
+  );
+}
+
+function ExecutionCompleteEvent({ event }: EventRendererProps) {
+  if (event.type !== "execution_complete") return null;
+
+  if (event.success === false) {
+    return (
+      <StatusRow tone="destructive" time={formatEventTime(event)}>
+        Execution failed{event.error ? `: ${event.error}` : ""}
+      </StatusRow>
+    );
+  }
+
+  return (
+    <StatusRow tone="success" time={formatEventTime(event)}>
+      Execution complete
+    </StatusRow>
+  );
+}
+
+function ContextCompactedEvent({ event }: EventRendererProps) {
+  if (event.type !== "context_compacted") return null;
+
+  return (
+    <div className="flex items-center gap-3 py-1 text-xs text-muted-foreground">
+      <span aria-hidden="true" className="flex-1 border-t border-border-muted" />
+      <span className="shrink-0">Context compacted</span>
+      <span aria-hidden="true" className="flex-1 border-t border-border-muted" />
+    </div>
+  );
+}
+
+function formatEventTime(event: SandboxEvent): string {
+  return new Date(event.timestamp * 1000).toLocaleTimeString();
+}
+
+const eventRenderers = {
+  user_message: UserMessageEvent,
+  token: AssistantMessageEvent,
+  tool_result: ToolResultEvent,
+  git_sync: GitSyncEvent,
+  artifact: ArtifactEvent,
+  error: ErrorEvent,
+  warning: WarningEvent,
+  execution_complete: ExecutionCompleteEvent,
+  context_compacted: ContextCompactedEvent,
+} satisfies Record<DirectTimelineEventType, (props: EventRendererProps) => ReactNode>;
+
+export const EventItem = memo(function EventItem({
+  event,
+  sessionId,
+  currentParticipantId,
+  participantProfiles,
+  onOpenMedia,
+}: {
+  event: SandboxEvent;
+  sessionId: string;
+  currentParticipantId: string | null;
+  participantProfiles: Record<string, SessionParticipantProfile>;
+  onOpenMedia: (artifactId: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyContent = useCallback(async (content: string) => {
+    const success = await copyToClipboard(content);
+    if (!success) return;
+
+    setCopied(true);
+    if (copyTimeoutRef.current) {
+      clearTimeout(copyTimeoutRef.current);
+    }
+    copyTimeoutRef.current = setTimeout(() => {
+      setCopied(false);
+      copyTimeoutRef.current = null;
+    }, 1500);
+  }, []);
+
+  if (!isRenderableTimelineEvent(event) || event.type === "tool_call") return null;
+  const render = eventRenderers[event.type];
+
+  return render({
+    event,
+    sessionId,
+    currentParticipantId,
+    participantProfiles,
+    copied,
+    onCopyContent: handleCopyContent,
+    onOpenMedia,
+  });
+});

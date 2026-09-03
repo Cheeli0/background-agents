@@ -36,13 +36,21 @@ describe("POST /internal/stop", () => {
     const body = await res.json<{ status: string }>();
     expect(body.status).toBe("stopping");
 
-    const messages = await queryDO<{ status: string; completed_at: number | null }>(
+    const messages = await queryDO<{
+      status: string;
+      completed_at: number | null;
+      error_message: string | null;
+      stop_confirmation_deadline: number | null;
+    }>(
       stub,
-      "SELECT status, completed_at FROM messages WHERE id = ?",
+      `SELECT status, completed_at, error_message, stop_confirmation_deadline
+       FROM messages WHERE id = ?`,
       msgId
     );
     expect(messages[0].status).toBe("failed");
     expect(messages[0].completed_at).toEqual(expect.any(Number));
+    expect(messages[0].error_message).toBe("Execution was stopped");
+    expect(messages[0].stop_confirmation_deadline).toBeNull();
   });
 
   it("is idempotent with no processing message", async () => {
@@ -291,9 +299,15 @@ describe("POST /internal/stop", () => {
     // Connect sandbox WS so queue drain can dispatch
     const { ws: sandboxWs } = await openSandboxWs(name, sandboxAuth);
     if (sandboxWs) sandboxWs.accept();
-
     // Stop execution - marks A as failed
     await stub.fetch("http://internal/internal/stop", { method: "POST" });
+
+    const stopped = await queryDO<{
+      error_message: string | null;
+      stop_confirmation_deadline: number | null;
+    }>(stub, "SELECT error_message, stop_confirmation_deadline FROM messages WHERE id = ?", msgA);
+    expect(stopped[0].error_message).toBe("Execution was stopped");
+    expect(stopped[0].stop_confirmation_deadline).toEqual(expect.any(Number));
 
     // Bridge sends late execution_complete for A → triggers queue drain
     await stub.fetch("http://internal/internal/sandbox-event", {
@@ -375,5 +389,42 @@ describe("POST /internal/stop", () => {
 
     clientWs.close();
     if (sandboxWs) sandboxWs.close();
+  });
+
+  it("does not stop execution before the client subscribes", async () => {
+    const name = `ws-stop-client-unsubscribed-${Date.now()}`;
+    const { stub } = await initNamedSession(name);
+
+    const participants = await queryDO<{ id: string }>(
+      stub,
+      "SELECT id FROM participants WHERE user_id = 'user-1'"
+    );
+    const participantId = participants[0].id;
+
+    const msgId = "msg-ws-stop-unsubscribed";
+    await seedMessage(stub, {
+      id: msgId,
+      authorId: participantId,
+      content: "Must remain in progress",
+      source: "web",
+      status: "processing",
+      createdAt: Date.now() - 1000,
+      startedAt: Date.now() - 500,
+    });
+
+    const { ws } = await openClientWs(name);
+    const closed = new Promise<{ code: number }>((resolve) => {
+      ws.addEventListener("close", (event) => resolve({ code: event.code }));
+    });
+
+    ws.send(JSON.stringify({ type: "stop" }));
+
+    await expect(closed).resolves.toEqual({ code: 4002 });
+    const messages = await queryDO<{ status: string }>(
+      stub,
+      "SELECT status FROM messages WHERE id = ?",
+      msgId
+    );
+    expect(messages[0].status).toBe("processing");
   });
 });

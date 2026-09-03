@@ -1,3 +1,5 @@
+import { encodeRepositoryPathSegments } from "@open-inspect/shared/types/repositories";
+
 function buildCustomInstructionsSection(instructions: string | null | undefined): string {
   if (!instructions?.trim()) return "";
   return `\n## Custom Instructions\n${instructions}`;
@@ -45,9 +47,26 @@ export function buildCodeReviewPrompt(params: {
   head: string;
   isPublic: boolean;
   codeReviewInstructions?: string | null;
+  isSelfReview?: boolean;
 }): string {
-  const { owner, repo, number, title, body, author, base, head, isPublic, codeReviewInstructions } =
-    params;
+  const {
+    owner,
+    repo,
+    number,
+    title,
+    body,
+    author,
+    base,
+    head,
+    isPublic,
+    codeReviewInstructions,
+    isSelfReview = false,
+  } = params;
+  const reviewEvent = isSelfReview ? "COMMENT" : "<APPROVE, REQUEST_CHANGES, or COMMENT>";
+  const reviewEventGuidance = isSelfReview
+    ? "Use COMMENT because GitHub does not allow pull request authors to approve their own PRs."
+    : "Use APPROVE if the code looks good, REQUEST_CHANGES if changes are needed,\n   or COMMENT for general feedback.";
+  const repositoryPath = encodeRepositoryPathSegments({ repoOwner: owner, repoName: repo });
 
   const prTitleBlock = buildUntrustedUserContentBlock({
     source: "github_pr_title",
@@ -91,25 +110,28 @@ ${prDescriptionBlock}
    - Performance implications
    - Code clarity and maintainability
 3. You may read individual files in the repo for additional context beyond the diff
-4. When your review is complete, submit it via:
+4. When your review is complete, compose the summary and all inline comments first, then submit
+   exactly one pull request review. Include every inline comment in the review's \`comments\` array;
+   do not create standalone pull request comments. If there are no inline comments, use an empty array.
 
-   gh api repos/${owner}/${repo}/pulls/${number}/reviews \\
+   gh api repos/${repositoryPath}/pulls/${number}/reviews \\
      --method POST \\
-     -f body="<your review summary>" \\
-     -f event="COMMENT|APPROVE|REQUEST_CHANGES"
+     --input - <<'JSON'
+{
+  "body": "<your review summary>",
+  "event": "${reviewEvent}",
+  "comments": [
+    {
+      "path": "<file path>",
+      "line": <line number>,
+      "side": "RIGHT",
+      "body": "<inline comment>"
+    }
+  ]
+}
+JSON
 
-   Use APPROVE if the code looks good, REQUEST_CHANGES if changes are needed,
-   or COMMENT for general feedback.
-
-5. For inline comments on specific files:
-
-   gh api repos/${owner}/${repo}/pulls/${number}/comments \\
-     --method POST \\
-     -f body="<comment>" \\
-     -f path="<file path>" \\
-     -f commit_id="$(gh api repos/${owner}/${repo}/pulls/${number} --jq '.head.sha')" \\
-     -f line=<line number> \\
-     -f side="RIGHT"
+   ${reviewEventGuidance}
 
 ${buildCustomInstructionsSection(codeReviewInstructions)}
 ${buildCommentGuidelines(isPublic)}`;
