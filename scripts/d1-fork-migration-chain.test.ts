@@ -5,6 +5,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
 const migrationsDirectory = join(import.meta.dirname, "..", "terraform", "d1", "migrations");
+const migrationRunnerPath = join(import.meta.dirname, "d1-migrate.sh");
 const forkMigrationNames = [
   "0017_add_creation_source_to_sessions.sql",
   "0018_add_branch_name_to_sessions.sql",
@@ -61,4 +62,14 @@ test("the reconciled migration chain preserves the deployed fork ledger", () => 
   for (const name of files.slice(22)) applyMigration(upgraded, name);
 
   assert.deepEqual(schema(upgraded), schema(fresh));
+});
+
+test("the remote D1 bootstrap command stays on one line", () => {
+  const runner = readFileSync(migrationRunnerPath, "utf8");
+  const command = runner.match(
+    /--command "([^"]*CREATE TABLE IF NOT EXISTS _schema_migrations[^"]*)"/
+  )?.[1];
+
+  assert.ok(command, "expected the migration ledger bootstrap command");
+  assert.doesNotMatch(command, /\r?\n/);
 });

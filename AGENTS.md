@@ -121,6 +121,13 @@ These run inside a real `workerd` runtime with Miniflare, using the `cloudflareT
 Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`. Keep the subject
 under 72 characters. Use the PR body for details, not the commit message.
 
+## Repository Workflow
+
+- For this repo, default all branch pushes and pull requests to `origin`
+  (`Cheeli0/background-agents`).
+- Do not open PRs against `upstream` (`ColeMurray/background-agents`) unless the user explicitly
+  asks for that target.
+
 ## Key Gotchas
 
 - **Build order**: always build `@open-inspect/shared` before packages that depend on it.

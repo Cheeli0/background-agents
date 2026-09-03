@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as modalHelper from "./modal-helper.mjs";
 import { buildDeploySteps, buildSecretSteps, parseSecrets } from "./modal-helper.mjs";
 
 test("builds secret commands without a shell", () => {
@@ -53,4 +54,15 @@ test("does not build the sandbox image for a custom deploy target", () => {
     { args: ["sync", "--frozen"], label: "dependency sync" },
     { args: ["run", "modal", "deploy", "custom.py"], label: "Modal deployment" },
   ]);
+});
+
+test("forces UTF-8 for Python subprocess output", () => {
+  assert.deepEqual(
+    modalHelper.buildChildEnvironment?.({ KEEP_ME: "yes", PYTHONIOENCODING: "cp1252" }),
+    {
+      KEEP_ME: "yes",
+      PYTHONIOENCODING: "utf-8",
+      PYTHONUTF8: "1",
+    }
+  );
 });

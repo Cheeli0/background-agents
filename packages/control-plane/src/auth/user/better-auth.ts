@@ -76,6 +76,7 @@ export function createUserAuth(config: UserAuthConfig) {
             github: {
               ...config.github,
               disableDefaultScope: true,
+              scope: ["user:email"],
             },
           }
         : {}),

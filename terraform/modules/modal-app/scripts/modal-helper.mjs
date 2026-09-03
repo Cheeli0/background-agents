@@ -73,11 +73,19 @@ export function buildDeploySteps(deployModule) {
   return steps;
 }
 
+export function buildChildEnvironment(baseEnvironment = process.env) {
+  return {
+    ...baseEnvironment,
+    PYTHONIOENCODING: "utf-8",
+    PYTHONUTF8: "1",
+  };
+}
+
 function runUv(args, options = {}) {
   for (const command of UV_COMMANDS) {
     const result = spawnSync(command, args, {
       cwd: options.cwd,
-      env: process.env,
+      env: buildChildEnvironment(),
       encoding: "utf8",
       stdio: "inherit",
     });

@@ -44,11 +44,7 @@ fi
 
 # 1. Ensure tracking table exists
 $WRANGLER d1 execute "$DATABASE_NAME" --remote \
-  --command "CREATE TABLE IF NOT EXISTS _schema_migrations (
-    version TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )"
+  --command "CREATE TABLE IF NOT EXISTS _schema_migrations (version TEXT PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
 
 # 2. Get the applied versions and their exact filenames. A numeric prefix is
 # only unique within this repository; downstream installations can already
