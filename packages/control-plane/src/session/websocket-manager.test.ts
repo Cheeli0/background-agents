@@ -1,14 +1,15 @@
 /**
  * Unit tests for SessionWebSocketManagerImpl.
  *
- * Uses fake DurableObjectState and mock repositories to test
- * all WebSocket mechanics in isolation from the full DO.
+ * Uses a fake SocketHost and mock repositories to test
+ * all WebSocket mechanics in isolation from the host.
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { SessionWebSocketManagerImpl } from "./websocket-manager";
 import type { WebSocketManagerConfig } from "./websocket-manager";
 import type { Logger } from "../logger";
+import type { SocketHost } from "./platform";
 import type { ClientInfo } from "../types";
 import type { SandboxRepository } from "./sandbox-repository";
 import type {
@@ -52,34 +53,34 @@ function createFakeWebSocket(readyState = WebSocket.OPEN): WebSocket {
 }
 
 /** Type for the fake DurableObjectState with test helpers. */
-interface FakeCtx {
+interface FakeSocketHost {
   sockets: Map<WebSocket, string[]>;
-  state: DurableObjectState;
+  host: SocketHost;
 }
 
 /**
- * Fake DurableObjectState that tracks accepted WebSockets and their tags.
+ * Fake SocketHost that tracks accepted WebSockets and their tags.
  */
-function createFakeCtx(): FakeCtx {
+function createFakeSocketHost(): FakeSocketHost {
   const sockets = new Map<WebSocket, string[]>();
 
-  const state = {
-    acceptWebSocket(ws: WebSocket, tags: string[]) {
+  const host: SocketHost = {
+    accept(ws, tags) {
       sockets.set(ws, tags);
     },
-    getTags(ws: WebSocket): string[] {
+    tags(ws) {
       return sockets.get(ws) ?? [];
     },
-    getWebSockets(): WebSocket[] {
-      return Array.from(sockets.keys());
+    sockets(tag) {
+      const accepted = Array.from(sockets.keys());
+      return tag === undefined
+        ? accepted
+        : accepted.filter((ws) => (sockets.get(ws) ?? []).includes(tag));
     },
-    setWebSocketAutoResponse: vi.fn(),
-    storage: { setAlarm: vi.fn() },
-    id: { toString: () => "test-do-id" },
-    waitUntil: vi.fn(),
-  } as unknown as DurableObjectState;
+    setAutoResponse: vi.fn(),
+  };
 
-  return { sockets, state };
+  return { sockets, host };
 }
 
 /** Create a minimal mock Logger. */
@@ -202,7 +203,7 @@ const TEST_CONFIG: WebSocketManagerConfig = { authTimeoutMs: 100 };
 
 /** Create a fresh manager with all dependencies. */
 function createManager() {
-  const fakeCtx = createFakeCtx();
+  const fakeHost = createFakeSocketHost();
   const mockRepo = createMockRepository();
   const alarmScheduler = {
     schedule: vi.fn(async () => {}),
@@ -212,7 +213,7 @@ function createManager() {
   const log = createMockLogger();
 
   const manager = new SessionWebSocketManagerImpl(
-    fakeCtx.state,
+    fakeHost.host,
     mockRepo.repo,
     mockRepo.repo as unknown as WsClientMappingRepository,
     alarmScheduler,
@@ -222,8 +223,8 @@ function createManager() {
 
   return {
     manager,
-    sockets: fakeCtx.sockets,
-    state: fakeCtx.state,
+    sockets: fakeHost.sockets,
+    host: fakeHost.host,
     mockRepo,
     alarmScheduler,
     log,
@@ -318,6 +319,19 @@ describe("SessionWebSocketManagerImpl", () => {
       expect(oldWs.close).toHaveBeenCalledWith(1000, "New sandbox connecting");
     });
 
+    it("closes an attached sandbox socket after the in-memory pointer is lost", () => {
+      const { manager } = createManager();
+      const oldWs = createFakeWebSocket();
+      const newWs = createFakeWebSocket();
+      manager.acceptAndSetSandboxSocket(oldWs, "sb-1");
+      manager.clearSandboxSocket();
+
+      const result = manager.acceptAndSetSandboxSocket(newWs, "sb-1");
+
+      expect(result.replaced).toBe(true);
+      expect(oldWs.close).toHaveBeenCalledWith(1000, "New sandbox connecting");
+    });
+
     it("does not try to close an already-closed sandbox socket", () => {
       const { manager } = createManager();
       const oldWs = createFakeWebSocket(WebSocket.CLOSED);
@@ -386,6 +400,16 @@ describe("SessionWebSocketManagerImpl", () => {
 
       expect(manager.getSandboxSocket()).toBeNull();
       expect(untaggedWs.close).toHaveBeenCalledWith(1000, "Sandbox identity changed");
+    });
+
+    it("rejects a cached socket when the persisted sandbox ID changes", () => {
+      const { manager, mockRepo } = createManager();
+      const oldWs = createFakeWebSocket();
+      manager.acceptAndSetSandboxSocket(oldWs, "old-id");
+      mockRepo.setSandbox(createSandboxRow("new-id"));
+
+      expect(manager.getSandboxSocket()).toBeNull();
+      expect(oldWs.close).toHaveBeenCalledWith(1000, "Sandbox identity changed");
     });
 
     it("returns null when cached socket is closed", () => {
