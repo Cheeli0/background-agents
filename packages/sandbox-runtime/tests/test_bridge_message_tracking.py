@@ -324,6 +324,35 @@ class TestBuildPromptRequestBody:
         assert body["variant"] == "medium"
         assert body["model"] == {"providerID": "xai", "modelID": "grok-4.6"}
 
+    @pytest.mark.parametrize(
+        ("model", "effort"),
+        [
+            ("zai-coding-plan/glm-5.3-flash", "high"),
+            ("opencode-go/glm-5.3-flash", "max"),
+            ("opencode/muse-spark-1.3-contributor-free", "minimal"),
+            ("opencode-go/muse-spark-1.3-contributor", "xhigh"),
+            ("opencode-go/deepseek-v4-flash", "low"),
+            ("opencode-go/deepseek-v4-flash-vision-exp", "max"),
+        ],
+    )
+    def test_with_catalog_reasoning_variant(self, bridge: AgentBridge, model: str, effort: str):
+        body = bridge._ensure_prompt_stream()._build_prompt_request_body(
+            "Hello",
+            model,
+            reasoning_effort=effort,
+        )
+
+        assert body["variant"] == effort
+        assert "options" not in body["model"]
+
+    def test_without_big_pickle_reasoning_variant(self, bridge: AgentBridge):
+        body = bridge._ensure_prompt_stream()._build_prompt_request_body(
+            "Hello",
+            "opencode/big-pickle",
+        )
+
+        assert "variant" not in body
+
 
 class TestOpenCodeIdentifier:
     """Tests for OpenCode-compatible ascending ID generation."""

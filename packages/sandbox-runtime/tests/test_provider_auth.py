@@ -37,6 +37,11 @@ from sandbox_runtime.provider_auth import (
             {"opencode-go": {"type": "api", "key": "go-secret"}},
         ),
         (
+            "zai-coding-plan",
+            {"ZHIPU_API_KEY": "zai-secret"},
+            {"zai-coding-plan": {"type": "api", "key": "zai-secret"}},
+        ),
+        (
             "ollama-cloud",
             {"OLLAMA_CLOUD_API_KEY": "ollama-secret"},
             {"ollama-cloud": {"type": "api", "key": "ollama-secret"}},
@@ -53,6 +58,7 @@ def test_provider_auth_entries(provider, environment, expected):
         ("minimax-coding-plan", "MINIMAX_API_KEY"),
         ("fireworks-ai", "FIREWORKS_API_KEY"),
         ("opencode-go", "OPENCODE_GO_API_KEY"),
+        ("zai-coding-plan", "ZHIPU_API_KEY"),
         ("ollama-cloud", "OLLAMA_CLOUD_API_KEY"),
     ],
 )

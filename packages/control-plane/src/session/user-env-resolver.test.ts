@@ -507,6 +507,25 @@ describe("UserEnvResolver", () => {
       await expect(h.resolver.getProviderAuthenticationError("openai/gpt-5")).resolves.toBeNull();
     });
 
+    it("rejects Z.AI before sandbox creation when its API key is unavailable", async () => {
+      const h = makeHarness();
+      h.db.providerAuthRows = providerAuthRows(API_KEY_MODES);
+
+      await expect(
+        h.resolver.getProviderAuthenticationError("zai-coding-plan/glm-5.3-flash")
+      ).resolves.toContain("ZHIPU_API_KEY");
+
+      expect(h.logs).toContainEqual({
+        level: "error",
+        msg: "provider_auth.unavailable",
+        data: {
+          event: "provider_auth.unavailable",
+          provider: "zai-coding-plan",
+          auth_mode: "api_key",
+        },
+      });
+    });
+
     it("returns null for non-subscription providers", async () => {
       const h = makeHarness();
       h.db.providerAuthRows = providerAuthRows(API_KEY_MODES);

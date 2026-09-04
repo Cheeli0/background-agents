@@ -102,7 +102,10 @@ export class UserEnvResolver {
     this.log.error("provider_auth.unavailable", {
       event: "provider_auth.unavailable",
       provider: issue.provider,
-      auth_mode: context.providerAuthModes[issue.provider],
+      auth_mode:
+        issue.provider === "zai-coding-plan"
+          ? "api_key"
+          : context.providerAuthModes[issue.provider],
     });
     return issue.message;
   }

@@ -36,6 +36,10 @@ _PROVIDER_AUTH_SPECS = {
         secret_name="OPENCODE_GO_API_KEY",
         auth_names=("opencode-go",),
     ),
+    "zai-coding-plan": ProviderAuthSpec(
+        secret_name="ZHIPU_API_KEY",
+        auth_names=("zai-coding-plan",),
+    ),
     "ollama-cloud": ProviderAuthSpec(
         secret_name="OLLAMA_CLOUD_API_KEY",
         auth_names=("ollama-cloud",),
@@ -44,7 +48,7 @@ _PROVIDER_AUTH_SPECS = {
 
 
 def provider_auth_entries(provider: str, environment: Mapping[str, str]) -> dict[str, AuthEntry]:
-    """Build OpenCode auth entries for a selected fork-only provider."""
+    """Build OpenCode auth entries for a selected API-key provider."""
     spec = _PROVIDER_AUTH_SPECS.get(provider)
     if spec is None:
         return {}

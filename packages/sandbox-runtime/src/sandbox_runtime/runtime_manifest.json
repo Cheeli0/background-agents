@@ -1,6 +1,6 @@
 {
-  "runtimeVersion": "v61-sandbox-sbin-path",
-  "generation": 61,
-  "minimumCompatibleGeneration": 60,
-  "minimumRebuildGeneration": 60
+  "runtimeVersion": "v64-zai-key-alias-preflight",
+  "generation": 64,
+  "minimumCompatibleGeneration": 64,
+  "minimumRebuildGeneration": 64
 }

@@ -46,12 +46,23 @@ const PROVIDER_AUTH_ERROR = {
   xai: "No xAI authentication is configured for this session. Select a connected SuperGrok account, configure an xAI default, or provide XAI_API_KEY, then create a new session.",
 } as const satisfies Record<SubscriptionProviderId, string>;
 
+const ZAI_CODING_PLAN_PROVIDER = "zai-coding-plan" as const;
+const ZAI_CODING_PLAN_API_KEY = "ZHIPU_API_KEY";
+const ZAI_CODING_PLAN_AUTH_ERROR =
+  "No Z.AI Coding Plan authentication is configured for this session. Provide ZHIPU_API_KEY, then create a new session.";
+
 export function getProviderAuthenticationError(
   model: string,
   sandboxEnv: Record<string, string>,
   providerAuthModes: Record<SubscriptionProviderId, SessionProviderAuthMode>
-): { provider: SubscriptionProviderId; message: string } | null {
+): { provider: SubscriptionProviderId | typeof ZAI_CODING_PLAN_PROVIDER; message: string } | null {
   const provider = model.split("/", 1)[0];
+  if (provider === ZAI_CODING_PLAN_PROVIDER) {
+    const available = Boolean(sandboxEnv[ZAI_CODING_PLAN_API_KEY]);
+    return available
+      ? null
+      : { provider: ZAI_CODING_PLAN_PROVIDER, message: ZAI_CODING_PLAN_AUTH_ERROR };
+  }
   if (provider !== "openai" && provider !== "xai") return null;
 
   const config = PROVIDER_ENV[provider];
