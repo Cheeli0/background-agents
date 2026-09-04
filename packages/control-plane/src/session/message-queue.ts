@@ -395,6 +395,25 @@ export class SessionMessageQueue {
 
     const sandboxWs = this.wsManager.getSandboxSocket();
     if (!sandboxWs) {
+      // The provider-auth lookup above is a non-storage await. The socket
+      // path re-validates through the processing claim; this path has no
+      // claim, so it re-reads what it acts on: a cancel or archive that
+      // landed meanwhile has closed the session and terminalized the prompt,
+      // and must not get a sandbox spawned for it. The queue is then pumped
+      // again over the state that moved: a prompt cancelled on its own
+      // leaves the next one pending with nobody else to dispatch it, and the
+      // pump stops by itself for a closed session, a processing owner, a
+      // stop fence, or an empty queue.
+      if (!this.isPromptStillDispatchable(message.id)) {
+        this.log.info("prompt.dispatch", {
+          event: "prompt.dispatch",
+          message_id: message.id,
+          outcome: "deferred",
+          reason: "superseded_during_auth",
+        });
+        await this.processMessageQueue();
+        return;
+      }
       this.log.info("prompt.dispatch", {
         event: "prompt.dispatch",
         message_id: message.id,
@@ -874,6 +893,20 @@ export class SessionMessageQueue {
     });
 
     return { messageId, position };
+  }
+
+  /**
+   * Whether `messageId` is still pending in a session that still accepts
+   * work. Read in the caller's continuation, so the decision it feeds is made
+   * on the same state.
+   */
+  private isPromptStillDispatchable(messageId: string): boolean {
+    const session = this.repository.getSession();
+    return (
+      session !== null &&
+      isSessionPromptable(session.status) &&
+      this.messageRepository.getMessageStatus(messageId) === "pending"
+    );
   }
 
   private assertPromptableSession(): void {
