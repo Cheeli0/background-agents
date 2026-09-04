@@ -389,7 +389,7 @@ class OpenCodeServer:
             self.log.warn("managed_oauth.setup_error", exc=e)
 
     def _setup_provider_auth(self) -> None:
-        """Write API-key auth for a selected fork-only provider."""
+        """Write API-key auth for a selected provider."""
         entries = provider_auth_entries(self.provider, os.environ)
         if not entries:
             return

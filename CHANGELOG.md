@@ -8,7 +8,8 @@ New features, integrations, and notable improvements to Open-Inspect — newest 
 Spark 1.3 and DeepSeek V4 Flash variants through OpenCode, and Big Pickle through OpenCode Zen.
 Their provider-specific reasoning efforts are available in sessions, automations, and integration
 settings. Sandbox images now pin OpenCode 1.18.23 and rebuild existing runtimes so Z.AI Coding Plan
-recognizes GLM 5.3 Flash.
+recognizes GLM 5.3 Flash. The sandbox runtime also registers `ZHIPU_API_KEY` under OpenCode's
+`zai-coding-plan` auth identity so every Coding Plan model can resolve and authenticate.
 
 ## September 1, 2026
 

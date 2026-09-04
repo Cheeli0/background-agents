@@ -52,6 +52,7 @@ TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 # v60: generic provider-account token broker plugin
 # v61: account/init helpers and /usr/sbin on PATH
 # v62: OpenCode 1.18.23 adds Z.AI GLM 5.3 Flash catalog support
+# v63: register Z.AI Coding Plan API keys with OpenCode
 CACHE_BUSTER = RUNTIME_VERSION
 
 # Base image with all development tools
