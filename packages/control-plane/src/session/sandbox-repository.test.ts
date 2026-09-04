@@ -131,6 +131,9 @@ describe("SandboxRepository", () => {
       expect(mock.calls[0].query).toContain("vnc_password = NULL");
       // A replacement sandbox must not inherit the predecessor's runtime.
       expect(mock.calls[0].query).toContain("runtime_version = NULL");
+      // ...nor its bridge: the predecessor's socket loses dispatch authority
+      // here. Revoked is '' — NULL is reserved for rows that predate identities.
+      expect(mock.calls[0].query).toContain("active_socket_id = ''");
       expect(mock.calls[0].params).toEqual(["spawning", 1000, "modal-sb-1"]);
     });
 
@@ -143,6 +146,24 @@ describe("SandboxRepository", () => {
       });
 
       expect(mock.calls[0].query).toContain("modal_object_id = modal_object_id");
+    });
+  });
+
+  describe("active socket id", () => {
+    it("writes the identity to the session's one sandbox row", () => {
+      repository.setActiveSocketId("sbws-2");
+
+      expect(mock.calls.length).toBe(1);
+      expect(mock.calls[0].query).toContain("UPDATE sandbox SET active_socket_id = ?");
+      expect(mock.calls[0].params).toEqual(["sbws-2"]);
+    });
+
+    it("revokes with the empty sentinel rather than NULL", () => {
+      repository.revokeActiveSocketId();
+
+      expect(mock.calls.length).toBe(1);
+      expect(mock.calls[0].query).toContain("UPDATE sandbox SET active_socket_id = ''");
+      expect(mock.calls[0].params).toEqual([]);
     });
   });
 

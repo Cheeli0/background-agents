@@ -137,11 +137,33 @@ export class SandboxRepository {
          tunnel_urls = NULL,
          ttyd_url = NULL,
          ttyd_token = NULL,
-         runtime_version = NULL
+         runtime_version = NULL,
+         active_socket_id = ''
        WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
       data.status,
       data.createdAt,
       data.modalSandboxId
+    );
+  }
+
+  /**
+   * Make `socketId` the socket the session dispatches to; every earlier
+   * socket loses authority. `active_socket_id` is three-valued: a tag id,
+   * `''` for revoked (no socket matches, see `revokeActiveSocketId` and the
+   * spawn reservation above), and NULL only on rows that predate persisted
+   * identities.
+   */
+  setActiveSocketId(socketId: string): void {
+    this.sql.exec(
+      `UPDATE sandbox SET active_socket_id = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+      socketId
+    );
+  }
+
+  /** Leave the session with no authoritative bridge socket until the next accept. */
+  revokeActiveSocketId(): void {
+    this.sql.exec(
+      `UPDATE sandbox SET active_socket_id = '' WHERE id = (SELECT id FROM sandbox LIMIT 1)`
     );
   }
 
