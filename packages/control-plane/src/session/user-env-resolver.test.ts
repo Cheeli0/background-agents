@@ -513,7 +513,7 @@ describe("UserEnvResolver", () => {
 
       await expect(
         h.resolver.getProviderAuthenticationError("zai-coding-plan/glm-5.3-flash")
-      ).resolves.toContain("ZAI_API_KEY");
+      ).resolves.toContain("ZHIPU_API_KEY");
 
       expect(h.logs).toContainEqual({
         level: "error",
