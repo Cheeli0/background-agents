@@ -4,7 +4,7 @@
  * Cloudflare Workers entry point with Durable Objects for session management.
  */
 
-import { handleRequest } from "./router";
+import { handleControlPlaneHttp } from "./routing/hono-app";
 import { createLogger } from "./logger";
 import type { Env } from "./types";
 import type { GitHubAutofixEnvelope } from "@open-inspect/shared";
@@ -17,6 +17,7 @@ import {
   AbandonedDraftSweep,
   SessionDraftExpiryClient,
 } from "./session/abandoned-draft-sweep";
+import { createSessionRuntimeClient } from "./session/runtime-client";
 import { createRequestMetrics, instrumentD1, type RequestMetrics } from "./db/instrumented-d1";
 import { SessionIndexStore } from "./db/session-index";
 import type { SqlDatabase } from "./db/sql-database";
@@ -42,8 +43,9 @@ export default {
       return handleWebSocket(request, env, url, db, metrics);
     }
 
-    // Regular API request — logged by the router with requestId and timing
-    return handleRequest(request, env, createCloudflareBackgroundTasks(ctx));
+    // Regular API request — Hono owns HTTP route selection while the neutral
+    // admission/dispatch pipeline retains authentication and authorization.
+    return handleControlPlaneHttp(request, env, ctx);
   },
 
   /**
@@ -60,10 +62,12 @@ export default {
       return;
     }
     if (event.cron === ABANDONED_DRAFT_SWEEP_CRON) {
+      const sweepId = crypto.randomUUID();
+      const sweepContext = { trace_id: sweepId, request_id: sweepId };
       await new AbandonedDraftSweep(
         // eslint-disable-next-line no-restricted-syntax -- scheduled composition root: the one cron env.DB read
         new SessionIndexStore(env.DB),
-        new SessionDraftExpiryClient(env.SESSION),
+        new SessionDraftExpiryClient(createSessionRuntimeClient(env, sweepContext)),
         logger
       ).run(Date.now());
       return;
@@ -125,7 +129,9 @@ async function handleWebSocket(
     ...metrics.summarize(),
   });
 
-  // Get Durable Object and forward WebSocket
+  // Forward the upgrade to the Durable Object directly rather than through
+  // SessionRuntimeClient: the 101 must carry the object's own `webSocket`,
+  // which only this Cloudflare-side hop can return. Stays here by design.
   const doId = env.SESSION.idFromName(sessionId);
   const stub = env.SESSION.get(doId);
 

@@ -10,25 +10,32 @@
 import { DurableObject } from "cloudflare:workers";
 import { initSchema } from "./schema";
 import type { Env } from "../types";
-import type { SqlDatabase } from "../db/sql-database";
+import { createDurableObjectSessionPlatform } from "../cloudflare/session-platform";
+import { upgradeWebSocket } from "../cloudflare/websocket-upgrade";
+import type { SessionPlatform } from "./platform";
 import { createSessionRuntime, type SessionRuntime } from "./components";
 
 export class SessionDO extends DurableObject<Env> {
-  private sql: SqlStorage;
   /**
-   * The DO's global-database handle — the single point where env.DB is read.
-   * Nullable to preserve the existing defensive guards against a missing
-   * binding at runtime. Distinct from `this.sql`, the DO-embedded SQLite.
+   * This object's storage, sockets, alarm, and event lifetime as the ports
+   * the runtime is built over, with the deployment's global store. The
+   * constructor is the single point where env.DB is read; a missing binding
+   * fails construction instead of running a degraded session.
    */
-  private readonly db: SqlDatabase | null;
+  private readonly platform: SessionPlatform;
   // The per-activation runtime; null until ensureInitialized() builds it.
   private _runtime: SessionRuntime | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // eslint-disable-next-line no-restricted-syntax -- composition root input: the DO's one env.DB read
-    this.db = env.DB ?? null;
-    this.sql = ctx.storage.sql;
+    const db = env.DB;
+    if (!db) {
+      throw new Error(
+        "SessionDO requires the DB binding; sessions cannot run without the global store"
+      );
+    }
+    this.platform = createDurableObjectSessionPlatform(ctx, db);
   }
 
   /** The runtime, (re)built on first touch after construction or eviction. */
@@ -44,8 +51,8 @@ export class SessionDO extends DurableObject<Env> {
   private ensureInitialized(rehydrateAlarm = true): void {
     if (this._runtime) return;
     const initStart = performance.now();
-    initSchema(this.sql);
-    const runtime = createSessionRuntime({ ctx: this.ctx, sql: this.sql, db: this.db }, this.env);
+    initSchema(this.platform.storage.sql);
+    const runtime = createSessionRuntime(this.platform, this.env);
     // Publish only after the graph is fully built: a throw above leaves the
     // activation uninitialized, so the next event retries initialization
     // instead of dereferencing an undefined runtime.
@@ -60,10 +67,16 @@ export class SessionDO extends DurableObject<Env> {
   }
 
   /**
-   * Handle incoming HTTP requests.
+   * Handle incoming HTTP requests. WebSocket upgrades are completed here,
+   * on the Cloudflare side of the session, because only the host can turn
+   * an admitted upgrade into a socket.
    */
   async fetch(request: Request): Promise<Response> {
-    return this.runtime.server.onRequest(request);
+    const runtime = this.runtime;
+    if (request.headers.get("Upgrade") === "websocket") {
+      return upgradeWebSocket(runtime.upgrades, request, runtime.log);
+    }
+    return runtime.server.onRequest(request);
   }
 
   /**

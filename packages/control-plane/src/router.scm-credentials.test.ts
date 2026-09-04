@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { handleRequest, routes } from "./router";
 import {
+  handleRequest,
+  matchRoute,
   signedServiceRequest,
   TEST_BACKGROUND_TASK_CONTEXT,
   TEST_SERVICE_SECRETS,
+  routeContracts as routes,
 } from "./router.test-support";
 
 function routeFor(method: string, path: string) {
-  return routes.find((route) => route.method === method && route.pattern.test(path));
+  return matchRoute(routes, method, path)?.route;
 }
 
 function createEnv(options?: { actorAuthorized?: boolean }) {
