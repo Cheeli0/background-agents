@@ -20,6 +20,7 @@ class ProviderAuthSpec:
     secret_name: str
     auth_names: tuple[str, ...]
     plugin: str | None = None
+    legacy_secret_names: tuple[str, ...] = ()
 
 
 _PROVIDER_AUTH_SPECS = {
@@ -37,8 +38,9 @@ _PROVIDER_AUTH_SPECS = {
         auth_names=("opencode-go",),
     ),
     "zai-coding-plan": ProviderAuthSpec(
-        secret_name="ZHIPU_API_KEY",
+        secret_name="ZAI_API_KEY",
         auth_names=("zai-coding-plan",),
+        legacy_secret_names=("ZHIPU_API_KEY",),
     ),
     "ollama-cloud": ProviderAuthSpec(
         secret_name="OLLAMA_CLOUD_API_KEY",
@@ -53,9 +55,11 @@ def provider_auth_entries(provider: str, environment: Mapping[str, str]) -> dict
     if spec is None:
         return {}
 
-    api_key = environment.get(spec.secret_name)
+    secret_names = (spec.secret_name, *spec.legacy_secret_names)
+    api_key = next((environment.get(name) for name in secret_names if environment.get(name)), None)
     if not api_key:
-        raise RuntimeError(f"{spec.secret_name} is required for provider {provider}")
+        accepted_names = " or ".join(secret_names)
+        raise RuntimeError(f"{accepted_names} is required for provider {provider}")
 
     return {name: {"type": "api", "key": api_key} for name in spec.auth_names}
 

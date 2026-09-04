@@ -30,7 +30,7 @@ def make_server(tmp_path: Path, provider: str, model: str) -> OpenCodeServer:
     ("provider", "model", "secret_name", "expected_key"),
     [
         ("opencode-go", "glm-5.1", "OPENCODE_GO_API_KEY", "go-secret"),
-        ("zai-coding-plan", "glm-5.3-flash", "ZHIPU_API_KEY", "zai-secret"),
+        ("zai-coding-plan", "glm-5.3-flash", "ZAI_API_KEY", "zai-secret"),
     ],
 )
 def test_setup_provider_auth_writes_selected_provider_entries(

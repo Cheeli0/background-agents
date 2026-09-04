@@ -162,6 +162,35 @@ describe("getProviderAuthenticationError", () => {
     ).toContain("OPENAI_API_KEY");
   });
 
+  it("rejects a Z.AI Coding Plan launch without a supported API key", () => {
+    expect(
+      getProviderAuthenticationError(
+        "zai-coding-plan/glm-5.3-flash",
+        {},
+        {
+          openai: "legacy_scoped_oauth",
+          xai: "legacy_scoped_oauth",
+        }
+      )
+    ).toEqual({
+      provider: "zai-coding-plan",
+      message:
+        "No Z.AI Coding Plan authentication is configured for this session. Provide ZAI_API_KEY (or the legacy ZHIPU_API_KEY), then create a new session.",
+    });
+  });
+
+  it.each([
+    ["canonical", { ZAI_API_KEY: "configured" }],
+    ["legacy", { ZHIPU_API_KEY: "configured" }],
+  ])("accepts a Z.AI Coding Plan %s API key", (_label, sandboxEnv) => {
+    expect(
+      getProviderAuthenticationError("zai-coding-plan/glm-5.3", sandboxEnv, {
+        openai: "legacy_scoped_oauth",
+        xai: "legacy_scoped_oauth",
+      })
+    ).toBeNull();
+  });
+
   it("does not validate providers outside subscription account routing", () => {
     expect(
       getProviderAuthenticationError(

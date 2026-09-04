@@ -37,10 +37,10 @@ def test_all_sandbox_builders_pin_opencode_with_glm_5_3_flash() -> None:
 
     assert version_patterns == dict.fromkeys(version_patterns, "1.18.23")
     assert RUNTIME_MANIFEST == {
-        "runtimeVersion": "v63-zai-coding-plan-auth",
-        "generation": 63,
-        "minimumCompatibleGeneration": 63,
-        "minimumRebuildGeneration": 63,
+        "runtimeVersion": "v64-zai-key-alias-preflight",
+        "generation": 64,
+        "minimumCompatibleGeneration": 64,
+        "minimumRebuildGeneration": 64,
     }
 
 
