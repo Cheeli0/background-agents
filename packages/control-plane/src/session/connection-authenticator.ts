@@ -14,7 +14,7 @@ import type { Logger } from "../logger";
 import { isSandboxReconnectBlockedStatus } from "../sandbox/lifecycle/decisions";
 import type { SandboxLifecycleManager } from "../sandbox/lifecycle/manager";
 import type { SourceControlProviderName } from "../source-control";
-import type { BackgroundTasks } from "../platform-ports";
+import type { BackgroundTasks, SessionWebSocket } from "../platform-ports";
 import type { ClientInfo } from "../types";
 import { isValidSandboxToken } from "./sandbox-access";
 import { requestLogger } from "./request-logger";
@@ -74,7 +74,7 @@ export type UpgradeDecision =
       kind: "accept";
       role: "sandbox" | "client";
       /** Adopt the host's socket for this upgrade and run the connection's side effects. */
-      attach(ws: WebSocket): Promise<void>;
+      attach(ws: SessionWebSocket): Promise<void>;
     }
   | { kind: "reject"; response: Response };
 
@@ -192,7 +192,7 @@ export class SessionConnectionAuthenticator implements SessionUpgradeAdmission {
     return accept("sandbox", (ws) => this.attachSandbox(ws, sandboxId, log));
   }
 
-  private attachClient(ws: WebSocket, wsId: string): void {
+  private attachClient(ws: SessionWebSocket, wsId: string): void {
     const { wsManager, backgroundTasks } = this.deps;
     wsManager.acceptClientSocket(ws, wsId);
     backgroundTasks.submit(() => wsManager.enforceAuthTimeout(ws, wsId), {
@@ -207,7 +207,11 @@ export class SessionConnectionAuthenticator implements SessionUpgradeAdmission {
    * published. Everything after the await is synchronous, so the new socket,
    * the ready status, and the broadcasts land together.
    */
-  private async attachSandbox(ws: WebSocket, sandboxId: string | null, log: Logger): Promise<void> {
+  private async attachSandbox(
+    ws: SessionWebSocket,
+    sandboxId: string | null,
+    log: Logger
+  ): Promise<void> {
     const {
       wsManager,
       sandboxRepository,
@@ -251,7 +255,7 @@ export class SessionConnectionAuthenticator implements SessionUpgradeAdmission {
 
   /** Validate the client token and current permission before granting an authorization lease. */
   async handleSubscribe(
-    ws: WebSocket,
+    ws: SessionWebSocket,
     data: {
       token: string;
       clientId: string;
@@ -352,7 +356,6 @@ export class SessionConnectionAuthenticator implements SessionUpgradeAdmission {
         lastSeen: Date.now(),
         clientId: data.clientId,
         authorizationExpiresAt,
-        ws,
       };
 
       try {
@@ -399,7 +402,7 @@ export class SessionConnectionAuthenticator implements SessionUpgradeAdmission {
    * structural rather than a convention inside the async authentication flow.
    */
   private completeClientSubscription(
-    ws: WebSocket,
+    ws: SessionWebSocket,
     client: ClientInfo,
     enrichment: Parameters<SessionSnapshotReader["readSessionSnapshot"]>[0],
     canAccessSandbox: boolean
@@ -443,7 +446,7 @@ export class SessionConnectionAuthenticator implements SessionUpgradeAdmission {
   }
 
   /** Return authorized client state, recovering an unexpired lease after hibernation. */
-  getClientInfo(ws: WebSocket): ClientInfo | null {
+  getClientInfo(ws: SessionWebSocket): ClientInfo | null {
     const { wsManager, log } = this.deps;
     const lookup = wsManager.lookupClient(ws);
     if (lookup.kind === "cached") return lookup.client;
@@ -464,7 +467,6 @@ export class SessionConnectionAuthenticator implements SessionUpgradeAdmission {
       lastSeen: Date.now(),
       clientId: mapping.client_id || `client-${Date.now()}`,
       authorizationExpiresAt: mapping.authorization_expires_at,
-      ws,
     };
 
     wsManager.setClient(ws, clientInfo);
@@ -479,7 +481,7 @@ function reject(body: string, status: number): UpgradeDecision {
 /** An accepted decision whose attachment can run once. */
 function accept(
   role: "sandbox" | "client",
-  attach: (ws: WebSocket) => void | Promise<void>
+  attach: (ws: SessionWebSocket) => void | Promise<void>
 ): UpgradeDecision {
   let attached = false;
   return {
