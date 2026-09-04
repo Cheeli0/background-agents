@@ -47,9 +47,9 @@ const PROVIDER_AUTH_ERROR = {
 } as const satisfies Record<SubscriptionProviderId, string>;
 
 const ZAI_CODING_PLAN_PROVIDER = "zai-coding-plan" as const;
-const ZAI_CODING_PLAN_KEYS = ["ZAI_API_KEY", "ZHIPU_API_KEY"] as const;
+const ZAI_CODING_PLAN_API_KEY = "ZHIPU_API_KEY";
 const ZAI_CODING_PLAN_AUTH_ERROR =
-  "No Z.AI Coding Plan authentication is configured for this session. Provide ZAI_API_KEY (or the legacy ZHIPU_API_KEY), then create a new session.";
+  "No Z.AI Coding Plan authentication is configured for this session. Provide ZHIPU_API_KEY, then create a new session.";
 
 export function getProviderAuthenticationError(
   model: string,
@@ -58,7 +58,7 @@ export function getProviderAuthenticationError(
 ): { provider: SubscriptionProviderId | typeof ZAI_CODING_PLAN_PROVIDER; message: string } | null {
   const provider = model.split("/", 1)[0];
   if (provider === ZAI_CODING_PLAN_PROVIDER) {
-    const available = ZAI_CODING_PLAN_KEYS.some((key) => Boolean(sandboxEnv[key]));
+    const available = Boolean(sandboxEnv[ZAI_CODING_PLAN_API_KEY]);
     return available
       ? null
       : { provider: ZAI_CODING_PLAN_PROVIDER, message: ZAI_CODING_PLAN_AUTH_ERROR };

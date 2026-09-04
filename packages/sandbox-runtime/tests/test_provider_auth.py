@@ -38,7 +38,7 @@ from sandbox_runtime.provider_auth import (
         ),
         (
             "zai-coding-plan",
-            {"ZAI_API_KEY": "zai-secret"},
+            {"ZHIPU_API_KEY": "zai-secret"},
             {"zai-coding-plan": {"type": "api", "key": "zai-secret"}},
         ),
         (
@@ -58,7 +58,7 @@ def test_provider_auth_entries(provider, environment, expected):
         ("minimax-coding-plan", "MINIMAX_API_KEY"),
         ("fireworks-ai", "FIREWORKS_API_KEY"),
         ("opencode-go", "OPENCODE_GO_API_KEY"),
-        ("zai-coding-plan", "ZAI_API_KEY"),
+        ("zai-coding-plan", "ZHIPU_API_KEY"),
         ("ollama-cloud", "OLLAMA_CLOUD_API_KEY"),
     ],
 )
@@ -69,19 +69,6 @@ def test_provider_auth_entries_requires_selected_provider_secret(provider, secre
 
 def test_provider_auth_entries_ignores_upstream_providers():
     assert provider_auth_entries("anthropic", {}) == {}
-
-
-def test_zai_provider_auth_accepts_legacy_zhipu_key():
-    assert provider_auth_entries("zai-coding-plan", {"ZHIPU_API_KEY": "legacy-secret"}) == {
-        "zai-coding-plan": {"type": "api", "key": "legacy-secret"}
-    }
-
-
-def test_zai_provider_auth_prefers_canonical_key():
-    assert provider_auth_entries(
-        "zai-coding-plan",
-        {"ZAI_API_KEY": "canonical-secret", "ZHIPU_API_KEY": "legacy-secret"},
-    ) == {"zai-coding-plan": {"type": "api", "key": "canonical-secret"}}
 
 
 @pytest.mark.parametrize(
