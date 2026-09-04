@@ -2,6 +2,14 @@
 
 New features, integrations, and notable improvements to Open-Inspect — newest first.
 
+## September 3, 2026
+
+**New Z.AI and OpenCode models.** Adds GLM 5.3 Flash through Z.AI Coding Plan and OpenCode Go, Muse
+Spark 1.3 and DeepSeek V4 Flash variants through OpenCode, and Big Pickle through OpenCode Zen.
+Their provider-specific reasoning efforts are available in sessions, automations, and integration
+settings. Sandbox images now pin OpenCode 1.18.23 and rebuild existing runtimes so Z.AI Coding Plan
+recognizes GLM 5.3 Flash.
+
 ## September 1, 2026
 
 **Workspace audit log.** Owners, Administrators, and authorized custom roles can review paginated

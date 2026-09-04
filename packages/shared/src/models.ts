@@ -11,10 +11,10 @@ import { SUBSCRIPTION_PROVIDER_IDS, type SubscriptionProviderId } from "./types/
  * Reasoning effort levels supported across providers.
  *
  * - "none": No reasoning (OpenAI only)
- * - "low"/"medium"/"high"/"xhigh": Progressive reasoning depth
+ * - "minimal"/"low"/"medium"/"high"/"xhigh": Progressive reasoning depth
  * - "max": Maximum reasoning effort for models that support it
  */
-export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 const GPT_5_6_DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 
@@ -201,6 +201,20 @@ export const MODEL_CATALOG = [
       { id: "opencode/glm-5", name: "GLM 5", description: "Z.ai 744B MoE" },
       { id: "opencode/glm-5.1", name: "GLM 5.1", description: "Z.ai" },
       { id: "opencode/glm-5.2", name: "GLM 5.2", description: "Z.ai" },
+      {
+        id: "opencode/muse-spark-1.3-contributor-free",
+        name: "Muse Spark 1.3 Contributor Free",
+        description: "Meta",
+        reasoning: {
+          efforts: ["minimal", "low", "medium", "high", "xhigh"],
+          default: "xhigh",
+        },
+      },
+      {
+        id: "opencode/big-pickle",
+        name: "Big Pickle",
+        description: "Reasoning model",
+      },
     ],
   },
   {
@@ -232,6 +246,12 @@ export const MODEL_CATALOG = [
     models: [
       { id: "zai-coding-plan/glm-5.2", name: "GLM 5.2", description: "Z.AI Coding Plan" },
       { id: "zai-coding-plan/glm-5.3", name: "GLM 5.3", description: "Z.AI Coding Plan" },
+      {
+        id: "zai-coding-plan/glm-5.3-flash",
+        name: "GLM 5.3 Flash",
+        description: "Z.AI Coding Plan",
+        reasoning: { efforts: ["low", "high", "max"], default: "high" },
+      },
     ],
   },
   {
@@ -269,12 +289,39 @@ export const MODEL_CATALOG = [
     enabledByDefault: false,
     models: [
       { id: "opencode-go/glm-5.1", name: "GLM 5.1", description: "Z.ai" },
+      {
+        id: "opencode-go/glm-5.3-flash",
+        name: "GLM 5.3 Flash",
+        description: "Z.ai",
+        reasoning: { efforts: ["low", "high", "max"], default: "high" },
+      },
       { id: "opencode-go/kimi-k2.5", name: "Kimi K2.5", description: "Moonshot AI" },
       { id: "opencode-go/kimi-k2.6", name: "Kimi K2.6", description: "Moonshot AI" },
       { id: "opencode-go/qwen3.6-plus", name: "Qwen3.6 Plus", description: "Alibaba Cloud" },
       { id: "opencode-go/minimax-m2.7", name: "MiniMax M2.7", description: "MiniMax" },
       { id: "opencode-go/mimo-v2-pro", name: "MiMo V2 Pro", description: "Xiaomi" },
       { id: "opencode-go/mimo-v2-omni", name: "MiMo V2 Omni", description: "Xiaomi" },
+      {
+        id: "opencode-go/muse-spark-1.3-contributor",
+        name: "Muse Spark 1.3 Contributor",
+        description: "Meta",
+        reasoning: {
+          efforts: ["minimal", "low", "medium", "high", "xhigh"],
+          default: "xhigh",
+        },
+      },
+      {
+        id: "opencode-go/deepseek-v4-flash",
+        name: "DeepSeek V4 Flash",
+        description: "DeepSeek",
+        reasoning: { efforts: ["low", "high", "max"], default: "high" },
+      },
+      {
+        id: "opencode-go/deepseek-v4-flash-vision-exp",
+        name: "DeepSeek V4 Flash Vision Exp",
+        description: "DeepSeek, vision",
+        reasoning: { efforts: ["low", "high", "max"], default: "high" },
+      },
     ],
   },
   {

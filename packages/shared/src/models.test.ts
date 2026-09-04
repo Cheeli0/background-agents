@@ -53,20 +53,30 @@ const ZEN_MODELS = [
   "opencode/glm-5",
   "opencode/glm-5.1",
   "opencode/glm-5.2",
+  "opencode/muse-spark-1.3-contributor-free",
+  "opencode/big-pickle",
 ] as const;
 
 const DEEPSEEK_MODELS = ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"] as const;
-const ZAI_CODING_PLAN_MODELS = ["zai-coding-plan/glm-5.2", "zai-coding-plan/glm-5.3"] as const;
+const ZAI_CODING_PLAN_MODELS = [
+  "zai-coding-plan/glm-5.2",
+  "zai-coding-plan/glm-5.3",
+  "zai-coding-plan/glm-5.3-flash",
+] as const;
 const MINIMAX_CODING_PLAN_MODELS = ["minimax-coding-plan/MiniMax-M2.7"] as const;
 const FIREWORKS_MODELS = ["fireworks-ai/kimi-k2p5-turbo"] as const;
 const OPENCODE_GO_MODELS = [
   "opencode-go/glm-5.1",
+  "opencode-go/glm-5.3-flash",
   "opencode-go/kimi-k2.5",
   "opencode-go/kimi-k2.6",
   "opencode-go/qwen3.6-plus",
   "opencode-go/minimax-m2.7",
   "opencode-go/mimo-v2-pro",
   "opencode-go/mimo-v2-omni",
+  "opencode-go/muse-spark-1.3-contributor",
+  "opencode-go/deepseek-v4-flash",
+  "opencode-go/deepseek-v4-flash-vision-exp",
 ] as const;
 const OLLAMA_CLOUD_MODELS = [
   "ollama-cloud/glm-5.1",
@@ -358,6 +368,37 @@ describe("model utilities", () => {
     expect(getReasoningConfig("deepseek/deepseek-v4-flash")).toBeUndefined();
   });
 
+  it("exposes the provider-defined reasoning ladders for the new model routes", () => {
+    for (const model of ["zai-coding-plan/glm-5.3-flash", "opencode-go/glm-5.3-flash"]) {
+      expect(getReasoningConfig(model)).toEqual({
+        efforts: ["low", "high", "max"],
+        default: "high",
+      });
+    }
+
+    for (const model of [
+      "opencode/muse-spark-1.3-contributor-free",
+      "opencode-go/muse-spark-1.3-contributor",
+    ]) {
+      expect(getReasoningConfig(model)).toEqual({
+        efforts: ["minimal", "low", "medium", "high", "xhigh"],
+        default: "xhigh",
+      });
+    }
+
+    for (const model of [
+      "opencode-go/deepseek-v4-flash",
+      "opencode-go/deepseek-v4-flash-vision-exp",
+    ]) {
+      expect(getReasoningConfig(model)).toEqual({
+        efforts: ["low", "high", "max"],
+        default: "high",
+      });
+    }
+
+    expect(getReasoningConfig("opencode/big-pickle")).toBeUndefined();
+  });
+
   it("validates reasoning efforts per model", () => {
     expect(isValidReasoningEffort("anthropic/claude-sonnet-4-5", "high")).toBe(true);
     expect(isValidReasoningEffort("anthropic/claude-sonnet-4-5", "low")).toBe(false);
@@ -377,6 +418,12 @@ describe("model utilities", () => {
     expect(isValidReasoningEffort("xai/grok-build-0.1", "high")).toBe(false);
     expect(isValidReasoningEffort("xai/grok-build-0.1", "xhigh")).toBe(false);
     expect(isValidReasoningEffort("deepseek/deepseek-v4-pro", "high")).toBe(false);
+    expect(isValidReasoningEffort("opencode/muse-spark-1.3-contributor-free", "minimal")).toBe(
+      true
+    );
+    expect(isValidReasoningEffort("opencode-go/deepseek-v4-flash", "max")).toBe(true);
+    expect(isValidReasoningEffort("opencode-go/deepseek-v4-flash", "xhigh")).toBe(false);
+    expect(isValidReasoningEffort("opencode/big-pickle", "high")).toBe(false);
     expect(isValidReasoningEffort("invalid", "high")).toBe(false);
     expect(isValidReasoningEffort("anthropic/claude-sonnet-4-5", "")).toBe(false);
   });
