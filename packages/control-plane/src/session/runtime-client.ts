@@ -1,7 +1,8 @@
 import type { CorrelationContext } from "../logger";
 import type { Env } from "../types";
-import { buildSessionInternalUrl, type SessionInternalPath } from "./contracts";
+import { buildSessionInternalRequest, type SessionInternalPath } from "./contracts";
 
+/** Reach one session's runtime by session id, wherever the host keeps it. */
 export interface SessionRuntimeClient {
   fetch(
     sessionId: string,
@@ -14,7 +15,8 @@ export interface SessionRuntimeClient {
 /**
  * Delivers one internal request to the session's runtime, however the host
  * reaches it: a Durable Object stub on Cloudflare, the runtime registry on
- * Node. The request's signal aborts the delivery as it aborts a fetch.
+ * Node. The platform record carries the host's as `SESSION`. The request's
+ * signal aborts the delivery as it aborts a fetch.
  */
 export type SessionRuntimeDispatch = (sessionId: string, request: Request) => Promise<Response>;
 
@@ -30,17 +32,13 @@ class DispatchingSessionRuntimeClient implements SessionRuntimeClient {
     init?: RequestInit,
     search?: string
   ): Promise<Response> {
-    return this.dispatch(
-      sessionId,
-      this.internalRequest(buildSessionInternalUrl(path, search), init)
-    );
-  }
-
-  private internalRequest(url: string, init?: RequestInit): Request {
     const headers = new Headers(init?.headers);
     headers.set("x-trace-id", this.ctx.trace_id);
     headers.set("x-request-id", this.ctx.request_id);
-    return new Request(url, { ...init, headers });
+    return this.dispatch(
+      sessionId,
+      buildSessionInternalRequest(path, { ...init, headers }, search)
+    );
   }
 }
 
@@ -53,9 +51,10 @@ export function createSessionRuntimeClientOver(
 }
 
 /**
- * A client for a caller that has no request of its own, such as a runtime
- * notifying another runtime. Every call is one hop: it carries `traceId` and
- * a fresh request id, so unrelated calls never share a request identity.
+ * A client over `dispatch` for a caller that has no request of its own, such
+ * as a runtime notifying another runtime. Every call is one hop: it carries
+ * `traceId` and a fresh request id, so unrelated calls never share a request
+ * identity.
  */
 export function createSessionRuntimeClientForTraceOver(
   dispatch: SessionRuntimeDispatch,
@@ -70,21 +69,21 @@ export function createSessionRuntimeClientForTraceOver(
   };
 }
 
-/** The Cloudflare dispatch: the session's Durable Object stub. */
-function durableObjectDispatch(env: Env): SessionRuntimeDispatch {
-  return (sessionId, request) => env.SESSION.get(env.SESSION.idFromName(sessionId)).fetch(request);
-}
-
+/**
+ * The platform's session client with `ctx` on every request as the
+ * `x-trace-id` and `x-request-id` headers the runtime's request log reads.
+ */
 export function createSessionRuntimeClient(
   env: Env,
   ctx: CorrelationContext
 ): SessionRuntimeClient {
-  return createSessionRuntimeClientOver(durableObjectDispatch(env), ctx);
+  return createSessionRuntimeClientOver(env.SESSION, ctx);
 }
 
+/** The platform's session client for a caller without a request of its own; see `createSessionRuntimeClientForTraceOver`. */
 export function createSessionRuntimeClientForTrace(
   env: Env,
   traceId: string
 ): SessionRuntimeClient {
-  return createSessionRuntimeClientForTraceOver(durableObjectDispatch(env), traceId);
+  return createSessionRuntimeClientForTraceOver(env.SESSION, traceId);
 }
