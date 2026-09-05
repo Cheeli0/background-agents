@@ -163,6 +163,7 @@ async function boot(
     SESSION: createNodeSessionRuntimeDispatch(registry),
     REPOS_CACHE: new SqlCacheStore(cacheDb),
     MEDIA_BUCKET: createS3ObjectStorage(options.objectStorage),
+    JOBS: null, // Unavailable until this host has a durable jobs table and poller.
   };
   const env: Env = { ...config, ...platform };
 
