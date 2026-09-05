@@ -25,6 +25,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { WebSocketServer } from "ws";
 import { SessionIndexStore } from "../db/session-index";
+import { SqlCacheStore } from "../db/sql-cache-store";
 import type { SqlDatabase } from "../db/sql-database";
 import { requireRepoSecretsEncryptionKey, requireTokenEncryptionKey } from "../env-validation";
 import { createLogger, parseLogLevel, type Logger } from "../logger";
@@ -39,12 +40,12 @@ import { createSessionRuntime, type SessionRuntime } from "../session/components
 import { createSessionRuntimeClient } from "../session/runtime-client";
 import type { Env, EnvConfig, Platform } from "../types";
 import { createNodeBackgroundTasks, settlesWithin } from "./background-tasks";
+import { openNodeCacheDatabase } from "./cache-database";
 import type { NodeHostSettings } from "./config";
 import { CronLoop } from "./cron-loop";
 import { HostAlarmClock } from "./host-alarm-clock";
 import { openHostAlarmIndex } from "./host-alarm-index";
 import { createNodeHttpServer, type HealthReport } from "./http-server";
-import { createMemoryCacheStore } from "./memory-cache-store";
 import { ensurePrivateDirectory } from "./private-paths";
 import { createNodeSessionRuntimeDispatch } from "./runtime-client";
 import { createS3ObjectStorage, type S3ObjectStorageConfig } from "./s3-object-storage";
@@ -119,14 +120,31 @@ async function boot(
   const startedAtMs = Date.now();
 
   ensurePrivateDirectory(settings.dataDir);
-  const db = openNodeSqlDatabase(join(settings.dataDir, GLOBAL_STORE_FILE), {
-    migrationsDir: settings.migrationsDir,
-  });
-  acquire(() => db.close());
+
+  // Every file the host holds open, registered once. Boot failure unwinds it
+  // with everything else acquired; a successful shutdown closes it through
+  // `closeStores` below. One registration, so the two paths cannot drift.
+  const stores: Array<() => void> = [];
+  const ownStore = <T extends { close(): void }>(store: T): T => {
+    const close = (): void => store.close();
+    stores.push(close);
+    acquire(close);
+    return store;
+  };
+  const closeStores = (): void => {
+    for (const close of [...stores].reverse()) close();
+  };
+
+  const db = ownStore(
+    openNodeSqlDatabase(join(settings.dataDir, GLOBAL_STORE_FILE), {
+      migrationsDir: settings.migrationsDir,
+    })
+  );
   const migrationsApplied = await countMigrations(db);
 
-  const alarmIndex = openHostAlarmIndex(settings.dataDir);
-  acquire(() => alarmIndex.close());
+  const cacheDb = ownStore(openNodeCacheDatabase(settings.dataDir, log));
+
+  const alarmIndex = ownStore(openHostAlarmIndex(settings.dataDir));
   const clock: HostAlarmClock = new HostAlarmClock({
     index: alarmIndex,
     deliver: (sessionId) => registry.deliverScheduledDeadline(sessionId),
@@ -143,7 +161,7 @@ async function boot(
   const platform: Platform = {
     DB: db,
     SESSION: createNodeSessionRuntimeDispatch(registry),
-    REPOS_CACHE: createMemoryCacheStore(),
+    REPOS_CACHE: new SqlCacheStore(cacheDb),
     MEDIA_BUCKET: createS3ObjectStorage(options.objectStorage),
   };
   const env: Env = { ...config, ...platform };
@@ -254,8 +272,7 @@ async function boot(
     server.closeAllConnections();
     await closed;
 
-    alarmIndex.close();
-    db.close();
+    closeStores();
 
     const report: ShutdownReport = { clean: abandoned.length === 0, abandoned };
     if (report.clean) {

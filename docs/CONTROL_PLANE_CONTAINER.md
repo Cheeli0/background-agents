@@ -92,8 +92,11 @@ Everything the host persists is under `/data` on the `control-plane-data` volume
 - `global.db`: the global store (the tables D1 holds on Cloudflare).
 - `sessions/<id>.db`: one file per session (the Durable Object storage on Cloudflare).
 - `host-alarms.db`: the index of every session's next scheduled deadline.
+- `cache.db`: the cache the host uses where Cloudflare uses KV. Alone among these, it is not
+  deployment state — every entry is rebuilt by being used, so a file that cannot be opened is
+  discarded and recreated rather than failing the boot.
 
-These three are one deployment's state, and the unit of a deployment backup is the whole volume:
+The first three are one deployment's state, and the unit of a deployment backup is the whole volume:
 stop the app, snapshot the volume (an EBS snapshot on AWS), start it again. That procedure and its
 rehearsal are tracked separately from this stack.
 
@@ -104,6 +107,11 @@ It does not bring back the session files or the alarm index: the restored index 
 files are gone, and the host opens each of those as an empty session when it is next touched, with
 no pending deadlines. The entrypoint logs a warning to that effect after every restore. Treat the
 replica as protection for the global store, not as recovery of a deployment.
+
+`cache.db` is deliberately excluded from that replication: it holds the repositories listing and a
+live GitHub installation token, neither of which belongs in a backup bucket, and a cache refills by
+being used. A volume snapshot does capture it, so treat a snapshot as holding a credential and give
+it the access policy you would give the database.
 
 To rehearse the restore, remove the containers that hold the volume open, delete the volume (its
 name is prefixed with the compose project name, the checkout's directory name by default), then

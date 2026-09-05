@@ -4,9 +4,8 @@
  * Terraform declares (`cron_triggers` in
  * `terraform/environments/production/workers-control-plane.tf`), which must
  * list exactly the expressions below; a unit test checks the two agree. The
- * Node host will drive the same table from an in-process loop over
- * `nextCronOccurrence` from `@open-inspect/shared` (H-5); nothing on Node
- * consumes it yet.
+ * Node host drives the same table from an in-process loop over
+ * `nextCronOccurrence` from `@open-inspect/shared` (src/node/cron-loop.ts).
  *
  * A slot may fire twice (a retried trigger, two hosts during a cutover) and
  * that is harmless: the automation scheduler's tick claims its work with an
