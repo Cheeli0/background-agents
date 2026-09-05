@@ -6,13 +6,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { WebSocket as NodeWebSocket, WebSocketServer } from "ws";
+import { WS_CLOSE_SERVICE_RESTART } from "@open-inspect/shared/types/websocket";
 import type { SqlDatabase } from "../db/sql-database";
 import type { AlarmScheduleStore } from "../session/alarm/scheduler";
 import type { SessionRuntime } from "../session/components";
 import type { SessionPlatform, SessionStorage } from "../session/platform";
 import type { BackgroundTasks } from "../platform-ports";
 import {
-  SERVICE_RESTART_CLOSE_CODE,
   SessionRuntimeRegistry,
   type ManagedSessionRuntime,
   type SessionRuntimeRegistryOptions,
@@ -568,8 +568,14 @@ describe("SessionRuntimeRegistry", () => {
       try {
         const registry = makeRegistry({ storeProvider: createFileSessionStoreProvider(dataDir) });
         const { server, client } = await connect();
-        const closed = new Promise<{ code: number; reason: string }>((done) =>
-          client.once("close", (code, reason) => done({ code, reason: reason.toString() }))
+        // The standards-style close event carries `wasClean`, which is what
+        // the browser decides on: a proper close frame makes this a clean
+        // close, so the web transport has to retry on the code rather than
+        // treat it as a deliberate teardown (`use-session-transport.ts`).
+        const closed = new Promise<{ code: number; reason: string; wasClean: boolean }>((done) =>
+          client.addEventListener("close", (event) =>
+            done({ code: event.code, reason: event.reason, wasClean: event.wasClean })
+          )
         );
         const runtime = await registry.withRuntime("s1", async (runtime) => {
           runtime.platform.sockets.adopt(server, ["wsid:c1"]);
@@ -587,8 +593,9 @@ describe("SessionRuntimeRegistry", () => {
         await registry.shutdown();
 
         expect(await closed).toEqual({
-          code: SERVICE_RESTART_CLOSE_CODE,
+          code: WS_CLOSE_SERVICE_RESTART,
           reason: "Service restart",
+          wasClean: true,
         });
         expect(runtime.server.onClose).toHaveBeenCalledWith(server, 1012, "Service restart", true);
         expect(deliveredAgainstOpenStore).toBe(true);
@@ -636,7 +643,7 @@ describe("SessionRuntimeRegistry", () => {
       await attached;
 
       await shutdown;
-      expect(await closed).toBe(SERVICE_RESTART_CLOSE_CODE);
+      expect(await closed).toBe(WS_CLOSE_SERVICE_RESTART);
       expect(registry.residentSessionIds()).toEqual([]);
       expect(log.warn).not.toHaveBeenCalled();
     } finally {
