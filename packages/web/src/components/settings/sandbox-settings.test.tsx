@@ -196,13 +196,16 @@ describe("SandboxSettingsPage — tunnel ports editor", () => {
     expect(screen.getByText("Add port").closest("button")).toBeDisabled();
   });
 
-  it("keeps Save disabled when only invalid input is entered", async () => {
-    renderWithSWR({ integrationId: "sandbox", settings: null });
+  it("allows Save to surface validation when only invalid input is entered", async () => {
+    const { fetchMock } = renderWithSWR({ integrationId: "sandbox", settings: null });
     await user.click(screen.getByText("Add port"));
 
     await user.type(screen.getByPlaceholderText("e.g. 3000"), "abc");
 
-    expect(screen.getByText("Save Settings").closest("button")).toBeDisabled();
+    expect(screen.getByText("Save Settings").closest("button")).toBeEnabled();
+    await user.click(screen.getByText("Save Settings"));
+    expect(screen.getByText("Invalid port numbers: abc")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("shows validation error for mixed valid and invalid ports", async () => {
@@ -306,24 +309,23 @@ describe("SandboxSettingsPage — tunnel ports editor", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         SETTINGS_KEY,
-        expect.objectContaining({
-          method: "PUT",
-          body: JSON.stringify({
-            settings: {
-              defaults: {
-                tunnelPorts: [],
-                terminalEnabled: false,
-                codeServerPort: 8081,
-                vncPort: DEFAULT_VNC_PORT + 1,
-                terminalPort: 7000,
-                maxConcurrentChildSessions: DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS,
-                maxTotalChildSessions: DEFAULT_MAX_TOTAL_CHILD_SESSIONS,
-              },
-              enabledRepos: ["acme/app"],
-            },
-          }),
-        })
+        expect.objectContaining({ method: "PUT" })
       );
+      const request = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")?.[1];
+      expect(JSON.parse(request?.body as string)).toEqual({
+        settings: {
+          defaults: {
+            tunnelPorts: [],
+            terminalEnabled: false,
+            codeServerPort: 8081,
+            vncPort: DEFAULT_VNC_PORT + 1,
+            terminalPort: 7000,
+            maxConcurrentChildSessions: DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS,
+            maxTotalChildSessions: DEFAULT_MAX_TOTAL_CHILD_SESSIONS,
+          },
+          enabledRepos: ["acme/app"],
+        },
+      });
     });
   });
 
@@ -452,22 +454,21 @@ describe("SandboxSettingsPage — tunnel ports editor", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         SETTINGS_KEY,
-        expect.objectContaining({
-          method: "PUT",
-          body: JSON.stringify({
-            settings: {
-              defaults: {
-                tunnelPorts: [8080],
-                terminalEnabled: false,
-                codeServerPort: 8081,
-                maxConcurrentChildSessions: DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS,
-                maxTotalChildSessions: DEFAULT_MAX_TOTAL_CHILD_SESSIONS,
-              },
-              enabledRepos: ["acme/app"],
-            },
-          }),
-        })
+        expect.objectContaining({ method: "PUT" })
       );
+      const request = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")?.[1];
+      expect(JSON.parse(request?.body as string)).toEqual({
+        settings: {
+          defaults: {
+            tunnelPorts: [8080],
+            terminalEnabled: false,
+            codeServerPort: 8081,
+            maxConcurrentChildSessions: DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS,
+            maxTotalChildSessions: DEFAULT_MAX_TOTAL_CHILD_SESSIONS,
+          },
+          enabledRepos: ["acme/app"],
+        },
+      });
     });
   });
 
