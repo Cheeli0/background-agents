@@ -1,10 +1,10 @@
 import asyncio
-import signal
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sandbox_runtime.process_output import KILL_SIGNAL
 from sandbox_runtime.repo_config import RepoEntry
 from sandbox_runtime.repository_sync import (
     DEFAULT_GIT_CLONE_TIMEOUT_SECONDS,
@@ -28,7 +28,7 @@ def _hung_process() -> MagicMock:
 
     process = MagicMock(returncode=None, pid=4321)
     process.communicate = AsyncMock(side_effect=communicate_forever)
-    process.wait = AsyncMock(return_value=-signal.SIGKILL)
+    process.wait = AsyncMock(return_value=-KILL_SIGNAL)
     return process
 
 
@@ -52,12 +52,12 @@ async def test_hung_clone_times_out_and_cleans_up_process_group(tmp_path: Path) 
             new_callable=AsyncMock,
             return_value=process,
         ) as create_process,
-        patch("sandbox_runtime.repository_sync.os.killpg") as kill_process_group,
+        patch("sandbox_runtime.repository_sync.KILL_PROCESS_GROUP") as kill_process_group,
         pytest.raises(RepositorySyncTimeout),
     ):
         await synchronizer._clone_repo(repo)
 
-    kill_process_group.assert_called_once_with(process.pid, signal.SIGKILL)
+    kill_process_group.assert_called_once_with(process.pid, KILL_SIGNAL)
     process.wait.assert_awaited_once()
     assert create_process.await_args.kwargs["start_new_session"] is True
     log.error.assert_called_once_with(
@@ -82,12 +82,12 @@ async def test_hung_fetch_times_out_and_cleans_up_process_group(tmp_path: Path) 
             new_callable=AsyncMock,
             return_value=process,
         ) as create_process,
-        patch("sandbox_runtime.repository_sync.os.killpg") as kill_process_group,
+        patch("sandbox_runtime.repository_sync.KILL_PROCESS_GROUP") as kill_process_group,
         pytest.raises(RepositorySyncTimeout),
     ):
         await synchronizer._fetch_branch(repo, repo.branch)
 
-    kill_process_group.assert_called_once_with(process.pid, signal.SIGKILL)
+    kill_process_group.assert_called_once_with(process.pid, KILL_SIGNAL)
     process.wait.assert_awaited_once()
     assert create_process.await_args.kwargs["start_new_session"] is True
     log.error.assert_called_once_with(

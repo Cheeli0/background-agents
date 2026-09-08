@@ -9,7 +9,12 @@ from .process_output import communicate_owned_subprocess, terminate_owned_subpro
 from .runtime_config import BootMode
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .repo_config import RepoEntry
+
+
+KILL_PROCESS_GROUP: Callable[[int, int], None] | None = getattr(os, "killpg", None)
 
 
 class RepositoryHooks:
@@ -22,10 +27,10 @@ class RepositoryHooks:
         self.log = log
 
     async def _terminate(self, process: asyncio.subprocess.Process) -> None:
-        await terminate_owned_subprocess(process, kill_process_group=os.killpg)
+        await terminate_owned_subprocess(process, kill_process_group=KILL_PROCESS_GROUP)
 
     async def _communicate(self, process: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
-        return await communicate_owned_subprocess(process, kill_process_group=os.killpg)
+        return await communicate_owned_subprocess(process, kill_process_group=KILL_PROCESS_GROUP)
 
     async def _run(
         self,

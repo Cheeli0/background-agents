@@ -9,6 +9,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from sandbox_runtime.process_output import KILL_SIGNAL
 from sandbox_runtime.repository_sync import (
     RepositorySyncOutcome,
     RepositorySyncResult,
@@ -221,7 +222,7 @@ class TestImageBuildMode:
 
         process = MagicMock(returncode=None, pid=4321)
         process.communicate = AsyncMock(side_effect=communicate_forever)
-        process.wait = AsyncMock(return_value=-signal.SIGKILL)
+        process.wait = AsyncMock(return_value=-KILL_SIGNAL)
 
         with (
             patch(
@@ -229,7 +230,7 @@ class TestImageBuildMode:
                 new_callable=AsyncMock,
                 return_value=process,
             ) as create_process,
-            patch("sandbox_runtime.repository_sync.os.killpg") as kill_process_group,
+            patch("sandbox_runtime.repository_sync.KILL_PROCESS_GROUP") as kill_process_group,
         ):
             operation = asyncio.create_task(
                 supervisor.repository_boot.synchronizer._clone_repo(
@@ -241,7 +242,7 @@ class TestImageBuildMode:
             with pytest.raises(asyncio.CancelledError):
                 await operation
 
-        kill_process_group.assert_called_once_with(process.pid, signal.SIGKILL)
+        kill_process_group.assert_called_once_with(process.pid, KILL_SIGNAL)
         process.wait.assert_awaited_once()
         assert create_process.await_args.kwargs["start_new_session"] is True
 

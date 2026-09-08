@@ -9,7 +9,7 @@ test("lint-staged runs Ruff through the repository's uv project", async () => {
   );
   const commands =
     packageJson["lint-staged"][
-      "packages/{daytona-infra,e2b-infra,modal-infra,sandbox-runtime}/**/*.py"
+      "packages/{daytona-infra,e2b-infra,modal-infra,sandbox-runtime,sandbox-images}/**/*.py"
     ];
 
   assert.deepEqual(commands, [

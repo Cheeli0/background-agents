@@ -1,6 +1,6 @@
 {
-  "runtimeVersion": "v64-zai-key-alias-preflight",
-  "generation": 64,
+  "runtimeVersion": "v65-zai-auth-mcp-package-cache",
+  "generation": 65,
   "minimumCompatibleGeneration": 64,
-  "minimumRebuildGeneration": 64
+  "minimumRebuildGeneration": 65
 }

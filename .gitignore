@@ -11,6 +11,7 @@ __pycache__/
 venv/
 *.egg-info/
 .ruff_cache/
+.uv-cache/
 .pytest_cache/
 
 # Build outputs
@@ -85,6 +86,7 @@ override.tf.json
 terraform.rc
 *.tfplan
 .vercel
+.codex-worktrees/
 
 # Internal docs (kept locally)
 docs/internal/
@@ -94,3 +96,14 @@ terraform/environments/production/plan.out
 terraform/environments/production/backend_override.tf
 terraform/environments/production/terraform.tfstate*
 terraform/environments/production/.terraform*
+
+# The compose smoke bundles its driver here at run time.
+packages/control-plane/test/smoke/run-smoke.bundle.mjs
+smoke-logs/
+
+# AWS environments (see terraform/environments/aws-*); state files and
+# *_override.tf are already covered globally above.
+terraform/environments/aws-staging/plan.out
+terraform/environments/aws-production/plan.out
+
+# Stable local advisory-lock inode for sandbox release selection writers.

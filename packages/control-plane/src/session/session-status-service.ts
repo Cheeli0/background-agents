@@ -19,7 +19,13 @@ import type { MessageRepository } from "./message-repository";
 import type { ArtifactRepository } from "./artifact-repository";
 import type { SessionMessenger } from "./messenger";
 import type { BackgroundTasks } from "../platform-ports";
-import { isTurnSettled } from "@open-inspect/shared/types/session-activity";
+import { isSessionPromptable, isTurnSettled } from "@open-inspect/shared/types/session-activity";
+
+/** The index projections this service keeps consistent with the session row. */
+type SessionIndexProjections = Pick<
+  SessionIndexStore,
+  "updateStatus" | "repairStatus" | "finalizeChildAdmission" | "updateMetrics"
+>;
 
 export class SessionStatusService {
   constructor(
@@ -29,7 +35,7 @@ export class SessionStatusService {
     private readonly messageRepository: MessageRepository,
     private readonly artifactRepository: ArtifactRepository,
     private readonly messenger: SessionMessenger,
-    private readonly sessionIndex: SessionIndexStore | null,
+    private readonly sessionIndex: SessionIndexProjections,
     /** Reaches the parent session's runtime for the child rollup. */
     private readonly sessions: SessionRuntimeClient
   ) {}
@@ -77,7 +83,7 @@ export class SessionStatusService {
    */
   async repairIndexStatus(): Promise<void> {
     const session = this.repository.getSession();
-    if (!session || !this.sessionIndex) return;
+    if (!session) return;
 
     const publicSessionId = this.getPublicSessionId(session);
     const repaired = await this.sessionIndex
@@ -138,18 +144,35 @@ export class SessionStatusService {
   /**
    * After an execution finishes, settle the session status: back to active
    * when more prompts are queued, otherwise completed/failed by outcome.
+   * Leaves a session that was cancelled or archived meanwhile as it is.
    */
   async reconcileAfterExecution(success: boolean): Promise<void> {
+    if (this.isSessionClosed()) return;
     const pendingOrProcessing = this.messageRepository.getPendingOrProcessingCount();
     const nextStatus: SessionStatus =
       pendingOrProcessing > 0 ? "active" : success ? "completed" : "failed";
     await this.transition(nextStatus);
   }
 
+  /** Leaves a session that was cancelled or archived meanwhile as it is. */
   async reconcileAfterQueueRemoval(): Promise<void> {
+    if (this.isSessionClosed()) return;
     if (this.messageRepository.getPendingOrProcessingCount() > 0) return;
     const nextStatus = this.getIdleStatusFromTerminalMessages();
     await this.transition(nextStatus);
+  }
+
+  /**
+   * Whether the session has been cancelled or archived. A reconcile derives
+   * the next status from message state, and message state says nothing about
+   * a status the user chose; a reconcile that runs after an await (the
+   * terminal projection, the stop alarm) must not move such a session, and
+   * `transition` writes whatever it is given. Read in the same turn as the
+   * transition it guards.
+   */
+  private isSessionClosed(): boolean {
+    const session = this.repository.getSession();
+    return session !== null && !isSessionPromptable(session.status);
   }
 
   async settleFromMessageState(): Promise<SessionStatus> {
@@ -230,7 +253,6 @@ export class SessionStatusService {
     status: SessionStatus,
     updatedAt: number
   ): Promise<void> {
-    if (!this.sessionIndex) return;
     const projected = await this.sessionIndex.updateStatus(sessionId, status, updatedAt);
     if (projected && status === "active") {
       await this.sessionIndex.finalizeChildAdmission(sessionId);
@@ -252,9 +274,6 @@ export class SessionStatusService {
   }
 
   private syncSessionMetrics(sessionId: string): void {
-    const sessionIndex = this.sessionIndex;
-    if (!sessionIndex) return;
-
     const session = this.repository.getSession();
     if (!session) return;
 
@@ -265,7 +284,7 @@ export class SessionStatusService {
 
     this.backgroundTasks.submit(
       () =>
-        sessionIndex.updateMetrics(sessionId, {
+        this.sessionIndex.updateMetrics(sessionId, {
           totalCost: session.total_cost ?? 0,
           activeDurationMs,
           messageCount,
