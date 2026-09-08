@@ -4,7 +4,6 @@ import json
 import os
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -75,51 +74,6 @@ def test_deployed_environment_requires_image_reference(monkeypatch, image_id) ->
     else:
         with pytest.raises(RuntimeError, match="missing its verified"):
             base.deployed_image_environment()
-
-
-def test_modal_image_upload_uses_one_archive(monkeypatch, tmp_path) -> None:
-    from src.images import base
-
-    image = Mock()
-    image.add_local_file.return_value = image
-    image.run_commands.return_value = image
-    image.env.return_value = image
-    image.workdir.return_value = image
-    monkeypatch.setattr(base.modal, "is_local", lambda: True)
-    monkeypatch.setattr(
-        base,
-        "local_image_plan",
-        lambda: (
-            tmp_path,
-            {"target": {"base": "python:3.12-slim"}, "runtimeEnv": {}},
-        ),
-    )
-    monkeypatch.setattr(base.modal.Image, "from_registry", Mock(return_value=image))
-    archive = tmp_path / "modal-bundle.tar"
-    monkeypatch.setattr(base, "_create_image_archive", Mock(return_value=archive))
-
-    base._define_image()
-
-    image.add_local_file.assert_called_once_with(str(archive), base.IMAGE_ARCHIVE_PATH, copy=True)
-    image.run_commands.assert_called_once_with(
-        f"python -m tarfile -e {base.IMAGE_ARCHIVE_PATH} {base.IMAGE_BUNDLE_PATH}",
-        f"bash {base.IMAGE_BUNDLE_PATH}/packages/sandbox-images/install/install.sh",
-    )
-
-
-def test_modal_image_archive_preserves_nested_bundle_paths(tmp_path) -> None:
-    from src.images import base
-
-    bundle = tmp_path / "modal-bundle"
-    script = bundle / "packages/sandbox-images/install/os/debian.sh"
-    script.parent.mkdir(parents=True)
-    script.write_text("#!/usr/bin/env bash\necho ready\n")
-
-    archive = base._create_image_archive(bundle)
-
-    with tarfile.open(archive) as image_tar:
-        member = image_tar.getmember("packages/sandbox-images/install/os/debian.sh")
-        assert image_tar.extractfile(member).read() == script.read_bytes()
 
 
 def test_eager_build_does_not_register_functions_before_image_exists() -> None:

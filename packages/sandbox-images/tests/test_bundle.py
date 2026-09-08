@@ -136,6 +136,12 @@ def test_pack_normalizes_windows_shell_line_endings(checkout, tmp_path):
     assert b"\r\n" not in packed_script.read_bytes()
 
 
+def test_pack_writes_generated_shell_config_with_lf_endings(checkout, tmp_path):
+    packed = pack_bundle(checkout, "modal", tmp_path / "bundles")
+
+    assert b"\r\n" not in (packed / "image-config.sh").read_bytes()
+
+
 def test_each_caller_gets_a_fresh_context_without_reusing_extra_files(tmp_path):
     first = pack_bundle(REPO_ROOT, "e2b", tmp_path)
     (first / ".env").write_text("must not leak")

@@ -200,9 +200,11 @@ def pack_bundle(root: Path, provider: str, output_root: Path) -> Path:
             pin = toolchain[key][plan["target"]["node"]] if key == "node" else toolchain[key]
             variables[f"{name}_VERSION"] = pin["version"]
             variables[f"{name}_SHA256"] = pin["sha256"]
-        (destination / "image-config.sh").write_text(
-            "\n".join(f"export {key}={shlex.quote(value)}" for key, value in variables.items())
-            + "\n"
+        (destination / "image-config.sh").write_bytes(
+            (
+                "\n".join(f"export {key}={shlex.quote(value)}" for key, value in variables.items())
+                + "\n"
+            ).encode("utf-8")
         )
 
         return destination
