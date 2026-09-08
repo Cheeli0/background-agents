@@ -191,7 +191,7 @@ async function handleCreatePR(
 ): Promise<Response> {
   const sessionId = params.id;
 
-  const body = await parseJsonBody<unknown>(request);
+  const body = await parseJsonBody(request);
   if (body instanceof Response) return body;
   if (!isObjectBody(body)) return error("JSON body must be an object");
 

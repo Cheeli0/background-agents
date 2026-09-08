@@ -75,7 +75,7 @@ async function handleCreateAutomation(
   _params: object,
   ctx: RequestContext
 ): Promise<Response> {
-  const rawBody = await parseJsonBody<unknown>(request);
+  const rawBody = await parseJsonBody(request);
   if (rawBody instanceof Response) return rawBody;
 
   // Automation attribution comes from the verified principal. The stored
@@ -352,7 +352,7 @@ async function handleUpdateAutomation(
   const admission = admittedAutomation(ctx);
   const { automation: existing } = admission;
 
-  const rawBody = await parseJsonBody<unknown>(request);
+  const rawBody = await parseJsonBody(request);
   if (rawBody instanceof Response) return rawBody;
   const parsedBody = updateAutomationRequestSchema.safeParse(rawBody);
   if (!parsedBody.success) {
