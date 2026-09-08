@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,8 @@ from sandbox_runtime.runtime_manifest import RUNTIME_VERSION
 
 CACHE_BUSTER = RUNTIME_VERSION
 IMAGE_ID_ENV = "OPENINSPECT_MODAL_BASE_IMAGE_ID"
+IMAGE_ARCHIVE_PATH = "/tmp/openinspect-image.tar"
+IMAGE_BUNDLE_PATH = "/tmp/openinspect-image"
 
 
 def local_image_plan() -> tuple[Path, dict[str, Any]]:
@@ -25,6 +28,26 @@ def local_image_plan() -> tuple[Path, dict[str, Any]]:
     bundle = pack_bundle(root, "modal", root / ".cache/sandbox-images")
     plan = json.loads((bundle / "build-config.json").read_text())
     return bundle, plan
+
+
+def _create_image_archive(bundle: Path) -> Path:
+    archive = bundle.with_suffix(".tar")
+    with tarfile.open(archive, "w", format=tarfile.PAX_FORMAT) as image_tar:
+        for path in sorted(bundle.rglob("*")):
+            if path.is_dir():
+                continue
+            info = image_tar.gettarinfo(str(path), path.relative_to(bundle).as_posix())
+            info.uid = 0
+            info.gid = 0
+            info.uname = ""
+            info.gname = ""
+            info.mtime = 0
+            if path.is_symlink():
+                image_tar.addfile(info)
+            else:
+                with path.open("rb") as content:
+                    image_tar.addfile(info, content)
+    return archive
 
 
 def image_reference_path() -> Path:
@@ -58,15 +81,14 @@ def _define_image() -> modal.Image:
             raise RuntimeError("Deployed Modal function is missing its verified sandbox image ID")
         return modal.Image.from_id(image_id)
     bundle, plan = local_image_plan()
+    archive = _create_image_archive(bundle)
     return (
         modal.Image.from_registry(plan["target"]["base"])
-        .add_local_dir(
-            str(bundle),
-            "/tmp/openinspect-image",
-            copy=True,
-            ignore=lambda _path: False,
+        .add_local_file(str(archive), IMAGE_ARCHIVE_PATH, copy=True)
+        .run_commands(
+            f"python -m tarfile -e {IMAGE_ARCHIVE_PATH} {IMAGE_BUNDLE_PATH}",
+            f"bash {IMAGE_BUNDLE_PATH}/packages/sandbox-images/install/install.sh",
         )
-        .run_commands("bash /tmp/openinspect-image/packages/sandbox-images/install/install.sh")
         .env(plan["runtimeEnv"] | {"SANDBOX_VERSION": RUNTIME_VERSION})
         .workdir("/workspace")
     )
