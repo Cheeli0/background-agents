@@ -18,7 +18,13 @@ def checkout(tmp_path):
         REPO_ROOT,
         path,
         ignore=shutil.ignore_patterns(
-            ".git", "node_modules", ".venv", ".cache", "__pycache__", ".terraform"
+            ".git",
+            ".codex-worktrees",
+            "node_modules",
+            ".venv",
+            ".cache",
+            "__pycache__",
+            ".terraform",
         ),
     )
     return path
@@ -114,6 +120,20 @@ def test_runtime_assets_are_packed_without_per_file_manifest(checkout, tmp_path)
     config = json.loads((packed / "build-config.json").read_text())
     assert set(config) == {"provider", "target", "runtimeVersion", "runtimeEnv", "buildHash"}
     assert not (packed / "packages/e2b-infra").exists()
+
+
+def test_pack_normalizes_windows_shell_line_endings(checkout, tmp_path):
+    script = checkout / "packages/sandbox-images/install/install.sh"
+    lf_content = script.read_bytes().replace(b"\r\n", b"\n")
+    script.write_bytes(lf_content)
+    lf_hash = plan_image(checkout, "modal")["buildHash"]
+    script.write_bytes(lf_content.replace(b"\n", b"\r\n"))
+
+    packed = pack_bundle(checkout, "modal", tmp_path / "bundles")
+    packed_script = packed / "packages/sandbox-images/install/install.sh"
+
+    assert plan_image(checkout, "modal")["buildHash"] == lf_hash
+    assert b"\r\n" not in packed_script.read_bytes()
 
 
 def test_each_caller_gets_a_fresh_context_without_reusing_extra_files(tmp_path):

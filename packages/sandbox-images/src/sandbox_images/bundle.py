@@ -106,6 +106,13 @@ def source_files(root: Path, paths: tuple[Path, ...]) -> list[Path]:
     return files
 
 
+def _source_content(path: Path) -> bytes:
+    content = str(path.readlink()).encode() if path.is_symlink() else path.read_bytes()
+    if not path.is_symlink() and path.suffix == ".sh":
+        return content.replace(b"\r\n", b"\n")
+    return content
+
+
 def plan_image(root: Path, provider: str) -> dict[str, Any]:
     root = root.resolve()
     if provider not in PROVIDERS:
@@ -136,7 +143,7 @@ def plan_image(root: Path, provider: str) -> dict[str, Any]:
     digest = hashlib.sha256(provider.encode())
     for path in source_files(root, paths):
         # Boundaries, executable bits and link destinations also affect the build.
-        content = str(path.readlink()).encode() if path.is_symlink() else path.read_bytes()
+        content = _source_content(path)
         digest.update(path.relative_to(root).as_posix().encode() + b"\0")
         digest.update(str(stat.S_IMODE(path.lstat().st_mode)).encode() + b"\0")
         digest.update(hashlib.sha256(content).digest())
@@ -162,7 +169,11 @@ def pack_bundle(root: Path, provider: str, output_root: Path) -> Path:
         for source in source_files(root, PAYLOAD_ROOTS):
             target = destination / source.relative_to(root)
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target, follow_symlinks=False)
+            if not source.is_symlink() and source.suffix == ".sh":
+                target.write_bytes(_source_content(source))
+                shutil.copystat(source, target, follow_symlinks=False)
+            else:
+                shutil.copy2(source, target, follow_symlinks=False)
         (destination / "build-config.json").write_text(json.dumps(plan) + "\n")
         toolchain = read_json(root / IMAGE_PACKAGE / "toolchain.json")
         variables = {
