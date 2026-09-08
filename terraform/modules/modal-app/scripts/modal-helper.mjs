@@ -2,6 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import console from "node:console";
+import { join, resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
@@ -73,6 +74,23 @@ export function buildDeploySteps(deployModule) {
   return steps;
 }
 
+export function buildImageHashArgs(repoRoot, provider) {
+  const root = resolve(repoRoot);
+  const project = join(root, "packages", "sandbox-images");
+  return [
+    "run",
+    "--project",
+    project,
+    "python",
+    join(project, "cli.py"),
+    "hash",
+    "--root",
+    root,
+    "--provider",
+    provider,
+  ];
+}
+
 export function buildChildEnvironment(baseEnvironment = process.env) {
   return {
     ...baseEnvironment,
@@ -99,6 +117,21 @@ function runUv(args, options = {}) {
   throw new Error("Could not find the uv CLI in PATH");
 }
 
+function captureUv(args, label) {
+  for (const command of UV_COMMANDS) {
+    const result = spawnSync(command, args, {
+      env: buildChildEnvironment(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    if (result.error?.code === "ENOENT") continue;
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`${label} failed with status ${result.status}`);
+    return result.stdout;
+  }
+  throw new Error("Could not find the uv CLI in PATH");
+}
+
 function validateCommonEnvironment() {
   requireEnvironment("MODAL_TOKEN_ID");
   requireEnvironment("MODAL_TOKEN_SECRET");
@@ -120,7 +153,21 @@ function deploy() {
   console.log(`Deploying Modal app ${appName} in environment ${process.env.MODAL_ENVIRONMENT}`);
   for (const step of buildDeploySteps(deployModule)) {
     runUv(step.args, { ...step, cwd: deployPath });
+    if (step.label === "sandbox image build") {
+      process.env.OPENINSPECT_REQUIRE_BUILT_IMAGE = "true";
+    }
   }
+}
+
+function imageHash(repoRoot, provider) {
+  if (!repoRoot) throw new Error("Repository root argument is required");
+  if (!provider) throw new Error("Sandbox provider argument is required");
+  const output = captureUv(buildImageHashArgs(repoRoot, provider), "sandbox image hash");
+  const result = JSON.parse(output);
+  if (typeof result.hash !== "string" || !result.hash) {
+    throw new Error("Sandbox image hash command returned an invalid result");
+  }
+  process.stdout.write(`${JSON.stringify({ hash: result.hash })}\n`);
 }
 
 function appInfo(appName) {
@@ -133,6 +180,7 @@ function main() {
   if (command === "create-secrets") createSecrets();
   else if (command === "deploy") deploy();
   else if (command === "app-info") appInfo(process.argv[3]);
+  else if (command === "image-hash") imageHash(process.argv[3], process.argv[4]);
   else throw new Error(`Unsupported Modal helper command '${command ?? ""}'`);
 }
 

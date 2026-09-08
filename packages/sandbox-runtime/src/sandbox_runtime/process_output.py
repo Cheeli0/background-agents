@@ -12,37 +12,59 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
 TRUNCATED_LINE_NOTICE = "[log line too large to forward; truncated]"
+TERMINATE_SIGNAL = getattr(signal, "SIGTERM", 15)
+KILL_SIGNAL = getattr(signal, "SIGKILL", 9)
 
 
 async def terminate_owned_subprocess(
     process: asyncio.subprocess.Process,
     *,
     kill_process_group: Callable[[int, int], None] | None = None,
+    terminate_grace_seconds: float = 0,
 ) -> None:
     """Kill a child-owned process group and reap its leader."""
-    if process.returncode is None:
-        process_id = getattr(process, "pid", None)
-        platform_killpg = getattr(os, "killpg", None)
-        group_killer = kill_process_group or platform_killpg
-        if isinstance(process_id, int) and group_killer is not None:
-            with contextlib.suppress(ProcessLookupError):
-                group_killer(process_id, signal.SIGKILL)
-        else:
-            process.kill()
-    await asyncio.shield(process.wait())
+    process_id = getattr(process, "pid", None)
+    group_killer = (
+        kill_process_group if kill_process_group is not None else getattr(os, "killpg", None)
+    )
+
+    def send_signal(sig: int) -> None:
+        with contextlib.suppress(ProcessLookupError):
+            if isinstance(process_id, int) and group_killer is not None:
+                group_killer(process_id, sig)
+            elif process.returncode is None:
+                if sig == TERMINATE_SIGNAL:
+                    process.terminate()
+                else:
+                    process.kill()
+
+    try:
+        if terminate_grace_seconds > 0:
+            send_signal(TERMINATE_SIGNAL)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=terminate_grace_seconds)
+    finally:
+        # The leader may have exited while descendants still hold its output pipes.
+        send_signal(KILL_SIGNAL)
+        await asyncio.shield(process.wait())
 
 
 async def communicate_owned_subprocess(
     process: asyncio.subprocess.Process,
     *,
     kill_process_group: Callable[[int, int], None] | None = None,
+    terminate_grace_seconds: float = 0,
 ) -> tuple[bytes, bytes]:
-    """Communicate with a child and terminate its process group if cancelled."""
+    """Communicate with a child, cleaning up its process group on failure."""
     try:
         stdout, stderr = await process.communicate()
         return stdout or b"", stderr or b""
-    except asyncio.CancelledError:
-        await terminate_owned_subprocess(process, kill_process_group=kill_process_group)
+    except (asyncio.CancelledError, Exception):
+        await terminate_owned_subprocess(
+            process,
+            kill_process_group=kill_process_group,
+            terminate_grace_seconds=terminate_grace_seconds,
+        )
         raise
 
 

@@ -2,22 +2,20 @@
 # Modal Sandbox Infrastructure
 # =============================================================================
 
-# Calculate the Modal source hash with Terraform functions so the deployment
-# path works on Windows, macOS, and Linux without shell-specific utilities.
+# Use the shared image planner for the image hash. The Node wrapper selects a
+# working uv executable on Windows, macOS, and Linux without invoking a shell.
+data "external" "modal_image_hash" {
+  count = local.use_modal_backend ? 1 : 0
+
+  program = ["node", "${var.project_root}/terraform/modules/modal-app/scripts/modal-helper.mjs", "image-hash", var.project_root, "modal"]
+}
+
 locals {
-  modal_source_files = concat(
-    [for file in fileset("${var.project_root}/packages/modal-infra/src", "**") : "${var.project_root}/packages/modal-infra/src/${file}"],
-    [for file in fileset("${var.project_root}/packages/sandbox-runtime/src", "**") : "${var.project_root}/packages/sandbox-runtime/src/${file}"],
-    [
-      "${var.project_root}/packages/modal-infra/deploy.py",
-      "${var.project_root}/packages/modal-infra/pyproject.toml",
-      "${var.project_root}/packages/modal-infra/uv.lock",
-      "${var.project_root}/terraform/modules/modal-app/scripts/modal-helper.mjs",
-    ]
-  )
-  modal_source_hash = sha256(join("", [
-    for file in sort(local.modal_source_files) : "${file}:${filesha256(file)}"
-  ]))
+  modal_source_hash = local.use_modal_backend ? sha256(join(":", [
+    data.external.modal_image_hash[0].result.hash,
+    filesha256("${var.project_root}/packages/modal-infra/deploy.py"),
+    filesha256("${var.project_root}/terraform/modules/modal-app/scripts/modal-helper.mjs"),
+  ])) : ""
 }
 
 module "modal_app" {
@@ -37,10 +35,8 @@ module "modal_app" {
 
   secrets = [
     {
-      name = "llm-api-keys"
-      values = {
-        ANTHROPIC_API_KEY = var.anthropic_api_key
-      }
+      name   = "llm-api-keys"
+      values = local.modal_llm_secret_values
     },
     {
       name = "github-app"

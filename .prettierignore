@@ -6,8 +6,11 @@ node_modules/
 dist/
 build/
 .next/
+.open-next/
+.codex-worktrees/
 .wrangler/
 coverage/
+.cache/sandbox-images/
 
 # Python
 packages/modal-infra/
@@ -15,6 +18,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.uv-cache/
 
 # Reference code (vendored)
 opencode-reference/
