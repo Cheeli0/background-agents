@@ -7,6 +7,7 @@ import type {
   GitHubAutofixSessionCommand,
   GitHubAutofixSessionResponse,
 } from "@open-inspect/shared";
+import { githubAutofixOriginSchema } from "@open-inspect/shared";
 import {
   DEFAULT_MODEL,
   getDefaultReasoningEffort,
@@ -588,7 +589,7 @@ export class SessionMessageQueue {
     let origin: GitHubAutofixOrigin | undefined;
     if (originContext) {
       try {
-        origin = JSON.parse(originContext) as GitHubAutofixOrigin;
+        origin = githubAutofixOriginSchema.parse(JSON.parse(originContext));
       } catch {
         this.log.error("prompt.invalid_origin_context", { message_id: messageId });
       }
