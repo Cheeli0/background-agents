@@ -115,7 +115,7 @@ export function SessionRightSidebarContent({
       </div>
 
       {/* Metadata */}
-      <div className="px-4 py-4 border-b border-border-muted">
+      <div className="space-y-4 px-4 py-4 border-b border-border-muted">
         <MetadataSection
           sessionId={sessionId}
           createdAt={sessionState.createdAt}
