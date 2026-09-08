@@ -117,6 +117,9 @@ jobs:
       - name: Test user merge CLI
         run: npm run test:user-merge-cli
 
+      - name: Test Cloudflare logs CLI
+        run: npm run test:cf-logs-cli
+
       - name: Check Prettier formatting
         run: npm run format:check
 
