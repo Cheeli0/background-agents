@@ -76,6 +76,31 @@ def test_deployed_environment_requires_image_reference(monkeypatch, image_id) ->
             base.deployed_image_environment()
 
 
+def test_modal_image_upload_does_not_filter_generated_bundle_files(monkeypatch, tmp_path) -> None:
+    from src.images import base
+
+    image = Mock()
+    image.add_local_dir.return_value = image
+    image.run_commands.return_value = image
+    image.env.return_value = image
+    image.workdir.return_value = image
+    monkeypatch.setattr(base.modal, "is_local", lambda: True)
+    monkeypatch.setattr(
+        base,
+        "local_image_plan",
+        lambda: (
+            tmp_path,
+            {"target": {"base": "python:3.12-slim"}, "runtimeEnv": {}},
+        ),
+    )
+    monkeypatch.setattr(base.modal.Image, "from_registry", Mock(return_value=image))
+
+    base._define_image()
+
+    ignore = image.add_local_dir.call_args.kwargs["ignore"]
+    assert ignore(Path("packages/sandbox-images/install/os/debian.sh")) is False
+
+
 def test_eager_build_does_not_register_functions_before_image_exists() -> None:
     environment = dict(os.environ)
     environment.pop("OPENINSPECT_MODAL_BASE_IMAGE_ID", None)

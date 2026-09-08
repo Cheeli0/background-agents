@@ -60,7 +60,12 @@ def _define_image() -> modal.Image:
     bundle, plan = local_image_plan()
     return (
         modal.Image.from_registry(plan["target"]["base"])
-        .add_local_dir(str(bundle), "/tmp/openinspect-image", copy=True)
+        .add_local_dir(
+            str(bundle),
+            "/tmp/openinspect-image",
+            copy=True,
+            ignore=lambda _path: False,
+        )
         .run_commands("bash /tmp/openinspect-image/packages/sandbox-images/install/install.sh")
         .env(plan["runtimeEnv"] | {"SANDBOX_VERSION": RUNTIME_VERSION})
         .workdir("/workspace")
