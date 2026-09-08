@@ -68,6 +68,13 @@ describe("MessageRepository", () => {
     expect(mock.calls[1].query).toContain("'pending', 'processing'");
   });
 
+  it("rejects malformed numeric SQL aggregate rows", () => {
+    mock.setOne({ count: "5" });
+    expect(() => repository.getPendingOrProcessingCount()).toThrow(
+      "Malformed numeric SQL result for count"
+    );
+  });
+
   it("calculates active duration", () => {
     mock.setOne({ duration_ms: 4500 });
     expect(repository.getActiveDurationMs()).toBe(4500);
@@ -259,6 +266,39 @@ describe("MessageRepository", () => {
       })
     ).toEqual({ kind: "rejected", reason: "attempt_limit" });
     expect(mock.calls).toHaveLength(4);
+  });
+
+  it("does not admit Autofix feedback when the rolling count is malformed", () => {
+    mock.setOne({ count: 0 });
+    const exec = mock.sql.exec.bind(mock.sql);
+    vi.spyOn(mock.sql, "exec").mockImplementation((query, ...params) => {
+      const result = exec(query, ...params);
+      return query.includes("WHERE autofix_pr_key = ?")
+        ? { ...result, one: () => ({ count: "invalid-count" }) }
+        : result;
+    });
+    const authorId = vi.fn(() => "p-1");
+
+    expect(() =>
+      repository.admitAutofixMessage({
+        message: {
+          id: "msg-new",
+          authorId,
+          content: "Fix feedback",
+          source: "github",
+          status: "pending",
+          createdAt: 2000,
+        },
+        feedbackKey: "github:review:1",
+        pullRequestKey: "github:99:42",
+        originContext: "{}",
+        attemptLimit: 3,
+        windowStart: 1000,
+        sessionClosed: false,
+      })
+    ).toThrow("Malformed numeric SQL result for count");
+    expect(authorId).not.toHaveBeenCalled();
+    expect(mock.calls.some(({ query }) => query.includes("INSERT INTO messages"))).toBe(false);
   });
 
   it("admits Autofix feedback without checking the rolling count when there is no limit", () => {
