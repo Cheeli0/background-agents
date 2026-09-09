@@ -75,7 +75,7 @@ Z.AI Coding Plan models require `ZHIPU_API_KEY` as a global or repository secret
 | Model ID                        | Display name  | Description      | Reasoning efforts | Default effort |
 | ------------------------------- | ------------- | ---------------- | ----------------- | -------------- |
 | `zai-coding-plan/glm-5.2`       | GLM 5.2       | Z.AI Coding Plan | Not supported     | N/A            |
-| `zai-coding-plan/glm-5.3`       | GLM 5.3       | Z.AI Coding Plan | Not supported     | N/A            |
+| `zai-coding-plan/glm-5.3`       | GLM 5.3       | Z.AI Coding Plan | low, high, max    | high           |
 | `zai-coding-plan/glm-5.3-flash` | GLM 5.3 Flash | Z.AI Coding Plan | low, high, max    | high           |
 
 ## DeepSeek

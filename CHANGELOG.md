@@ -2,6 +2,12 @@
 
 New features, integrations, and notable improvements to Open-Inspect — newest first.
 
+## September 9, 2026
+
+**GLM 5.3 reasoning efforts.** GLM 5.3 through Z.AI Coding Plan now exposes the provider-supported
+low, high, and max reasoning efforts, matching GLM 5.3 Flash. Sessions, automations, and integration
+settings can select and persist them.
+
 ## September 3, 2026
 
 **New Z.AI and OpenCode models.** Adds GLM 5.3 Flash through Z.AI Coding Plan and OpenCode Go, Muse
