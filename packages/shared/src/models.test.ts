@@ -301,6 +301,7 @@ describe("model utilities", () => {
     expect(supportsReasoning("claude-opus-4-8")).toBe(true);
     expect(supportsReasoning("openai/gpt-5.4")).toBe(true);
     expect(supportsReasoning("openai/gpt-5.6-terra")).toBe(true);
+    expect(supportsReasoning("zai-coding-plan/glm-5.3")).toBe(true);
     expect(supportsReasoning("xai/grok-build-0.1")).toBe(false);
     expect(supportsReasoning("deepseek/deepseek-v4-flash")).toBe(false);
     expect(supportsReasoning("invalid")).toBe(false);
@@ -316,6 +317,7 @@ describe("model utilities", () => {
     expect(getDefaultReasoningEffort("openai/gpt-5.6-sol")).toBe("medium");
     expect(getDefaultReasoningEffort("openai/gpt-5.6-terra")).toBe("medium");
     expect(getDefaultReasoningEffort("openai/gpt-5.6-luna")).toBe("medium");
+    expect(getDefaultReasoningEffort("zai-coding-plan/glm-5.3")).toBe("high");
     expect(getDefaultReasoningEffort("xai/grok-build-0.1")).toBeUndefined();
     expect(getDefaultReasoningEffort("deepseek/deepseek-v4-pro")).toBeUndefined();
   });
@@ -374,7 +376,11 @@ describe("model utilities", () => {
   });
 
   it("exposes the provider-defined reasoning ladders for the new model routes", () => {
-    for (const model of ["zai-coding-plan/glm-5.3-flash", "opencode-go/glm-5.3-flash"]) {
+    for (const model of [
+      "zai-coding-plan/glm-5.3",
+      "zai-coding-plan/glm-5.3-flash",
+      "opencode-go/glm-5.3-flash",
+    ]) {
       expect(getReasoningConfig(model)).toEqual({
         efforts: ["low", "high", "max"],
         default: "high",
@@ -431,6 +437,8 @@ describe("model utilities", () => {
     );
     expect(isValidReasoningEffort("opencode-go/deepseek-v4-flash", "max")).toBe(true);
     expect(isValidReasoningEffort("opencode-go/deepseek-v4-flash", "xhigh")).toBe(false);
+    expect(isValidReasoningEffort("zai-coding-plan/glm-5.3", "max")).toBe(true);
+    expect(isValidReasoningEffort("zai-coding-plan/glm-5.3", "medium")).toBe(false);
     expect(isValidReasoningEffort("opencode/big-pickle", "high")).toBe(false);
     expect(isValidReasoningEffort("invalid", "high")).toBe(false);
     expect(isValidReasoningEffort("anthropic/claude-sonnet-4-5", "")).toBe(false);
