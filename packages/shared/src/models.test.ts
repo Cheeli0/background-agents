@@ -6,6 +6,7 @@ import {
   MODEL_OPTIONS,
   MODEL_REASONING_CONFIG,
   VALID_MODELS,
+  applyModelPreferenceChanges,
   extractProviderAndModel,
   getSubscriptionProviderForModel,
   getDefaultReasoningEffort,
@@ -30,6 +31,7 @@ const ANTHROPIC_MODELS = [
   "anthropic/claude-opus-4-8",
   "anthropic/claude-opus-5",
   "anthropic/claude-fable-5",
+  "anthropic/claude-fable-5-1",
 ] as const;
 
 const OPENAI_MODELS = [
@@ -58,6 +60,36 @@ const ZEN_MODELS = [
   "opencode/big-pickle",
 ] as const;
 
+const GO_MODELS = [
+  "opencode-go/grok-4.6",
+  "opencode-go/gpt-5.6-luna",
+  "opencode-go/glm-5.3-flash",
+  "opencode-go/glm-5.3",
+  "opencode-go/glm-5.2",
+  "opencode-go/glm-5.1",
+  "opencode-go/kimi-k3",
+  "opencode-go/kimi-k2.7-code",
+  "opencode-go/kimi-k2.6",
+  "opencode-go/longcat-2.0",
+  "opencode-go/deepseek-v4.1-flash",
+  "opencode-go/deepseek-v4-pro",
+  "opencode-go/deepseek-v4-flash",
+  "opencode-go/deepseek-v4-flash-vision-exp",
+  "opencode-go/mimo-v2.5",
+  "opencode-go/mimo-v2.5-pro",
+  "opencode-go/minimax-m3",
+  "opencode-go/minimax-m2.7",
+  "opencode-go/muse-spark-1.3-contributor",
+  "opencode-go/muse-spark-1.2-contributor",
+  "opencode-go/qwen3.8-max",
+  "opencode-go/qwen3.8-flash",
+  "opencode-go/qwen3.7-max",
+  "opencode-go/qwen3.7-plus",
+  "opencode-go/qwen3.6-plus",
+  "opencode-go/hy4-preview",
+  "opencode-go/hy3",
+] as const;
+
 const DEEPSEEK_MODELS = ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"] as const;
 const ZAI_CODING_PLAN_MODELS = [
   "zai-coding-plan/glm-5.2",
@@ -66,19 +98,6 @@ const ZAI_CODING_PLAN_MODELS = [
 ] as const;
 const MINIMAX_CODING_PLAN_MODELS = ["minimax-coding-plan/MiniMax-M2.7"] as const;
 const FIREWORKS_MODELS = ["fireworks-ai/kimi-k2p5-turbo"] as const;
-const OPENCODE_GO_MODELS = [
-  "opencode-go/glm-5.1",
-  "opencode-go/glm-5.3-flash",
-  "opencode-go/kimi-k2.5",
-  "opencode-go/kimi-k2.6",
-  "opencode-go/qwen3.6-plus",
-  "opencode-go/minimax-m2.7",
-  "opencode-go/mimo-v2-pro",
-  "opencode-go/mimo-v2-omni",
-  "opencode-go/muse-spark-1.3-contributor",
-  "opencode-go/deepseek-v4-flash",
-  "opencode-go/deepseek-v4-flash-vision-exp",
-] as const;
 const OLLAMA_CLOUD_MODELS = [
   "ollama-cloud/glm-5.1",
   "ollama-cloud/kimi-k2.5",
@@ -132,11 +151,11 @@ describe("model utilities", () => {
       ...OPENAI_MODELS,
       ...XAI_MODELS,
       ...ZEN_MODELS,
+      ...GO_MODELS,
       ...ZAI_CODING_PLAN_MODELS,
       ...DEEPSEEK_MODELS,
       ...MINIMAX_CODING_PLAN_MODELS,
       ...FIREWORKS_MODELS,
-      ...OPENCODE_GO_MODELS,
       ...OLLAMA_CLOUD_MODELS,
     ]) {
       expect(isValidModel(model)).toBe(true);
@@ -148,12 +167,14 @@ describe("model utilities", () => {
     expect(normalizeModelId("claude-opus-4-8")).toBe("anthropic/claude-opus-4-8");
     expect(normalizeModelId("claude-opus-5")).toBe("anthropic/claude-opus-5");
     expect(normalizeModelId("claude-fable-5")).toBe("anthropic/claude-fable-5");
+    expect(normalizeModelId("claude-fable-5-1")).toBe("anthropic/claude-fable-5-1");
     expect(normalizeModelId("gpt-5.3-codex")).toBe("openai/gpt-5.3-codex");
     expect(normalizeModelId("gpt-5.6-sol")).toBe("openai/gpt-5.6-sol");
     expect(isValidModel("claude-sonnet-4-6")).toBe(true);
     expect(isValidModel("claude-opus-4-8")).toBe(true);
     expect(isValidModel("claude-opus-5")).toBe(true);
     expect(isValidModel("claude-fable-5")).toBe(true);
+    expect(isValidModel("claude-fable-5-1")).toBe(true);
     expect(isValidModel("gpt-5.3-codex")).toBe(true);
     expect(isValidModel("gpt-5.6-sol")).toBe(true);
   });
@@ -171,6 +192,28 @@ describe("model utilities", () => {
     ).toEqual(["openai/gpt-5.4", "openai/gpt-5.3-codex", "anthropic/claude-sonnet-4-6"]);
     expect(normalizeValidModels(["openai/gpt-5.2", "unknown/model"])).toEqual([]);
     expect(normalizeValidModels([])).toEqual([]);
+  });
+
+  it("applies model preference changes as an ordered set", () => {
+    expect(
+      applyModelPreferenceChanges(
+        ["openai/gpt-5.4", "anthropic/claude-sonnet-4-6"],
+        [
+          { modelId: "openai/gpt-5.4", enabled: false },
+          { modelId: "anthropic/claude-haiku-4-5", enabled: true },
+          { modelId: "openai/gpt-5.4", enabled: true },
+        ]
+      )
+    ).toEqual(["anthropic/claude-sonnet-4-6", "anthropic/claude-haiku-4-5", "openai/gpt-5.4"]);
+  });
+
+  it("keeps enabled no-op changes in their existing position", () => {
+    expect(
+      applyModelPreferenceChanges(
+        ["openai/gpt-5.4", "anthropic/claude-sonnet-4-6"],
+        [{ modelId: "openai/gpt-5.4", enabled: true }]
+      )
+    ).toEqual(["openai/gpt-5.4", "anthropic/claude-sonnet-4-6"]);
   });
 
   it("resolves models using the shared enabled-model fallback policy", () => {
@@ -265,7 +308,7 @@ describe("model utilities", () => {
   it("strictly derives subscription providers from canonical catalog routes", () => {
     expect(getSubscriptionProviderForModel("openai/gpt-5.6-sol")).toBe("openai");
     expect(getSubscriptionProviderForModel("xai/grok-4.6")).toBe("xai");
-    expect(getSubscriptionProviderForModel("anthropic/claude-sonnet-4-6")).toBeNull();
+    expect(getSubscriptionProviderForModel("anthropic/claude-sonnet-4-6")).toBe("anthropic");
     expect(getSubscriptionProviderForModel("deepseek/deepseek-v4-pro")).toBeNull();
   });
 
@@ -312,6 +355,7 @@ describe("model utilities", () => {
     expect(getDefaultReasoningEffort("anthropic/claude-sonnet-5")).toBe("high");
     expect(getDefaultReasoningEffort("anthropic/claude-opus-5")).toBe("high");
     expect(getDefaultReasoningEffort("anthropic/claude-fable-5")).toBe("high");
+    expect(getDefaultReasoningEffort("anthropic/claude-fable-5-1")).toBe("high");
     expect(getDefaultReasoningEffort("openai/gpt-5.3-codex")).toBe("high");
     expect(getDefaultReasoningEffort("openai/gpt-5.5")).toBeUndefined();
     expect(getDefaultReasoningEffort("openai/gpt-5.6-sol")).toBe("medium");
@@ -340,6 +384,10 @@ describe("model utilities", () => {
       default: "high",
     });
     expect(getReasoningConfig("anthropic/claude-opus-5")).toEqual({
+      efforts: ["low", "medium", "high", "xhigh", "max"],
+      default: "high",
+    });
+    expect(getReasoningConfig("anthropic/claude-fable-5-1")).toEqual({
       efforts: ["low", "medium", "high", "xhigh", "max"],
       default: "high",
     });
@@ -419,6 +467,8 @@ describe("model utilities", () => {
     expect(isValidReasoningEffort("anthropic/claude-opus-5", "xhigh")).toBe(true);
     expect(isValidReasoningEffort("anthropic/claude-opus-5", "none")).toBe(false);
     expect(isValidReasoningEffort("anthropic/claude-fable-5", "max")).toBe(true);
+    expect(isValidReasoningEffort("anthropic/claude-fable-5-1", "max")).toBe(true);
+    expect(isValidReasoningEffort("anthropic/claude-fable-5-1", "none")).toBe(false);
     expect(isValidReasoningEffort("openai/gpt-5.4", "none")).toBe(true);
     expect(isValidReasoningEffort("openai/gpt-6-astra", "max")).toBe(true);
     expect(isValidReasoningEffort("openai/gpt-6-astra", "ultra")).toBe(false);
@@ -458,6 +508,9 @@ describe("model utilities", () => {
       MODEL_OPTIONS.find((group) => group.category === "OpenCode Zen")?.models.map((m) => m.id)
     ).toEqual(ZEN_MODELS);
     expect(
+      MODEL_OPTIONS.find((group) => group.category === "OpenCode Go")?.models.map((m) => m.id)
+    ).toEqual(GO_MODELS);
+    expect(
       MODEL_OPTIONS.find((group) => group.category === "Z.AI Coding Plan")?.models.map((m) => m.id)
     ).toEqual(ZAI_CODING_PLAN_MODELS);
     expect(
@@ -472,9 +525,6 @@ describe("model utilities", () => {
       MODEL_OPTIONS.find((group) => group.category === "Fireworks AI")?.models.map((m) => m.id)
     ).toEqual(FIREWORKS_MODELS);
     expect(
-      MODEL_OPTIONS.find((group) => group.category === "OpenCode Go")?.models.map((m) => m.id)
-    ).toEqual(OPENCODE_GO_MODELS);
-    expect(
       MODEL_OPTIONS.find((group) => group.category === "Ollama Cloud")?.models.map((m) => m.id)
     ).toEqual(OLLAMA_CLOUD_MODELS);
 
@@ -482,11 +532,11 @@ describe("model utilities", () => {
     for (const optInModel of [
       ...XAI_MODELS,
       ...ZEN_MODELS,
+      ...GO_MODELS,
       ...ZAI_CODING_PLAN_MODELS,
       ...DEEPSEEK_MODELS,
       ...MINIMAX_CODING_PLAN_MODELS,
       ...FIREWORKS_MODELS,
-      ...OPENCODE_GO_MODELS,
       ...OLLAMA_CLOUD_MODELS,
     ]) {
       expect(DEFAULT_ENABLED_MODELS).not.toContain(optInModel);

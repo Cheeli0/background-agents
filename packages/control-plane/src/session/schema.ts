@@ -69,10 +69,12 @@ CREATE TABLE IF NOT EXISTS session (
   branch_name TEXT,                                 -- Working branch (set after first commit)
   base_sha TEXT,                                    -- SHA of base branch at session start
   current_sha TEXT,                                 -- Current HEAD SHA
-  opencode_session_id TEXT,                         -- OpenCode session ID (for 1:1 mapping)
+  agent_session_id TEXT,                            -- The agent's own conversation id (1:1 mapping)
+  harness TEXT NOT NULL DEFAULT 'opencode',         -- Agent harness: 'opencode' | 'claude'; fixed at create
   model TEXT DEFAULT 'anthropic/claude-haiku-4-5',   -- LLM model to use
   reasoning_effort TEXT,                            -- Session-level reasoning effort default
   status TEXT DEFAULT 'created',                    -- 'created', 'active', 'completed', 'failed', 'archived', 'cancelled'
+  status_revision INTEGER NOT NULL DEFAULT 1,
   parent_session_id TEXT,                           -- Parent session ID (NULL for top-level)
   spawn_source TEXT NOT NULL DEFAULT 'user',        -- 'user' or 'agent'
   spawn_depth INTEGER NOT NULL DEFAULT 0,           -- 0 for top-level, parent.depth + 1 for children
@@ -231,6 +233,7 @@ CREATE TABLE IF NOT EXISTS ws_client_mapping (
 const INDEXES_SQL = `
 CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status);
 CREATE INDEX IF NOT EXISTS idx_messages_author ON messages(author_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at_id ON messages(created_at DESC, id DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_request_id
 ON messages(client_request_id) WHERE client_request_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_one_processing
@@ -671,6 +674,26 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
         `ALTER TABLE messages ADD COLUMN reported_cost_usd REAL NOT NULL DEFAULT 0`
       );
     },
+  },
+  {
+    id: 50,
+    description: "Add session harness and rename opencode_session_id to agent_session_id",
+    run: (sql) => {
+      runMigration(sql, `ALTER TABLE session ADD COLUMN harness TEXT NOT NULL DEFAULT 'opencode'`);
+      // A fresh DO already created agent_session_id through SCHEMA_SQL, so the
+      // legacy column is absent there; only an existing DO has it to rename.
+      try {
+        sql.exec(`ALTER TABLE session RENAME COLUMN opencode_session_id TO agent_session_id`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.includes("no such column") && !msg.includes("duplicate column")) throw e;
+      }
+    },
+  },
+  {
+    id: 51,
+    description: "Fence session status projections independently of activity",
+    run: `ALTER TABLE session ADD COLUMN status_revision INTEGER NOT NULL DEFAULT 1`,
   },
 ];
 

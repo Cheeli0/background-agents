@@ -1,6 +1,7 @@
 """Shared payload staging and conservative build invalidation."""
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -116,10 +117,11 @@ def test_runtime_assets_are_packed_without_per_file_manifest(checkout, tmp_path)
     skill = "packages/sandbox-runtime/src/sandbox_runtime/skills/agent-browser/SKILL.md"
     (checkout / skill).write_text("updated skill")
     packed = pack_bundle(checkout, "e2b", tmp_path / "bundles")
-    assert (packed / skill).read_text() == "updated skill"
-    config = json.loads((packed / "build-config.json").read_text())
+    assert (packed.directory / skill).read_text() == "updated skill"
+    config = json.loads((packed.directory / "build-config.json").read_text())
+    assert config == packed.plan
     assert set(config) == {"provider", "target", "runtimeVersion", "runtimeEnv", "buildHash"}
-    assert not (packed / "packages/e2b-infra").exists()
+    assert not (packed.directory / "packages/e2b-infra").exists()
 
 
 def test_pack_normalizes_windows_shell_line_endings(checkout, tmp_path):
@@ -130,7 +132,7 @@ def test_pack_normalizes_windows_shell_line_endings(checkout, tmp_path):
     script.write_bytes(lf_content.replace(b"\n", b"\r\n"))
 
     packed = pack_bundle(checkout, "modal", tmp_path / "bundles")
-    packed_script = packed / "packages/sandbox-images/install/install.sh"
+    packed_script = packed.directory / "packages/sandbox-images/install/install.sh"
 
     assert plan_image(checkout, "modal")["buildHash"] == lf_hash
     assert b"\r\n" not in packed_script.read_bytes()
@@ -139,15 +141,15 @@ def test_pack_normalizes_windows_shell_line_endings(checkout, tmp_path):
 def test_pack_writes_generated_shell_config_with_lf_endings(checkout, tmp_path):
     packed = pack_bundle(checkout, "modal", tmp_path / "bundles")
 
-    assert b"\r\n" not in (packed / "image-config.sh").read_bytes()
+    assert b"\r\n" not in (packed.directory / "image-config.sh").read_bytes()
 
 
 def test_each_caller_gets_a_fresh_context_without_reusing_extra_files(tmp_path):
     first = pack_bundle(REPO_ROOT, "e2b", tmp_path)
-    (first / ".env").write_text("must not leak")
+    (first.directory / ".env").write_text("must not leak")
     second = pack_bundle(REPO_ROOT, "e2b", tmp_path)
-    assert first != second
-    assert not (second / ".env").exists()
+    assert first.directory != second.directory
+    assert not (second.directory / ".env").exists()
 
 
 def test_missing_payload_fails_closed(checkout):
@@ -156,6 +158,7 @@ def test_missing_payload_fails_closed(checkout):
         plan_image(checkout, "e2b")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires permission to create symbolic links")
 def test_symlinks_and_executable_modes(checkout, tmp_path):
     directory = checkout / "packages/sandbox-runtime/src/sandbox_runtime"
     (directory / "probe.sh").write_text("#!/bin/sh\nexit 0\n")
@@ -163,7 +166,7 @@ def test_symlinks_and_executable_modes(checkout, tmp_path):
     (directory / "probe-link.sh").symlink_to("probe.sh")
     before = plan_image(checkout, "e2b")["buildHash"]
     packed = pack_bundle(checkout, "e2b", tmp_path / "bundles")
-    copied = packed / "packages/sandbox-runtime/src/sandbox_runtime"
+    copied = packed.directory / "packages/sandbox-runtime/src/sandbox_runtime"
     assert (copied / "probe-link.sh").is_symlink()
     assert (copied / "probe.sh").stat().st_mode & 0o111
     (directory / "probe.sh").chmod(0o644)

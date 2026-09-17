@@ -10,7 +10,7 @@ import shutil
 import stat
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple, TypedDict
 
 from .configuration import IMAGE_PACKAGE, RUNTIME_PACKAGE, read_json, runtime_environment
 from .locks import update_locks
@@ -44,6 +44,27 @@ INFRA_MODULES = {
     "vercel": "vercel-sandbox-infra",
     "opencomputer": "opencomputer-infra",
 }
+
+
+class ImageTarget(TypedDict):
+    os: str
+    base: str
+    node: str
+    user: str
+    home: str
+
+
+class ImagePlan(TypedDict):
+    provider: str
+    target: ImageTarget
+    runtimeVersion: str
+    runtimeEnv: dict[str, str]
+    buildHash: str
+
+
+class PackedBundle(NamedTuple):
+    directory: Path
+    plan: ImagePlan
 
 
 def validate_toolchain(tools: dict[str, Any]) -> None:
@@ -113,7 +134,7 @@ def _source_content(path: Path) -> bytes:
     return content
 
 
-def plan_image(root: Path, provider: str) -> dict[str, Any]:
+def plan_image(root: Path, provider: str) -> ImagePlan:
     root = root.resolve()
     if provider not in PROVIDERS:
         raise ValueError(f"Unsupported sandbox image provider: {provider}")
@@ -158,7 +179,7 @@ def plan_image(root: Path, provider: str) -> dict[str, Any]:
     }
 
 
-def pack_bundle(root: Path, provider: str, output_root: Path) -> Path:
+def pack_bundle(root: Path, provider: str, output_root: Path) -> PackedBundle:
     """Create a fresh context for each caller; no shared cache to reconcile."""
     root = root.resolve()
     update_locks(root, check=True)
@@ -207,7 +228,7 @@ def pack_bundle(root: Path, provider: str, output_root: Path) -> Path:
             ).encode("utf-8")
         )
 
-        return destination
+        return PackedBundle(destination, plan)
     except BaseException:
         shutil.rmtree(destination)
         raise

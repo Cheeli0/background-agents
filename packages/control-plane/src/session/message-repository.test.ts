@@ -1,4 +1,6 @@
+import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createNodeSqlStorage } from "../node/sqlite-storage";
 import { EventRepository } from "./event-repository";
 import { MessageRepository } from "./message-repository";
 import { MAX_UNFINISHED_PROMPTS } from "@open-inspect/shared/types/prompts";
@@ -7,6 +9,7 @@ import {
   SessionAttachmentRepository,
 } from "./session-attachment-repository";
 import type { SqlResult, SqlStorage } from "./sql-storage";
+import { initSchema } from "./schema";
 
 function createMockSql() {
   const calls: Array<{ query: string; params: unknown[] }> = [];
@@ -130,6 +133,18 @@ describe("MessageRepository", () => {
     expect(repository.getUnfinishedMessagePosition("finished")).toBeNull();
   });
 
+  it("decodes persisted message statuses", () => {
+    const query = `SELECT status FROM messages WHERE id = ? LIMIT 1`;
+    mock.setData(query, [{ status: "pending" }]);
+    expect(repository.getMessageStatus("msg-1")).toBe("pending");
+
+    mock.setData(query, [{ status: "queued" }]);
+    expect(repository.getMessageStatus("msg-1")).toBeNull();
+
+    mock.setData(query, [{}]);
+    expect(repository.getMessageStatus("msg-1")).toBeNull();
+  });
+
   it("projects unfinished messages into the prompt queue", () => {
     vi.spyOn(repository, "listUnfinishedMessages").mockReturnValue([
       { id: "msg-1", content: "Continue", status: "pending" } as never,
@@ -137,6 +152,13 @@ describe("MessageRepository", () => {
     expect(repository.listPromptQueue()).toEqual([
       { messageId: "msg-1", content: "Continue", status: "pending" },
     ]);
+  });
+
+  it("omits malformed persisted statuses from the prompt queue", () => {
+    vi.spyOn(repository, "listUnfinishedMessages").mockReturnValue([
+      { id: "msg-1", content: "Continue", status: "queued" } as never,
+    ]);
+    expect(repository.listPromptQueue()).toEqual([]);
   });
 
   it("creates a message with all fields", () => {
@@ -242,6 +264,15 @@ describe("MessageRepository", () => {
       })
     ).toEqual({ kind: "rejected", reason: "budget_exhausted" });
     expect(mock.calls).toHaveLength(2);
+  });
+
+  it("fails closed when cancel sees a malformed persisted status", () => {
+    mock.setData(`SELECT status, source, callback_context FROM messages WHERE id = ?`, [
+      { status: "queued", source: "web", callback_context: null },
+    ]);
+
+    expect(repository.cancelPendingMessage("msg-1")).toBe(false);
+    expect(mock.calls).toHaveLength(1);
   });
 
   it("rejects Autofix admission when the rolling PR cap is reached", () => {
@@ -531,10 +562,64 @@ describe("MessageRepository", () => {
   });
 
   it("builds message list pagination filters", () => {
-    repository.listMessages({ limit: 10, status: "pending", cursor: "5000" });
+    repository.listMessages({
+      limit: 10,
+      status: "pending",
+      cursor: { createdAt: 5000, id: "msg-5" },
+    });
     expect(mock.calls[0].query).toContain("status = ?");
+    expect(mock.calls[0].query).toContain("created_at = ? AND id < ?");
+    expect(mock.calls[0].query).toContain("ORDER BY created_at DESC, id DESC");
+    expect(mock.calls[0].params).toEqual(["pending", 5000, 5000, "msg-5", 11]);
+  });
+
+  it("retains timestamp-only filtering for legacy message cursors", () => {
+    repository.listMessages({ limit: 10, cursor: { createdAt: 5000 } });
     expect(mock.calls[0].query).toContain("created_at < ?");
-    expect(mock.calls[0].params).toEqual(["pending", 5000, 11]);
+    expect(mock.calls[0].params).toEqual([5000, 11]);
+  });
+
+  it("paginates tied message timestamps without gaps against SQLite", () => {
+    const db = new DatabaseSync(":memory:");
+    const sql = createNodeSqlStorage(db).sql;
+    try {
+      initSchema(sql);
+      sql.exec(
+        "INSERT INTO participants (id, user_id, role, joined_at) VALUES ('author', 'user', 'owner', 1)"
+      );
+      for (const id of ["msg-a", "msg-b", "msg-c"]) {
+        sql.exec(
+          `INSERT INTO messages (id, author_id, content, source, status, created_at)
+           VALUES (?, 'author', ?, 'web', 'completed', 5000)`,
+          id,
+          id
+        );
+      }
+      const transaction = <T>(closure: () => T) => closure();
+      const realRepository = new MessageRepository(
+        sql,
+        transaction,
+        new SessionAttachmentRepository(sql),
+        new EventRepository(sql, transaction)
+      );
+
+      expect(
+        realRepository
+          .listMessages({ limit: 1, cursor: null, status: null })
+          .map((message) => message.id)
+      ).toEqual(["msg-c", "msg-b"]);
+      expect(
+        realRepository
+          .listMessages({
+            limit: 1,
+            cursor: { createdAt: 5000, id: "msg-c" },
+            status: null,
+          })
+          .map((message) => message.id)
+      ).toEqual(["msg-b", "msg-a"]);
+    } finally {
+      db.close();
+    }
   });
 
   it("selects the latest terminal message", () => {
