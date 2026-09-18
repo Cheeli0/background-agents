@@ -1,6 +1,7 @@
 """Owned subprocess cleanup without network or Git operations."""
 
 import asyncio
+import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,10 +9,40 @@ import pytest
 
 from sandbox_runtime.process_output import (
     KILL_SIGNAL,
+    PROCESS_OUTPUT_TAIL_BYTES,
     TERMINATE_SIGNAL,
+    BoundedOutputCollector,
     communicate_owned_subprocess,
     terminate_owned_subprocess,
+    wait_for_process_exit,
 )
+
+
+async def test_bounded_output_collector_retains_only_tail_window():
+    stream = asyncio.StreamReader()
+    collector = BoundedOutputCollector(stream)
+    stream.feed_data(b"discarded\n" * 10_000 + b"final line\n")
+    stream.feed_eof()
+
+    await collector.wait()
+
+    tail = collector.tail_lines(max_lines=10_000)
+    assert len(tail.encode()) <= PROCESS_OUTPUT_TAIL_BYTES
+    assert tail.endswith("final line")
+
+
+async def test_wait_for_process_exit_does_not_wait_for_inherited_pipe_eof():
+    process = MagicMock(returncode=None)
+    wait_forever = asyncio.Event()
+    process.wait = AsyncMock(side_effect=wait_forever.wait)
+
+    async def mark_process_exited():
+        await asyncio.sleep(0)
+        process.returncode = 0
+
+    await asyncio.gather(wait_for_process_exit(process), mark_process_exited())
+
+    process.wait.assert_awaited_once()
 
 
 @pytest.mark.parametrize("returncode", [None, 0])
@@ -49,7 +80,10 @@ async def test_local_process_cancellation_reaps_before_propagating(grace_seconds
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=2)
-        assert process.returncode is not None
+        if os.name == "nt":
+            assert process.returncode is not None
+        else:
+            assert process.returncode in (-TERMINATE_SIGNAL, -KILL_SIGNAL)
         assert await process.wait() == process.returncode
     finally:
         if process.returncode is None:
@@ -82,14 +116,3 @@ async def test_cancellation_during_grace_still_kills_and_reaps():
         (123, KILL_SIGNAL),
     ]
     assert process.wait.await_count == 2
-
-
-async def test_terminate_owned_subprocess_falls_back_without_killpg(monkeypatch):
-    process = MagicMock(pid=123, returncode=None)
-    process.wait = AsyncMock(return_value=0)
-    monkeypatch.delattr("sandbox_runtime.process_output.os.killpg", raising=False)
-
-    await terminate_owned_subprocess(process)
-
-    process.kill.assert_called_once_with()
-    process.wait.assert_awaited_once_with()

@@ -3,6 +3,8 @@
 An open-source background agents coding system inspired by
 [Ramp's Inspect](https://builders.ramp.com/post/why-we-built-our-background-agent).
 
+![Open-Inspect web UI: session sidebar and new session composer](docs/images/ui-overview.png)
+
 ## Overview
 
 Open-Inspect provides a hosted background coding agent that can:
@@ -15,8 +17,9 @@ Open-Inspect provides a hosted background coding agent that can:
 - Run scheduled automations for cron jobs, or event-driven automations for GitHub events, Sentry
   alerts, and webhooks
 - Spawn parallel sub-tasks that work in separate sandboxes simultaneously
-- Use your choice of AI model — Anthropic Claude, OpenAI Codex (via ChatGPT subscription), xAI Grok
-  (via SuperGrok subscription), or OpenCode Zen
+- Use your choice of AI model — Anthropic Claude (via API key or a connected Claude subscription on
+  the Claude Agent harness), OpenAI Codex (via ChatGPT subscription), xAI Grok (via SuperGrok
+  subscription), or OpenCode Zen
 
 ## Security Model (Single-Tenant Only)
 
@@ -107,8 +110,10 @@ ownership, bots, and member suspension.
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │                     Session Sandbox                          │  │
 │  │  ┌───────────┐  ┌───────────┐  ┌───────────┐                 │  │
-│  │  │ Supervisor│──│  OpenCode │──│   Bridge  │─────────────────┼──┼──▶ Control Plane
-│  │  └───────────┘  └───────────┘  └───────────┘                 │  │
+│  │  │ Supervisor│──│  Harness  │──│   Bridge  │─────────────────┼──┼──▶ Control Plane
+│  │  └───────────┘  │ (OpenCode │  └───────────┘                 │  │
+│  │                 │ or Claude)│                                │  │
+│  │                 └───────────┘                                │  │
 │  │                      │                                       │  │
 │  │              Full Dev Environment                            │  │
 │  │      (Node.js, Python, git, agent-browser)                   │  │
@@ -204,20 +209,22 @@ await configureGitIdentity({
 
 Choose the AI model that fits your task, with per-session reasoning effort controls:
 
-| Provider            | Models                                                               |
-| ------------------- | -------------------------------------------------------------------- |
-| Anthropic           | Claude Haiku 4.5, Sonnet 4.5/4.6/5, Opus 4.5/4.6/4.7/4.8/5, Fable 5  |
-| OpenAI              | GPT 5.4, GPT 5.5, 5.3 Codex, 5.3 Codex Spark                         |
-| xAI / SuperGrok     | Grok models (opt-in)                                                 |
-| OpenCode Zen        | Kimi, MiniMax, Qwen, GLM, Muse Spark, and Big Pickle models (opt-in) |
-| Z.AI Coding Plan    | GLM 5.2/5.3 and GLM 5.3 Flash (opt-in)                               |
-| MiniMax Coding Plan | MiniMax M2.7 (opt-in)                                                |
-| Fireworks AI        | Kimi K2.5 Turbo (opt-in)                                             |
-| OpenCode Go         | GLM, Kimi, Qwen, MiniMax, MiMo, Muse, and DeepSeek models (opt-in)   |
-| Ollama Cloud        | GLM, Kimi, and MiniMax models (opt-in)                               |
+| Provider            | Models                                                                  |
+| ------------------- | ----------------------------------------------------------------------- |
+| Anthropic           | Claude Haiku 4.5, Sonnet 4.5/4.6/5, Opus 4.5/4.6/4.7/4.8/5, Fable 5/5.1 |
+| OpenAI              | GPT 5.4, GPT 5.5, 5.3 Codex, 5.3 Codex Spark                            |
+| xAI / SuperGrok     | Grok models (opt-in)                                                    |
+| OpenCode Zen        | Kimi, MiniMax, Qwen, GLM, Muse Spark, and Big Pickle models (opt-in)    |
+| OpenCode Go         | GLM, Kimi, Qwen, MiniMax, MiMo, Muse, and DeepSeek models (opt-in)      |
+| Z.AI Coding Plan    | GLM 5.2/5.3 and GLM 5.3 Flash (opt-in)                                  |
+| MiniMax Coding Plan | MiniMax M2.7 (opt-in)                                                   |
+| Fireworks AI        | Kimi K2.5 Turbo (opt-in)                                                |
+| Ollama Cloud        | GLM, Kimi, and MiniMax models (opt-in)                                  |
 
 OpenAI models work with your existing ChatGPT subscription via OAuth — no separate API key needed.
-Grok models work with an eligible SuperGrok subscription through control-plane-managed OAuth. See
+Anthropic models can run on the **Claude Agent** harness with a connected Claude subscription; see
+[Using the Claude Agent Harness](docs/CLAUDE_AGENT.md). Grok models work with an eligible SuperGrok
+subscription through control-plane-managed OAuth. See
 **[docs/AVAILABLE_MODELS.md](docs/AVAILABLE_MODELS.md)** for the full model list and
 **[docs/OPENAI_MODELS.md](docs/OPENAI_MODELS.md)** or **[docs/GROK_MODELS.md](docs/GROK_MODELS.md)**
 for subscription setup instructions.
@@ -299,9 +306,9 @@ docker compose up -d postgres redis
 - `setup.sh` failures are non-fatal for fresh sessions, but fatal in image build mode
 - `start.sh` runs for every non-build session startup (fresh, prebuilt-image, snapshot-restore)
 - `start.sh` failures are strict: if present and it fails, session startup fails
-- Default timeouts:
-  - `SETUP_TIMEOUT_SECONDS` (default `300`)
-  - `START_TIMEOUT_SECONDS` (default `120`)
+- Open-Inspect does not impose hook-specific timeouts. Scripts remain subject to enclosing sandbox
+  shutdown and image-build limits; scripts can apply their own command-specific deadlines when
+  needed.
 - Both hooks receive `OPENINSPECT_BOOT_MODE` (`build`, `fresh`, `repo_image`, `snapshot_restore`)
 - Git operations in hooks can authenticate to other private repos on the configured SCM host when
   the shared installation has access
@@ -321,5 +328,7 @@ built with:
 - [OpenComputer](https://www.opencomputer.dev) - Cloud sandbox infrastructure
 - [E2B](https://e2b.dev) - Cloud sandbox infrastructure
 - [Cloudflare Workers](https://workers.cloudflare.com) - Edge computing
-- [OpenCode](https://opencode.ai) - Coding agent runtime
+- [OpenCode](https://opencode.ai) - Coding agent runtime (built-in harness)
+- [Claude Agent SDK](https://docs.anthropic.com/en/docs/agent-sdk) - Coding agent runtime (Claude
+  Agent harness)
 - [Next.js](https://nextjs.org) - Web framework

@@ -2,7 +2,21 @@
 
 New features, integrations, and notable improvements to Open-Inspect — newest first.
 
+## September 14, 2026
+
+**OpenCode Go models.** Adds 27 opt-in `opencode-go/*` models to Settings > Models for OpenCode
+sessions. Configure `OPENCODE_API_KEY` in Settings > Secrets with an active Go subscription. See
+[Available models](docs/AVAILABLE_MODELS.md#opencode-go).
+
 ## September 9, 2026
+
+**Claude Fable 5.1.** Adds `claude-fable-5-1` to the model picker and integrations, with adaptive
+thinking controls from low through max.
+
+**Claude Agent harness.** Sessions can run on the Claude Agent SDK as a second harness beside
+OpenCode, chosen in the composer and inherited by child sessions and automations. Claude Agent
+sessions can use a **connected Claude subscription** from Settings > Provider Accounts instead of an
+API key. See [Using the Claude Agent Harness](docs/CLAUDE_AGENT.md).
 
 **GLM 5.3 reasoning efforts.** GLM 5.3 through Z.AI Coding Plan now exposes the provider-supported
 low, high, and max reasoning efforts, matching GLM 5.3 Flash. Sessions, automations, and integration
@@ -14,9 +28,8 @@ settings can select and persist them.
 Spark 1.3 and DeepSeek V4 Flash variants through OpenCode, and Big Pickle through OpenCode Zen.
 Their provider-specific reasoning efforts are available in sessions, automations, and integration
 settings. Sandbox images now pin OpenCode 1.18.23 and rebuild existing runtimes so Z.AI Coding Plan
-recognizes GLM 5.3 Flash. The sandbox runtime registers upstream's `ZHIPU_API_KEY` under OpenCode's
-`zai-coding-plan` auth identity. Missing Z.AI credentials are rejected before sandbox provisioning
-instead of failing during startup.
+recognizes GLM 5.3 Flash. The sandbox runtime registers `ZHIPU_API_KEY` under OpenCode's
+`zai-coding-plan` auth identity. Missing Z.AI credentials are rejected before sandbox provisioning.
 
 ## September 1, 2026
 
