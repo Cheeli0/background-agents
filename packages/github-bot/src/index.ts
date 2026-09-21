@@ -29,28 +29,16 @@ import {
   isReviewRequestedForBot,
   type HandlerResult,
 } from "./handlers";
-import { createKvCacheStore } from "@open-inspect/shared/cache-store";
 import { toAutofixEnvelope } from "./autofix-ingress";
+import { DeliveryDedupe } from "./delivery-dedupe";
 
 const app = new Hono<{ Bindings: Env }>();
-const DELIVERY_DEDUPE_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
-const DELIVERY_PROCESSING_TTL_MS = 5 * 60 * 1_000;
-const DELIVERY_STATUS_PROCESSING = "processing";
-const DELIVERY_STATUS_PROCESSED = "processed";
-
-function getDeliveryDedupeKey(deliveryId: string): string {
-  return `delivery:${deliveryId}`;
-}
-
-function ttlSecondsFromMs(ttlMs: number): number {
-  return Math.ceil(ttlMs / 1_000);
-}
 
 app.get("/health", (c) => c.json({ status: "healthy", service: "open-inspect-github-bot" }));
 
 app.post("/webhooks/github", async (c) => {
   const log = createLogger("webhook", {}, parseLogLevel(c.env.LOG_LEVEL));
-  const cacheStore = createKvCacheStore(c.env.GITHUB_KV);
+  const deliveryDedupe = new DeliveryDedupe(c.env.DB);
 
   const rawBody = await c.req.text();
   const signature = c.req.header("X-Hub-Signature-256") ?? null;
@@ -63,22 +51,18 @@ app.post("/webhooks/github", async (c) => {
     return c.json({ error: "invalid signature" }, 401);
   }
 
-  let dedupeKey: string | null = null;
+  let claimToken: string | null = null;
   if (deliveryId) {
-    dedupeKey = getDeliveryDedupeKey(deliveryId);
-    const existing = await cacheStore.get(dedupeKey);
-    if (existing) {
+    claimToken = crypto.randomUUID();
+    const claimResult = await deliveryDedupe.claim(deliveryId, claimToken);
+    if (claimResult === "duplicate") {
       log.info("webhook.duplicate_delivery", {
         delivery_id: deliveryId,
         event_type: event,
-        dedupe_status: existing,
+        dedupe_backend: "d1",
       });
       return c.json({ ok: true, duplicate: true });
     }
-
-    await cacheStore.put(dedupeKey, DELIVERY_STATUS_PROCESSING, {
-      expirationTtl: ttlSecondsFromMs(DELIVERY_PROCESSING_TTL_MS),
-    });
   } else {
     log.warn("webhook.delivery_id_missing", { event_type: event });
   }
@@ -122,28 +106,28 @@ app.post("/webhooks/github", async (c) => {
   c.executionCtx.waitUntil(
     handleWebhook(c.env, log, event, payload, traceId, deliveryId)
       .then(async () => {
-        if (!dedupeKey) return;
+        if (!deliveryId || !claimToken) return;
 
         try {
-          await cacheStore.put(dedupeKey, DELIVERY_STATUS_PROCESSED, {
-            expirationTtl: ttlSecondsFromMs(DELIVERY_DEDUPE_TTL_MS),
-          });
+          await deliveryDedupe.markProcessed(deliveryId, claimToken);
         } catch (err) {
           log.warn("webhook.dedupe_finalize_failed", {
             trace_id: traceId,
             delivery_id: deliveryId,
+            dedupe_backend: "d1",
             error: err instanceof Error ? err : new Error(String(err)),
           });
         }
       })
       .catch(async (err) => {
-        if (dedupeKey) {
+        if (deliveryId && claimToken) {
           try {
-            await cacheStore.delete(dedupeKey);
+            await deliveryDedupe.release(deliveryId, claimToken);
           } catch (deleteErr) {
             log.warn("webhook.dedupe_clear_failed", {
               trace_id: traceId,
               delivery_id: deliveryId,
+              dedupe_backend: "d1",
               error: deleteErr instanceof Error ? deleteErr : new Error(String(deleteErr)),
             });
           }

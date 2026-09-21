@@ -43,10 +43,45 @@ function createMockKV() {
   };
 }
 
+function createMockD1() {
+  const rows = new Map<string, { claimToken: string; status: string; expiresAt: number }>();
+  const prepare = vi.fn((sql: string) => ({
+    bind: vi.fn((...params: unknown[]) => ({
+      first: vi.fn(async () => {
+        if (!sql.includes("INSERT INTO github_webhook_deliveries")) return null;
+
+        const [deliveryId, claimToken, expiresAt, now] = params as [string, string, number, number];
+        const existing = rows.get(deliveryId);
+        if (existing && existing.expiresAt > now) return null;
+
+        rows.set(deliveryId, { claimToken, status: "processing", expiresAt });
+        return { delivery_id: deliveryId };
+      }),
+      run: vi.fn(async () => {
+        if (sql.includes("UPDATE github_webhook_deliveries")) {
+          const [expiresAt, deliveryId, claimToken] = params as [number, string, string];
+          const existing = rows.get(deliveryId);
+          if (existing?.claimToken === claimToken) {
+            rows.set(deliveryId, { claimToken, status: "processed", expiresAt });
+          }
+        } else if (sql.includes("DELETE FROM github_webhook_deliveries")) {
+          const [deliveryId, claimToken] = params as [string, string];
+          if (rows.get(deliveryId)?.claimToken === claimToken) rows.delete(deliveryId);
+        }
+        return { success: true };
+      }),
+    })),
+  }));
+
+  return { database: { prepare } as unknown as D1Database, prepare, rows };
+}
+
 function makeEnv() {
   const githubKv = createMockKV();
+  const githubD1 = createMockD1();
   return {
     GITHUB_KV: githubKv,
+    DB: githubD1.database,
     AUTOFIX_QUEUE: {
       send: vi.fn(async () => undefined),
     },
@@ -59,7 +94,14 @@ function makeEnv() {
     DEPLOYMENT_NAME: "test",
     DEFAULT_MODEL: "anthropic/claude-haiku-4-5",
     LOG_LEVEL: "error",
-  } as unknown as Env;
+    githubD1,
+  } as unknown as Env & { githubD1: ReturnType<typeof createMockD1> };
+}
+
+function expectNoKvAccess(env: ReturnType<typeof makeEnv>): void {
+  expect(env.GITHUB_KV.get).not.toHaveBeenCalled();
+  expect(env.GITHUB_KV.put).not.toHaveBeenCalled();
+  expect(env.GITHUB_KV.delete).not.toHaveBeenCalled();
 }
 
 function makeCtx() {
@@ -346,6 +388,7 @@ describe("POST /webhooks/github", () => {
 
   it("returns 401 for invalid signature", async () => {
     const body = '{"action":"created"}';
+    const env = makeEnv();
     const res = await app.fetch(
       new Request("http://localhost/webhooks/github", {
         method: "POST",
@@ -355,12 +398,14 @@ describe("POST /webhooks/github", () => {
           "X-GitHub-Event": "issue_comment",
         },
       }),
-      makeEnv(),
+      env,
       makeCtx()
     );
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json).toEqual({ error: "invalid signature" });
+    expect(env.githubD1.prepare).not.toHaveBeenCalled();
+    expectNoKvAccess(env);
   });
 
   it("returns 401 for missing signature", async () => {
@@ -514,12 +559,8 @@ describe("POST /webhooks/github", () => {
     expect(await secondRes.json()).toEqual({ ok: true, duplicate: true });
 
     expect(ctx.waitUntil).toHaveBeenCalledOnce();
-    const githubKv = env.GITHUB_KV as unknown as {
-      get: ReturnType<typeof vi.fn>;
-      put: ReturnType<typeof vi.fn>;
-    };
-    expect(githubKv.get).toHaveBeenCalledTimes(2);
-    expect(githubKv.put).toHaveBeenCalledTimes(2);
+    expect(env.githubD1.rows.get("delivery-123")?.status).toBe("processed");
+    expectNoKvAccess(env);
   });
 
   it("allows redelivery after async processing failure clears the marker", async () => {
@@ -575,18 +616,15 @@ describe("POST /webhooks/github", () => {
         pullRequest: { number: 42 },
       });
     }
-    const githubKv = env.GITHUB_KV as unknown as {
-      get: ReturnType<typeof vi.fn>;
-      put: ReturnType<typeof vi.fn>;
-      delete: ReturnType<typeof vi.fn>;
-    };
-    expect(githubKv.delete).toHaveBeenCalledTimes(2);
+    expect(env.githubD1.rows.has("delivery-failure")).toBe(false);
+    expectNoKvAccess(env);
   });
 
   it("returns 200 for unhandled event type", async () => {
     const body = '{"action":"opened"}';
     const signature = await sign(SECRET, body);
     const ctx = makeCtx();
+    const env = makeEnv();
 
     const res = await app.fetch(
       new Request("http://localhost/webhooks/github", {
@@ -597,13 +635,15 @@ describe("POST /webhooks/github", () => {
           "X-GitHub-Event": "push",
         },
       }),
-      makeEnv(),
+      env,
       ctx
     );
 
     expect(res.status).toBe(200);
     expect(ctx.waitUntil).toHaveBeenCalledOnce();
     await flushWaitUntil(ctx);
+    expect(env.githubD1.prepare).not.toHaveBeenCalled();
+    expectNoKvAccess(env);
   });
 
   it("forwards closed pull request lifecycle fields to the control plane", async () => {

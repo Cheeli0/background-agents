@@ -5,8 +5,11 @@ import type { ControlPlaneFetcher } from "@open-inspect/shared/service-auth";
 import type { GitHubAutofixEnvelope } from "@open-inspect/shared";
 
 export interface Env {
-  /** KV namespace for deduplicating webhook deliveries. */
+  /** Legacy KV binding retained for rollback compatibility. */
   GITHUB_KV: KVNamespace;
+
+  /** D1 database used for atomic webhook delivery deduplication. */
+  DB: D1Database;
 
   /** Durable handoff for pull request feedback that may trigger Autofix. */
   AUTOFIX_QUEUE: Queue<GitHubAutofixEnvelope>;

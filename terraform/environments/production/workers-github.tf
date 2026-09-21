@@ -45,6 +45,12 @@ module "github_bot_worker" {
     }
   }
 
+  d1_databases = {
+    DB = {
+      database_id = cloudflare_d1_database.main.id
+    }
+  }
+
   service_bindings = {
     CONTROL_PLANE = {
       service_name = "open-inspect-control-plane-${local.name_suffix}"
@@ -77,7 +83,12 @@ module "github_bot_worker" {
   compatibility_date  = "2024-09-23"
   compatibility_flags = ["nodejs_compat"]
 
-  depends_on = [null_resource.github_bot_build[0], module.control_plane_worker, module.github_kv[0]]
+  depends_on = [
+    null_resource.github_bot_build[0],
+    module.control_plane_worker,
+    module.github_kv[0],
+    null_resource.d1_migrations,
+  ]
 }
 
 resource "cloudflare_queue_consumer" "github_autofix" {
