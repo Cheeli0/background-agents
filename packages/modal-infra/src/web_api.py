@@ -146,6 +146,7 @@ class CreateSandboxRequest(_RepositoryContextModel):
     sandbox_settings: dict[str, Any] | None = None
     sandbox_backend: ModalBackend = "modal"
     retire_sandbox_id: str | None = None
+    launch_deadline_at_ms: int | None = Field(default=None, gt=0)
 
 
 class RestoreSessionConfigRequest(_RepositoryContextModel):
@@ -180,6 +181,7 @@ class RestoreSandboxRequest(_ModalRequestModel):
     sandbox_settings: dict[str, Any] | None = None
     sandbox_backend: ModalBackend = "modal"
     retire_sandbox_id: str | None = None
+    launch_deadline_at_ms: int | None = Field(default=None, gt=0)
 
 
 @dataclass
@@ -380,6 +382,7 @@ def _session_config_from_create_request(
 @app.function(
     image=function_image,
     secrets=[internal_api_secret],
+    timeout=150,
 )
 @fastapi_endpoint(method="POST")
 async def api_create_sandbox(
@@ -458,6 +461,7 @@ async def api_create_sandbox(
                 else DEFAULT_SANDBOX_TIMEOUT_SECONDS
             ),
             retire_sandbox_id=parsed_request.retire_sandbox_id or None,
+            launch_deadline_at_ms=parsed_request.launch_deadline_at_ms,
         )
 
         try:
@@ -679,9 +683,12 @@ async def api_stop_sandbox(
     ):
         if not isinstance(sandbox_id, str) or not sandbox_id:
             raise HTTPException(status_code=400, detail="sandbox_id is required")
-        from .sandbox.manager import SandboxManager
+        from .sandbox.manager import PendingVMReferenceNotVisible, SandboxManager
 
-        await SandboxManager().stop_sandbox(sandbox_id)
+        try:
+            await SandboxManager().stop_sandbox(sandbox_id)
+        except PendingVMReferenceNotVisible as e:
+            raise HTTPException(status_code=409, detail="pending_reference_not_visible") from e
         return {"success": True, "data": {"terminated": True}}
 
 
@@ -728,7 +735,7 @@ async def api_snapshot_build_sandbox(
         }
 
 
-@app.function(image=function_image, secrets=[github_app_secrets, internal_api_secret])
+@app.function(image=function_image, secrets=[github_app_secrets, internal_api_secret], timeout=150)
 @fastapi_endpoint(method="POST")
 async def api_restore_sandbox(
     request: dict,
@@ -819,6 +826,7 @@ async def api_restore_sandbox(
             settings=parsed_request.sandbox_settings or None,
             sandbox_backend=parsed_request.sandbox_backend,
             retire_sandbox_id=parsed_request.retire_sandbox_id or None,
+            launch_deadline_at_ms=parsed_request.launch_deadline_at_ms,
         )
 
         return {
