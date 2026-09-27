@@ -225,6 +225,7 @@ CREATE TABLE IF NOT EXISTS sandbox (
   boot_phase TEXT,                                  -- JSON SandboxBootPhase the runtime last reported; NULL once ready
   boot_seq INTEGER,                                 -- Sequence of that report, for de-duplicating resends
   fenced INTEGER NOT NULL DEFAULT 0,                -- 1 once the generation's credentials were revoked for good (boot budget)
+  startup_rejected INTEGER NOT NULL DEFAULT 0,        -- rejected startup retains a cleanup obligation
   created_at INTEGER NOT NULL
 );
 
@@ -752,6 +753,11 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     id: 55,
     description: "Persist per-step usage in the session",
     run: STEP_USAGE_TABLE_SQL,
+  },
+  {
+    id: 56,
+    description: "Retain rejected sandbox startup cleanup intent",
+    run: "ALTER TABLE sandbox ADD COLUMN startup_rejected INTEGER NOT NULL DEFAULT 0",
   },
 ];
 

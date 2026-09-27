@@ -160,8 +160,9 @@ Create an R2 API Token:
 
 ### Modal
 
-> Only required when `sandbox_provider = "modal"` (the default, used by the core path). To use
-> Daytona, Vercel Sandboxes, OpenComputer, or E2B instead, skip this section and follow
+> Only required when `sandbox_provider = "modal"` (the default, used by the core path) or
+> `"modal-vm"`. Select `modal-vm` for Docker-capable VMs; see [Modal VM setup](MODAL_DOCKER.md). To
+> use Daytona, Vercel Sandboxes, OpenComputer, or E2B instead, skip this section and follow
 > [Alternative Sandbox Providers](#alternative-sandbox-providers-optional).
 
 1. Go to [Modal Settings](https://modal.com/settings)
