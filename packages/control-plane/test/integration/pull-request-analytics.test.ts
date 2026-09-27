@@ -34,6 +34,8 @@ async function seedSession(input: {
   const store = new SessionIndexStore(env.DB);
   await store.create({
     id: input.id,
+    ownerTeamId: null,
+    visibility: "workspace",
     title: input.id,
     repoOwner: "acme",
     repoName: "web",

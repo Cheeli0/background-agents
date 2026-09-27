@@ -50,6 +50,8 @@ async function seedSession(
 ): Promise<void> {
   await store.create({
     id: input.id,
+    ownerTeamId: null,
+    visibility: "workspace",
     title: input.id,
     repoOwner: input.repoOwner,
     repoName: input.repoName,

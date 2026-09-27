@@ -54,6 +54,7 @@ interface MatrixFixtures {
 function automation(id: string, userId: string): AutomationRow {
   return {
     id,
+    owner_team_id: null,
     name: id,
     instructions: "Run tests",
     trigger_type: "schedule",

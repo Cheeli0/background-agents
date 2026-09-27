@@ -97,6 +97,15 @@ export type {
 } from "./sessions";
 
 export {
+  teamRoleSchema,
+  teamJoinPolicySchema,
+  sessionVisibilitySchema,
+  teamRowSchema,
+  teamMembershipSchema,
+} from "./teams";
+export type { Team, TeamRole, TeamJoinPolicy, SessionVisibility, TeamMembership } from "./teams";
+
+export {
   SESSION_INBOX_CATEGORIES,
   sessionInboxCategorySchema,
   sessionInboxSessionSchema,
