@@ -197,8 +197,40 @@ export class SandboxShutdownCoordinator {
       restoreInvoked: true,
       // Only retained resume reactivates the source described by the receipt.
       sourceRetired: providerObjectId ? false : state.sourceRetired,
-      providerObjectId: providerObjectId ?? null,
+      providerObjectId: providerObjectId ?? state.providerObjectId,
     });
+  }
+
+  /** The pending reference belongs to this generation, unlike a row handle left by a prior one. */
+  async recordPendingProviderHandle(
+    generation: SandboxGeneration,
+    reference: string,
+    lifetime: Extract<SandboxLifetime, { kind: "finite" }>
+  ): Promise<"registered" | "expired" | "superseded"> {
+    const state = this.deps.store.read();
+    if (!state || !this.current(state) || !this.matches(state, generation)) return "superseded";
+    const settings = parsePersistedSandboxSettings(
+      this.deps.session.getSession()?.sandbox_settings ?? null
+    );
+    const expiresAtMs = lifetime.expiresAtMs;
+    const drainAtMs =
+      state.lifecyclePolicy === "legacy"
+        ? null
+        : expiresAtMs - (settings.finalSnapshotBufferMs ?? DEFAULT_FINAL_SNAPSHOT_BUFFER_MS);
+    if (drainAtMs !== null && this.now() >= drainAtMs) return "expired";
+    const next: ShutdownRecord = {
+      ...state,
+      providerObjectId: reference,
+      sourceRetired: false,
+      lifetimeKind: "finite",
+      lifetimeSource: lifetime.source,
+      expiresAtMs,
+      drainAtMs,
+    };
+    this.publish(next);
+    if (next.phase === "running" && next.drainAtMs !== null)
+      await this.deps.alarm.schedule(next.drainAtMs);
+    return "registered";
   }
 
   async recordProviderStartup(
@@ -218,7 +250,17 @@ export class SandboxShutdownCoordinator {
       this.deps.session.getSession()?.sandbox_settings ?? null
     );
     const buffer = settings.finalSnapshotBufferMs ?? DEFAULT_FINAL_SNAPSHOT_BUFFER_MS;
-    const expiresAtMs = lifetime.kind === "finite" ? lifetime.expiresAtMs : null;
+    const lifetimeToRecord =
+      state.lifetimeKind === "finite" &&
+      state.expiresAtMs !== null &&
+      (lifetime.kind !== "finite" || state.expiresAtMs <= lifetime.expiresAtMs)
+        ? {
+            kind: "finite" as const,
+            expiresAtMs: state.expiresAtMs,
+            source: state.lifetimeSource,
+          }
+        : lifetime;
+    const expiresAtMs = lifetimeToRecord.kind === "finite" ? lifetimeToRecord.expiresAtMs : null;
     const legacy = state.lifecyclePolicy === "legacy";
     const next: ShutdownRecord = {
       ...state,
@@ -226,8 +268,8 @@ export class SandboxShutdownCoordinator {
       restoreInvoked: undefined,
       providerObjectId: row?.modal_object_id ?? null,
       sourceRetired: false,
-      lifetimeKind: lifetime.kind,
-      lifetimeSource: lifetime.kind === "finite" ? lifetime.source : undefined,
+      lifetimeKind: lifetimeToRecord.kind,
+      lifetimeSource: lifetimeToRecord.kind === "finite" ? lifetimeToRecord.source : undefined,
       expiresAtMs,
       drainAtMs: legacy || expiresAtMs === null ? null : expiresAtMs - buffer,
     };
@@ -236,7 +278,7 @@ export class SandboxShutdownCoordinator {
       this.notifyLifecycleChange();
       return;
     }
-    if (lifetime.kind === "unknown") {
+    if (next.lifetimeKind === "unknown") {
       this.fail(
         next,
         "unknown",
