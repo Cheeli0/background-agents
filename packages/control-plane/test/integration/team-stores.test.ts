@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { TeamStore } from "../../src/db/teams";
+import { TeamSlugConflictError, TeamStore } from "../../src/db/teams";
 import {
   TeamMembershipStore,
   LastLeadError,
@@ -28,6 +28,51 @@ describe("team and membership stores", () => {
     expect(await store.list()).toEqual([]);
     expect(await store.restore(created.id)).toBe(true);
     expect(await store.bumpGrantsVersion(created.id)).toBe(1);
+  });
+
+  it("rejects an empty default environment ID without changing the team", async () => {
+    const store = new TeamStore(env.DB);
+    const team = await store.create({
+      slug: "empty-default",
+      name: "Empty",
+      joinPolicy: "invite_only",
+    });
+    await expect(store.update(team.id, { defaultEnvironmentId: "" })).rejects.toThrow(
+      "Default environment must belong to the team"
+    );
+    expect((await store.getById(team.id))?.defaultEnvironmentId).toBeNull();
+  });
+
+  it("reports duplicate slugs as a typed store conflict", async () => {
+    const store = new TeamStore(env.DB);
+    await store.create({ slug: "duplicate", name: "First", joinPolicy: "invite_only" });
+    await expect(
+      store.create({ slug: "duplicate", name: "Second", joinPolicy: "invite_only" })
+    ).rejects.toBeInstanceOf(TeamSlugConflictError);
+  });
+
+  it("rechecks open and active policy when a user joins, without restricting manual additions", async () => {
+    const teams = new TeamStore(env.DB);
+    const members = new TeamMembershipStore(env.DB);
+    const team = await teams.create({ slug: "join-race", name: "Join race", joinPolicy: "open" });
+    for (const userId of ["joiner", "invited"]) {
+      await env.DB.prepare("INSERT INTO users (id, created_at, updated_at) VALUES (?, 1, 1)")
+        .bind(userId)
+        .run();
+    }
+
+    await teams.update(team.id, { joinPolicy: "invite_only" });
+    expect(await members.addIfJoinable(team.id, "joiner")).toBe(false);
+    expect(await members.add(team.id, "invited")).toBe(true);
+    await teams.update(team.id, { joinPolicy: "open" });
+    await teams.archive(team.id);
+    expect(await members.addIfJoinable(team.id, "joiner")).toBe(false);
+    expect((await members.listForUser("joiner")).has(team.id)).toBe(false);
+
+    await teams.restore(team.id);
+    expect(await members.addIfJoinable(team.id, "joiner")).toBe(true);
+    expect(await members.addIfJoinable(team.id, "joiner")).toBe(false);
+    expect((await members.listForUser("joiner")).get(team.id)).toBe("member");
   });
 
   it("protects the final lead under concurrent demotions", async () => {
