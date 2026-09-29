@@ -2,6 +2,7 @@ import { ModalApiError } from "../sandbox/client";
 import { SandboxProviderError } from "../sandbox/provider";
 import type { ModalImageBuildProvider } from "../sandbox/providers/modal-provider";
 import type {
+  CompletedImageBuildInput,
   DeleteImageInput,
   FailedImageBuildInput,
   FinalizeImageBuildInput,
@@ -22,6 +23,7 @@ export class ModalImageBuildAdapter implements ImageBuildAdapter {
     await this.provider.triggerImageBuild({
       scopeKind: plan.scope.kind,
       scopeId: plan.scope.id,
+      resources: plan.resources,
       buildId: plan.buildId,
       repositories: plan.repositories,
       cloneToken: plan.cloneAuth.type === "credential_helper" ? plan.cloneAuth.token : undefined,
@@ -73,7 +75,7 @@ export class ModalImageBuildAdapter implements ImageBuildAdapter {
     };
   }
 
-  async cleanupCompletedBuild(input: FinalizeImageBuildInput): Promise<void> {
+  async cleanupCompletedBuild(input: CompletedImageBuildInput): Promise<void> {
     await this.provider.terminateImageBuildSandbox({
       buildId: input.buildId,
       providerSessionId: input.providerSessionId,

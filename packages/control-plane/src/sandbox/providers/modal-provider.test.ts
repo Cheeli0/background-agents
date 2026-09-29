@@ -6,6 +6,8 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { ModalSandboxProvider } from "./modal-provider";
+import { formatPendingVmReference } from "./pending-vm-reference";
+import { PENDING_VM_REFERENCE_MATERIALIZE_BOUND_MS } from "../lifecycle/decisions";
 import { PrebuiltImageUnavailableError, SandboxProviderError } from "../provider";
 import { ModalApiError } from "../client";
 import { RequestDeadlineError } from "../request-deadline";
@@ -22,6 +24,7 @@ import type {
   CreateImageBuildSandboxResponse,
   StartImageBuildSandboxRequest,
   TerminateImageBuildSandboxRequest,
+  StopSandboxRequest,
 } from "../client";
 
 // ==================== Mock Factories ====================
@@ -37,6 +40,7 @@ function createMockModalClient(
     ) => Promise<CreateImageBuildSandboxResponse>;
     startImageBuildSandbox: (req: StartImageBuildSandboxRequest) => Promise<void>;
     terminateImageBuildSandbox: (req: TerminateImageBuildSandboxRequest) => Promise<void>;
+    stopSandbox: (req: StopSandboxRequest) => Promise<void>;
   }> = {}
 ): ModalClient {
   return {
@@ -70,6 +74,7 @@ function createMockModalClient(
     ),
     startImageBuildSandbox: vi.fn(async () => undefined),
     terminateImageBuildSandbox: vi.fn(async () => undefined),
+    stopSandbox: vi.fn(async () => undefined),
     ...overrides,
   } as unknown as ModalClient;
 }
@@ -89,10 +94,125 @@ const testConfig = {
 // ==================== Tests ====================
 
 describe("ModalSandboxProvider", () => {
+  it.each([
+    [409, "race_pending", true, "transient"],
+    [409, "other_generation", false, "permanent"],
+    [409, "window_closed", false, "transient"],
+    [502, undefined, true, "transient"],
+    [500, undefined, true, "transient"],
+    [501, "docker_not_available", false, "permanent"],
+  ] as const)(
+    "classifies VM launch HTTP %s / %s without matching messages",
+    async (status, detail, unknown, errorType) => {
+      const error = new ModalApiError("arbitrary message", status, detail);
+      const provider = new ModalSandboxProvider(
+        createMockModalClient({
+          createSandbox: async () => {
+            throw error;
+          },
+        }),
+        "modal-vm"
+      );
+      let caught: unknown;
+      try {
+        await provider.createSandbox({ ...testConfig, generationCreatedAtMs: Date.now() });
+      } catch (cause) {
+        caught = cause;
+      }
+      expect(caught).toBeInstanceOf(SandboxProviderError);
+      expect((caught as SandboxProviderError).cause).toBe(error);
+      expect(provider.isUnknownStartupError(caught)).toBe(unknown);
+      expect((caught as SandboxProviderError).errorType).toBe(errorType);
+    }
+  );
+
+  it("derives a pending VM reference and lifetime from the launch reservation", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+      const createdAt = Date.now();
+      const provider = new ModalSandboxProvider(
+        createMockModalClient({
+          createSandbox: async () => ({
+            sandboxId: "sandbox-123",
+            modalObjectId: "sb-123",
+            createdAt: Date.now(),
+            sandboxBackend: "modal-vm",
+          }),
+          restoreSandbox: async () => ({
+            sandboxId: "sandbox-123",
+            modalObjectId: "sb-123",
+            sandboxBackend: "modal-vm",
+          }),
+        }),
+        "modal-vm"
+      );
+      const config = { ...testConfig, generationCreatedAtMs: createdAt, timeoutSeconds: 5_400 };
+      const pending = provider.pendingSandboxAllocation(config);
+      vi.setSystemTime(createdAt + 5_000);
+
+      expect(pending).toEqual({
+        reference: 'modal-vm-session:["test-session","sandbox-123"]',
+        lifetime: {
+          kind: "finite",
+          expiresAtMs: createdAt + 5_400_000,
+          observedAtMs: createdAt,
+          source: "conservative_start_bound",
+        },
+      });
+      expect((await provider.createSandbox(config)).lifetime).toEqual(pending?.lifetime);
+      expect(
+        (await provider.restoreFromSnapshot({ ...config, snapshotImageId: "im-1" })).lifetime
+      ).toEqual(pending?.lifetime);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns a conservative pre-request lifetime and propagates final deadlines", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+      const client = createMockModalClient();
+      const provider = new ModalSandboxProvider(client, "modal");
+      const created = await provider.createSandbox({ ...testConfig, timeoutSeconds: 1200 });
+      expect(created.lifetime).toEqual({
+        kind: "finite",
+        expiresAtMs: Date.parse("2030-01-01T00:20:00.000Z"),
+        observedAtMs: Date.parse("2030-01-01T00:00:00.000Z"),
+        source: "conservative_start_bound",
+      });
+
+      const deadlineAtMs = Date.now() + 30_000;
+      await provider.takeSnapshot({
+        providerObjectId: "modal-obj-123",
+        sessionId: "test-session",
+        reason: "final_preservation",
+        deadlineAtMs,
+      });
+      expect(client.snapshotSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ deadlineAtMs, signal: expect.any(AbortSignal) }),
+        undefined
+      );
+      await provider.stopSandbox({
+        providerObjectId: "modal-obj-123",
+        sessionId: "test-session",
+        reason: "final_preservation",
+        intent: "preserve",
+        deadlineAtMs,
+      });
+      expect(client.stopSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        undefined
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   describe("capabilities", () => {
     it("reports correct capabilities", () => {
       const client = createMockModalClient();
-      const provider = new ModalSandboxProvider(client);
+      const provider = new ModalSandboxProvider(client, "modal");
 
       expect(provider.name).toBe("modal");
       expect(provider.capabilities.supportsSnapshots).toBe(true);
@@ -108,7 +228,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("fetch failed");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         await expect(provider.createSandbox(testConfig)).rejects.toThrow(SandboxProviderError);
         try {
@@ -125,7 +245,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("connect ETIMEDOUT 192.168.1.1:443");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -141,7 +261,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("read ECONNRESET");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -157,7 +277,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("connect ECONNREFUSED 127.0.0.1:3000");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -173,7 +293,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Network request failed");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -189,7 +309,7 @@ describe("ModalSandboxProvider", () => {
             throw new RequestDeadlineError("Modal", "createSandbox", 30_000);
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -205,7 +325,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Modal API error: 502 Bad Gateway");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -221,7 +341,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Modal API error: 503 Service Unavailable");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -237,7 +357,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Modal API error: 504 Gateway Timeout");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -253,7 +373,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("upstream bad gateway error");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -269,7 +389,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("service unavailable, try again later");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -285,7 +405,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("gateway timeout while waiting for upstream");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -303,7 +423,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Modal API error: 401 Unauthorized");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -319,7 +439,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Modal API error: 403 Forbidden");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -335,7 +455,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Modal API error: 400 Bad Request - Invalid configuration");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -351,7 +471,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Modal API error: 422 Unprocessable Entity");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -367,7 +487,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Invalid repository configuration");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -383,7 +503,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Quota exceeded: maximum sandboxes reached");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -399,7 +519,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("Something unexpected happened");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -415,7 +535,7 @@ describe("ModalSandboxProvider", () => {
             throw "string error"; // Throwing a string, not an Error
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -435,7 +555,7 @@ describe("ModalSandboxProvider", () => {
             throw originalError;
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -451,7 +571,7 @@ describe("ModalSandboxProvider", () => {
             throw new Error("timeout exceeded");
           }),
         });
-        const provider = new ModalSandboxProvider(client);
+        const provider = new ModalSandboxProvider(client, "modal");
 
         try {
           await provider.createSandbox(testConfig);
@@ -477,7 +597,7 @@ describe("ModalSandboxProvider", () => {
       const client = createMockModalClient({
         createSandbox: vi.fn(async () => expectedResult),
       });
-      const provider = new ModalSandboxProvider(client);
+      const provider = new ModalSandboxProvider(client, "modal");
 
       const result = await provider.createSandbox({ ...testConfig, vncEnabled: true });
 
@@ -502,7 +622,7 @@ describe("ModalSandboxProvider", () => {
       });
 
       await expect(
-        new ModalSandboxProvider(client).createSandbox({
+        new ModalSandboxProvider(client, "modal").createSandbox({
           ...testConfig,
           prebuiltImageId: "im-missing",
         })
@@ -522,7 +642,7 @@ describe("ModalSandboxProvider", () => {
         }),
       });
 
-      const error = await new ModalSandboxProvider(client)
+      const error = await new ModalSandboxProvider(client, "modal")
         .createSandbox({ ...testConfig, prebuiltImageId: "im-valid" })
         .catch((caught: unknown) => caught);
 
@@ -534,7 +654,7 @@ describe("ModalSandboxProvider", () => {
   describe("image builds", () => {
     it("binds a created image-build sandbox before starting it", async () => {
       const client = createMockModalClient();
-      const provider = new ModalSandboxProvider(client);
+      const provider = new ModalSandboxProvider(client, "modal");
       const correlation = { request_id: "request-1", trace_id: "trace-1" };
       const onProviderSessionCreated = vi.fn(async () => undefined);
 
@@ -556,6 +676,8 @@ describe("ModalSandboxProvider", () => {
 
       expect(client.createImageBuildSandbox).toHaveBeenCalledWith(
         {
+          sandboxBackend: "modal",
+          resources: undefined,
           scopeKind: "repo",
           scopeId: "acme/repo",
           buildId: "build-123",
@@ -589,13 +711,63 @@ describe("ModalSandboxProvider", () => {
   });
 
   describe("HTTP status handling", () => {
+    it("confirms an invisible pending VM only after its materialization bound", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+        const createdAt = Date.now();
+        const stopSandbox = vi.fn(async () => {
+          throw new ModalApiError("not visible", 409, "pending_reference_not_visible");
+        });
+        const provider = new ModalSandboxProvider(
+          createMockModalClient({ stopSandbox }),
+          "modal-vm"
+        );
+        const config = {
+          sessionId: "test-session",
+          providerObjectId: formatPendingVmReference("test-session", "generation"),
+          reason: "respawn",
+          intent: "destroy" as const,
+          generationCreatedAtMs: createdAt,
+        };
+        await expect(provider.stopSandbox(config)).rejects.toThrow();
+        vi.setSystemTime(createdAt + PENDING_VM_REFERENCE_MATERIALIZE_BOUND_MS - 1);
+        await expect(provider.stopSandbox(config)).rejects.toThrow();
+        vi.setSystemTime(createdAt + PENDING_VM_REFERENCE_MATERIALIZE_BOUND_MS);
+        await expect(provider.stopSandbox(config)).resolves.toEqual({ success: true });
+        await expect(
+          provider.stopSandbox({
+            ...config,
+            providerObjectId: 'modal-vm-session:["test-session","generation"]',
+          })
+        ).resolves.toEqual({ success: true });
+        await expect(
+          provider.stopSandbox({ ...config, generationCreatedAtMs: undefined })
+        ).rejects.toThrow();
+
+        for (const error of [
+          new ModalApiError("pending_reference_not_visible", 409, "other_conflict"),
+          new ModalApiError("other conflict", 409),
+          new ModalApiError("provider unavailable", 500),
+          new Error("network failure"),
+        ]) {
+          stopSandbox.mockRejectedValueOnce(error);
+          await expect(provider.stopSandbox(config)).rejects.toThrow();
+        }
+        stopSandbox.mockRejectedValueOnce(new ModalApiError("not found", 404));
+        await expect(provider.stopSandbox(config)).resolves.toEqual({ success: true });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("classifies HTTP 502 from restoreFromSnapshot as transient", async () => {
       const client = createMockModalClient({
         restoreSandbox: vi.fn(async () => {
           throw new ModalApiError("Modal API error: 502 Bad Gateway", 502);
         }),
       });
-      const provider = new ModalSandboxProvider(client);
+      const provider = new ModalSandboxProvider(client, "modal");
 
       try {
         await provider.restoreFromSnapshot({
@@ -623,7 +795,7 @@ describe("ModalSandboxProvider", () => {
           throw new ModalApiError("Modal API error: 401 Unauthorized", 401);
         }),
       });
-      const provider = new ModalSandboxProvider(client);
+      const provider = new ModalSandboxProvider(client, "modal");
 
       try {
         await provider.restoreFromSnapshot({
@@ -652,7 +824,7 @@ describe("ModalSandboxProvider", () => {
           throw modalError;
         }),
       });
-      const provider = new ModalSandboxProvider(client);
+      const provider = new ModalSandboxProvider(client, "modal");
 
       try {
         await provider.takeSnapshot({
@@ -675,7 +847,10 @@ describe("ModalSandboxProvider", () => {
       const snapshotBuildSandbox = vi.fn(async () => ({
         imageId: "build-image-123",
       }));
-      const provider = new ModalSandboxProvider(createMockModalClient({ snapshotBuildSandbox }));
+      const provider = new ModalSandboxProvider(
+        createMockModalClient({ snapshotBuildSandbox }),
+        "modal"
+      );
 
       await expect(
         provider.snapshotImageBuildSandbox({
@@ -699,7 +874,8 @@ describe("ModalSandboxProvider", () => {
           snapshotBuildSandbox: vi.fn(async () => {
             throw modalError;
           }),
-        })
+        }),
+        "modal"
       );
 
       await expect(
@@ -721,7 +897,7 @@ describe("ModalSandboxProvider", () => {
           vncPassword: "vnc-pw",
         })),
       });
-      const provider = new ModalSandboxProvider(client);
+      const provider = new ModalSandboxProvider(client, "modal");
 
       const result = await provider.restoreFromSnapshot({
         snapshotImageId: "img-123",

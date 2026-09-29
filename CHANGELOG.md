@@ -2,6 +2,180 @@
 
 New features, integrations, and notable improvements to Open-Inspect — newest first.
 
+## September 29, 2026
+
+### Added
+
+`TEAMS_ENFORCEMENT` controls active-user session item routes (`/sessions/:id` and its subpaths)
+using the persisted session row (`off`, `shadow` by default, or `on`). On those routes, private
+visibility applies in every mode; team visibility and the delete ownership rule apply when `on`.
+
+WebSocket subscribe and per-command session checks now follow the current session row. Private
+sessions stay restricted in every enforcement mode; team access follows the resolver when
+`TEAMS_ENFORCEMENT=on`, including lifecycle access after membership or scope changes. Workspace-wide
+session lists and bulk export follow in subsequent changes; routes to change a session's team or
+visibility are not yet available.
+
+Session lists, the inbox, children lists, bulk export, and analytics now filter by persisted row
+visibility. Private sessions remain restricted in every mode; only Owners and administrators receive
+their unattributed, scope-filtered cost total in analytics. The WebSocket path follows in a later
+change; no route can yet make a session private or team-owned.
+
+## September 28, 2026
+
+### Added
+
+**Claude Sonnet 5.5.** Adds `anthropic/claude-sonnet-5-5` to the model picker and integrations, with
+adaptive thinking controls from low through max. Claude Agent SDK 0.2.161 bundles Claude Code
+2.1.284, which supports the new model.
+
+OpenCode sessions using a connected ChatGPT subscription now report estimated model costs through
+the existing session cost display and spending limit. These are API-price equivalents, not
+additional subscription charges or an OpenAI invoice; estimates remain zero if catalog pricing is
+unavailable.
+
+Workspace settings now includes Teams. Administrators can create teams, manage members and leads,
+edit team defaults, and archive or restore teams. Team leads can manage their own teams where
+permitted.
+
+## September 27, 2026
+
+### Changed
+
+Trace export now emits published schema 2: messages, events and usage are all oldest first, and
+session trace byte-budget errors use `trace_budget_exceeded`. Single-session downloads export only
+the requested session; `scope` on that route now returns 400. Whole runs remain available through
+the paginated bulk export.
+
+### Added
+
+Operators can select `modal-vm` deployment-wide for Docker-capable Modal sandboxes, with separate
+prepared images and filesystem snapshot recovery. The existing `modal` backend remains the default;
+switching backends does not migrate existing sessions or images. See
+[Modal VM setup](docs/MODAL_DOCKER.md).
+
+The analytics dashboard now shows harness metrics, automation performance in automation and all
+scopes, complete runs, and pull-request cost per merged PR by model and harness.
+
+The analytics dashboard now lets operators select human, agent, automation or all sessions and
+compare token usage, cost by model and provider billing in the selected scope.
+
+Analytics responses now include session token totals and cache hit ratio, pull-request cost by model
+and harness, and the top 20 scoped runs in the dashboard snapshot. Run titles may be null.
+
+Session analytics API now accepts `scope=human|agent|automation|all` (default `human`) on the
+dashboard, summary, timeseries, and breakdown routes, and supports `by=model`, `by=harness`,
+`by=spawnSource`, `by=automation`, and `by=provider` breakdowns. Provider rows include the number of
+sessions billed through a matching provider account.
+
+The [trace export reference](docs/TRACE_EXPORT.md) includes a JSON Schema and instructions for
+manually downloading paginated runs through the web app.
+
+## September 26, 2026
+
+### Added
+
+Bulk session export accepts `include` as a comma-separated list of `messages`, `events`, and
+`usage`, so one session line can carry the prompt, the persisted timeline events, and per-step token
+usage. Each session's included collections are read in one storage snapshot and share one 4 MiB byte
+budget and one page cap, and any include limits the request to 5 sessions per page. Messages keep
+their existing newest-first order; events and usage are listed in timeline order.
+
+## September 25, 2026
+
+### Added
+
+Bulk session export now includes run identity, harness, model provider, repository membership, pull
+request lifecycle, and projected token totals on session lines. Schema 1 consumers must ignore
+unknown fields; `source` is unchanged and also appears as `spawnSource`.
+
+### Changed
+
+Bulk session export now requires `sessions.export` instead of `sessions.read`. Owners,
+Administrators, and users granted the permission through a custom role may export; Viewers, Members,
+and bot services cannot.
+
+## September 23, 2026
+
+**Sessions discovery across full history.** A new **Sessions** destination in the sidebar (above
+Automations) searches every session the viewer may read, including archived work and history beyond
+the command menu's recent window. Search matches titles, session-id prefixes, and any member
+repository of a multi-repository session; creator, repository, environment, lifecycle, and
+automation-origin filters compose on the server and live in the URL, so a filtered view can be
+shared or reloaded. The command menu now labels its results as recent sessions and offers **Search
+all sessions**, carrying typed text to the page; the sidebar's Archived shortcut opens the archived
+view, with archive management still under Settings → Data Controls. The Inbox is unchanged.
+
+**Open changed files from agent output.** Repository file links in a session's agent output now open
+matching files in the Changes panel, including renamed files and line references. Links to files
+outside the session diff remain inert; external links retain their existing behavior.
+
+**Clearer audit log outcomes.** Authorization decisions in the workspace audit log now show
+**Allowed** or **Denied** with the recorded HTTP response (for example, HTTP 409 Conflict) instead
+of a green **Applied** badge, because admitting a request does not prove the change took effect.
+**Applied**, **No change**, and **Rejected** are reserved for events recorded by the operation
+itself. Older rows without a recorded status show the decision with the response marked as not
+recorded; stored audit data is unchanged.
+
+**Claude Opus 5.5.** Adds `anthropic/claude-opus-5-5` to the model picker and integrations, with
+adaptive thinking controls from low through max. The Claude Agent harness now uses
+`claude-agent-sdk` 0.2.158, whose bundled Claude Code release natively supports Opus 5.5.
+
+## September 21, 2026
+
+**Grok 4.7.** Adds `xai/grok-4.7` to the model picker and integrations, with reasoning efforts from
+low through xhigh. `xai/grok-4.6` now also offers xhigh, which it supported but the catalog did not
+expose. The **xAI / SuperGrok** group stays opt-in — enable the model under **Settings > Models**.
+See [Available models](docs/AVAILABLE_MODELS.md#xai--supergrok).
+
+## September 20, 2026
+
+**Graceful sandbox shutdown and recovery.** Sandboxes approaching their provider lifetime now stop
+admitting new work, preserve the filesystem, and confirm retirement before expiry, reserving a
+configurable **Final snapshot buffer** set globally or per repository and environment. Sessions show
+shutdown and recovery progress: work queued at a clean prompt boundary restores automatically into a
+new generation, while an interrupted prompt fails once and, after state is saved, queued work waits
+for **Resume queued work** — the interrupted prompt is never replayed automatically. A failed or
+uncertain shutdown stays held rather than falling back to a fresh checkout, offering retry or
+restore only when the server authorizes it.
+
+**Provider-aware sandbox settings.** The per-session CPU, memory, and session-timeout controls are
+now hidden when the configured provider cannot honor them. Daytona sandboxes inherit CPU and memory
+from their snapshot and take no per-session lifetime, so all three are hidden with an explanation
+while its image build timeout stays configurable, and stored values a provider cannot apply are
+stripped before a session starts instead of blocking the spawn.
+
+## September 19, 2026
+
+**Prebuilt images for Daytona.** Daytona joins the image-prebuild subsystem: it can build repository
+and environment snapshots, start sessions from them, and reclaim sources and snapshots afterwards.
+The feature is opt-in behind `DAYTONA_PREBUILDS_ENABLED` and off by default. Admission gates exactly
+two things — starting a build and selecting a prebuilt image for a fresh session — so while it is
+closed a manual rebuild returns 503, save hooks do nothing, and the cron skips new builds while
+finalization, status, and cleanup keep running. None of this has been exercised against a live
+Daytona deployment; the gates an operator should pass before opening admission are listed in
+[Image prebuilds](docs/IMAGE_PREBUILD.md#verification-gates).
+
+**Slack model flags set session defaults.** A `!model` or `!reasoning` flag on the message that
+opens a session now becomes that session's default for every following turn, instead of applying
+only to the first prompt. Flags on a follow-up still apply to that one request. The "Starting
+work..." acknowledgement names the resulting defaults whenever they differ from your App Home
+preferences.
+
+## September 17, 2026
+
+**Repository-less Slack sessions.** The Slack target classifier can start suitable work in an empty
+sandbox, while uncertain requests use a target picker that also exposes **No repository**. Session
+startup messages now use concise target-neutral copy.
+
+**Sandbox boot progress.** The sandbox runtime now connects to the control plane before it clones
+the repository, so a session shows each boot step as it runs: Cloning repository, Running setup.sh,
+Starting services, Installing skills, Starting agent, with the repository named in multi-repository
+sessions. Failure reports retain phase, repository, and error metadata, while hook stdout and stderr
+are discarded rather than collected or shown. Long setup scripts no longer trip the four-minute
+connect timeout; a boot may take up to `SANDBOX_BOOT_TIMEOUT_MS` (30 minutes by default). See
+[How Open-Inspect Works](docs/HOW_IT_WORKS.md#fresh-start-no-snapshot).
+
 ## September 14, 2026
 
 **OpenCode Go models.** Adds 27 opt-in `opencode-go/*` models to Settings > Models for OpenCode

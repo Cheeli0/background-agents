@@ -209,23 +209,15 @@ await configureGitIdentity({
 
 Choose the AI model that fits your task, with per-session reasoning effort controls:
 
-| Provider            | Models                                                                  |
-| ------------------- | ----------------------------------------------------------------------- |
-| Anthropic           | Claude Haiku 4.5, Sonnet 4.5/4.6/5, Opus 4.5/4.6/4.7/4.8/5, Fable 5/5.1 |
-| OpenAI              | GPT 5.4, GPT 5.5, 5.3 Codex, 5.3 Codex Spark                            |
-| xAI / SuperGrok     | Grok models (opt-in)                                                    |
-| OpenCode Zen        | Kimi, MiniMax, Qwen, GLM, Muse Spark, and Big Pickle models (opt-in)    |
-| OpenCode Go         | GLM, Kimi, Qwen, MiniMax, MiMo, Muse, and DeepSeek models (opt-in)      |
-| Z.AI Coding Plan    | GLM 5.2/5.3 and GLM 5.3 Flash (opt-in)                                  |
-| MiniMax Coding Plan | MiniMax M2.7 (opt-in)                                                   |
-| Fireworks AI        | Kimi K2.5 Turbo (opt-in)                                                |
-| Ollama Cloud        | GLM, Kimi, and MiniMax models (opt-in)                                  |
+Anthropic and OpenAI models are enabled by default. xAI / SuperGrok, OpenCode Zen and Go, Z.AI
+Coding Plan, MiniMax Coding Plan, Fireworks AI, Ollama Cloud, and DeepSeek models are opt-in. See
+[Available Models](docs/AVAILABLE_MODELS.md) for current model IDs, descriptions, and reasoning
+efforts.
 
 OpenAI models work with your existing ChatGPT subscription via OAuth — no separate API key needed.
 Anthropic models can run on the **Claude Agent** harness with a connected Claude subscription; see
 [Using the Claude Agent Harness](docs/CLAUDE_AGENT.md). Grok models work with an eligible SuperGrok
 subscription through control-plane-managed OAuth. See
-**[docs/AVAILABLE_MODELS.md](docs/AVAILABLE_MODELS.md)** for the full model list and
 **[docs/OPENAI_MODELS.md](docs/OPENAI_MODELS.md)** or **[docs/GROK_MODELS.md](docs/GROK_MODELS.md)**
 for subscription setup instructions.
 
@@ -263,7 +255,7 @@ See **[docs/AUTOMATIONS.md](docs/AUTOMATIONS.md)** for setup instructions.
 
 Every session runs in an isolated sandbox backend with a full development environment:
 
-- **Pre-installed:** Node.js 22, Python 3.12, Bun, git, GitHub CLI, build-essential
+- **Pre-installed:** Node.js 24, Python 3.12, Bun, git, GitHub CLI, build-essential
 - **Browser automation:** agent-browser CLI with headless Chromium for screenshots, visual diffs,
   and UI verification
 - **Code-server:** Optional browser-based VS Code connected to the session workspace
@@ -306,9 +298,14 @@ docker compose up -d postgres redis
 - `setup.sh` failures are non-fatal for fresh sessions, but fatal in image build mode
 - `start.sh` runs for every non-build session startup (fresh, prebuilt-image, snapshot-restore)
 - `start.sh` failures are strict: if present and it fails, session startup fails
-- Open-Inspect does not impose hook-specific timeouts. Scripts remain subject to enclosing sandbox
-  shutdown and image-build limits; scripts can apply their own command-specific deadlines when
-  needed.
+- Open-Inspect does not impose hook-specific timeouts. Scripts remain subject to the boot budget
+  (`SANDBOX_BOOT_TIMEOUT_MS`, 30 minutes by default, measured across the whole session boot), to
+  enclosing sandbox shutdown and image-build limits, and can apply their own command-specific
+  deadlines when needed.
+- Each script's progress is reported to the session while it runs. Failure reports retain the phase,
+  repository when available, and error or warning metadata, but hook stdout and stderr are discarded
+  rather than collected or shown. Image builds report neither, having no session to report to. See
+  [How Open-Inspect Works](docs/HOW_IT_WORKS.md#fresh-start-no-snapshot)
 - Both hooks receive `OPENINSPECT_BOOT_MODE` (`build`, `fresh`, `repo_image`, `snapshot_restore`)
 - Git operations in hooks can authenticate to other private repos on the configured SCM host when
   the shared installation has access
