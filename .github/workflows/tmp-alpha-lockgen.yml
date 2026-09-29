@@ -10,17 +10,15 @@ permissions:
 
 jobs:
   resolve:
-    name: Resolve generic dependency graph
+    name: Resolve isolated dependency graph
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Create generic pnpm workspace
+      - name: Create isolated generic pnpm workspace
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p lockgen-js/apps/web
-          cat > lockgen-js/package.json <<'JSON'
+          mkdir -p "$RUNNER_TEMP/lockgen-js/apps/web"
+          cat > "$RUNNER_TEMP/lockgen-js/package.json" <<'JSON'
           {
             "name": "lockgen",
             "private": true,
@@ -29,13 +27,13 @@ jobs:
             "devDependencies": {"prettier": "^3.9.9"}
           }
           JSON
-          cat > lockgen-js/pnpm-workspace.yaml <<'YAML'
+          cat > "$RUNNER_TEMP/lockgen-js/pnpm-workspace.yaml" <<'YAML'
           packages:
             - apps/*
           allowBuilds:
             unrs-resolver: true
           YAML
-          cat > lockgen-js/apps/web/package.json <<'JSON'
+          cat > "$RUNNER_TEMP/lockgen-js/apps/web/package.json" <<'JSON'
           {
             "name": "web",
             "version": "0.1.0",
@@ -64,19 +62,19 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: "22.13.1"
+          node-version: "22.16.0"
 
       - name: Resolve pnpm lockfile
-        working-directory: lockgen-js
-        run: pnpm install --lockfile-only
+        shell: bash
+        run: cd "$RUNNER_TEMP/lockgen-js" && pnpm install --lockfile-only
 
-      - name: Create generic uv workspace
+      - name: Create isolated generic uv workspace
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p lockgen-py/packages/{core,adapters,analytics,experiments,risk}
-          mkdir -p lockgen-py/services/{api,collector,scheduler,research-worker,research-agent,mcp}
-          cat > lockgen-py/pyproject.toml <<'TOML'
+          mkdir -p "$RUNNER_TEMP/lockgen-py/packages/"{core,adapters,analytics,experiments,risk}
+          mkdir -p "$RUNNER_TEMP/lockgen-py/services/"{api,collector,scheduler,research-worker,research-agent,mcp}
+          cat > "$RUNNER_TEMP/lockgen-py/pyproject.toml" <<'TOML'
           [project]
           name = "lock-workspace"
           version = "0.0.0"
@@ -113,8 +111,10 @@ jobs:
           lock-research-agent = { workspace = true }
           lock-mcp = { workspace = true }
           TOML
-          python - <<'PY'
+          LOCKGEN_PY="$RUNNER_TEMP/lockgen-py" python - <<'PY'
+          import os
           from pathlib import Path
+
           members = {
               "packages/core": ("lock-core", []),
               "packages/adapters": ("lock-adapters", ["lock-core>=0.1.0"]),
@@ -128,23 +128,24 @@ jobs:
               "services/research-agent": ("lock-research-agent", ["lock-core>=0.1.0", "lock-analytics>=0.1.0", "lock-experiments>=0.1.0"]),
               "services/mcp": ("lock-mcp", ["lock-core>=0.1.0"]),
           }
+          root = Path(os.environ["LOCKGEN_PY"])
           for rel, (name, deps) in members.items():
-              path = Path("lockgen-py") / rel
+              path = root / rel
               path.mkdir(parents=True, exist_ok=True)
-              sources = ""
+              lines = [
+                  "[project]",
+                  f'name = "{name}"',
+                  'version = "0.1.0"',
+                  'requires-python = ">=3.12"',
+                  "dependencies = [" + ", ".join(repr(dep) for dep in deps) + "]",
+              ]
               if deps:
-                  sources = "\n[tool.uv.sources]\n" + "".join(
-                      f'{dep.split(">=")[0]} = {{ workspace = true }}\n' for dep in deps
+                  lines.extend(["", "[tool.uv.sources]"])
+                  lines.extend(
+                      f'{dep.split(">=")[0]} = {{ workspace = true }}'
+                      for dep in deps
                   )
-              text = (
-                  '[project]\n'
-                  f'name = "{name}"\n'
-                  'version = "0.1.0"\n'
-                  'requires-python = ">=3.12"\n'
-                  f'dependencies = {deps!r}\n'
-                  + sources
-              )
-              path.joinpath("pyproject.toml").write_text(text)
+              path.joinpath("pyproject.toml").write_text("\n".join(lines) + "\n")
           PY
 
       - uses: astral-sh/setup-uv@v6
@@ -152,27 +153,18 @@ jobs:
           version: "0.10.0"
 
       - name: Resolve uv lockfile
-        working-directory: lockgen-py
-        run: uv lock
-
-      - name: Upload generic lockfiles
-        uses: actions/upload-artifact@v4
-        with:
-          name: generic-lockfiles
-          path: |
-            lockgen-js/pnpm-lock.yaml
-            lockgen-py/uv.lock
-          if-no-files-found: error
+        shell: bash
+        run: cd "$RUNNER_TEMP/lockgen-py" && uv lock
 
       - name: Emit lockfiles for connector transfer
         shell: bash
         run: |
           set -euo pipefail
           echo "PNPM_LOCK_B64_BEGIN"
-          base64 -w0 lockgen-js/pnpm-lock.yaml
+          base64 -w0 "$RUNNER_TEMP/lockgen-js/pnpm-lock.yaml"
           echo
           echo "PNPM_LOCK_B64_END"
           echo "UV_LOCK_B64_BEGIN"
-          base64 -w0 lockgen-py/uv.lock
+          base64 -w0 "$RUNNER_TEMP/lockgen-py/uv.lock"
           echo
           echo "UV_LOCK_B64_END"
