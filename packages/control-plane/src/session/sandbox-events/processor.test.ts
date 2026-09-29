@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { createTestBackgroundTasks } from "../../background-tasks.test-support";
+import { createNodeSqlStorage } from "../../node/sqlite-storage";
 import { SessionSandboxEventProcessor } from "./processor";
 import { SandboxArtifactEventHandler } from "./artifact.handler";
 import { SandboxExecutionEventHandler } from "./execution.handler";
@@ -17,8 +19,10 @@ import type { ArtifactRepository } from "../artifact-repository";
 import type { EventRepository } from "../event-repository";
 import type { MessageRepository } from "../message-repository";
 import type { SessionStatusService } from "../session-status-service";
-import type { SessionWebSocketManager } from "../websocket-manager";
+import type { SandboxCommandTarget, SessionWebSocketManager } from "../websocket-manager";
 import type { SessionBudgetService } from "../budget-service";
+import { UsageRepository } from "../usage-repository";
+import { initSchema } from "../schema";
 
 function createPushSpec(repoOwner: string, repoName: string, targetBranch: string): GitPushSpec {
   return {
@@ -32,11 +36,18 @@ function createPushSpec(repoOwner: string, repoName: string, targetBranch: strin
   };
 }
 
-function createProcessor() {
+function createProcessor(
+  shutdown?: {
+    generationReady(event: Extract<SandboxEvent, { type: "sandbox_generation_ready" }>): void;
+    prepared(event: Extract<SandboxEvent, { type: "preservation_prepared" }>): void;
+  },
+  persistedUsage?: UsageRepository
+) {
   const getProcessingMessage = vi.fn(() => null as { id: string } | null);
   const repository = {
     updateSandboxHeartbeat: vi.fn(),
     recordReportedSandboxRuntimeVersion: vi.fn(),
+    recordBootProgress: vi.fn(() => true),
     getSession: vi.fn(() => null),
     getProcessingMessage,
     getMessageContent: vi.fn(() => null as string | null),
@@ -70,6 +81,11 @@ function createProcessor() {
 
   const wsManager = {
     getSandboxSocket: vi.fn(() => null as WebSocket | null),
+    getSandboxCommandTarget: vi.fn(
+      (): SandboxCommandTarget => ({
+        kind: "unavailable",
+      })
+    ),
     send: vi.fn(() => true),
   };
 
@@ -103,6 +119,8 @@ function createProcessor() {
     })),
     deliverTransition: vi.fn(async () => {}),
   };
+  const usageRepository = { recordStepUsage: vi.fn() };
+  const refreshMetricsAfterStep = vi.fn((_messageId: string | null) => {});
 
   // The real family composition, mirroring components.ts, so the suite keeps
   // pinning end-to-end processSandboxEvent behavior across the split.
@@ -117,7 +135,9 @@ function createProcessor() {
       callbackService as unknown as CallbackNotificationService,
       messenger,
       updateLastActivity,
-      budgetService as unknown as SessionBudgetService
+      budgetService as unknown as SessionBudgetService,
+      persistedUsage ?? (usageRepository as unknown as UsageRepository),
+      refreshMetricsAfterStep
     ),
     new SandboxArtifactEventHandler(
       artifactRepository,
@@ -151,9 +171,14 @@ function createProcessor() {
       applySessionTitleUpdate,
       updateLastActivity,
       refreshSlackActivity,
-      log
+      scheduleInactivityCheck,
+      backgroundTasks,
+      { processMessageQueue },
+      log,
+      { onRuntimeReady: vi.fn(() => false) }
     ),
-    pushService
+    pushService,
+    shutdown
   );
 
   return {
@@ -179,6 +204,8 @@ function createProcessor() {
     backgroundTasks,
     log,
     budgetService,
+    usageRepository,
+    refreshMetricsAfterStep,
   };
 }
 
@@ -222,7 +249,6 @@ describe("SessionSandboxEventProcessor", () => {
     const event: SandboxEvent = {
       type: "heartbeat",
       sandboxId: "sb-1",
-      status: "ready",
       timestamp: 1000,
     };
 
@@ -431,6 +457,105 @@ describe("SessionSandboxEventProcessor", () => {
       expect.any(Number)
     );
     expect(h.eventRepository.createEvent).not.toHaveBeenCalled();
+    expect(h.usageRepository.recordStepUsage).toHaveBeenCalledWith(
+      event,
+      "msg-1",
+      expect.any(Number)
+    );
+  });
+
+  it("records step usage before budget delivery rejects", async () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      const storage = createNodeSqlStorage(db);
+      initSchema(storage.sql);
+      const usage = new UsageRepository(storage.sql, storage.transactionSync);
+      const h = createProcessor(undefined, usage);
+      const event: SandboxEvent = {
+        type: "step_finish",
+        messageId: "msg-1",
+        sandboxId: "sb-1",
+        timestamp: 1000,
+        tokens: { input: 10 },
+      };
+      h.budgetService.ingestStepFinish.mockRejectedValueOnce(new Error("stop failed"));
+
+      await expect(h.processor.processSandboxEvent(event)).rejects.toThrow("stop failed");
+      expect(usage.listStepUsage(null, 10).items).toEqual([
+        expect.objectContaining({ messageId: "msg-1", inputTokens: 10 }),
+      ]);
+      expect(usage.getSessionTotals().rowCount).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([false, true])(
+    "ingests cost and preserves the usage error when budget delivery rejects: %s",
+    async (budgetRejects) => {
+      const h = createProcessor();
+      const event: SandboxEvent = {
+        type: "step_finish",
+        messageId: "msg-1",
+        sandboxId: "sb-1",
+        timestamp: 1000,
+        cost: 0.25,
+      };
+      const persistenceError = new Error("usage write failed");
+      h.usageRepository.recordStepUsage.mockImplementationOnce(() => {
+        throw persistenceError;
+      });
+      if (budgetRejects) {
+        h.budgetService.ingestStepFinish.mockRejectedValueOnce(new Error("budget delivery failed"));
+      }
+
+      await expect(h.processor.processSandboxEvent(event)).rejects.toBe(persistenceError);
+      expect(h.budgetService.ingestStepFinish).toHaveBeenCalledWith(
+        event,
+        "msg-1",
+        expect.any(Number)
+      );
+    }
+  );
+
+  it("keeps a recorded step's result when refreshing its metrics fails", async () => {
+    const h = createProcessor();
+    const refreshError = new Error("Malformed persisted session row");
+    h.refreshMetricsAfterStep.mockImplementation(() => {
+      throw refreshError;
+    });
+
+    await expect(
+      h.processor.processSandboxEvent({
+        type: "step_finish",
+        messageId: "msg-1",
+        sandboxId: "sb-1",
+        timestamp: 1000,
+        tokens: { input: 10 },
+      })
+    ).resolves.toBeUndefined();
+    expect(h.backgroundTasks.failures).toEqual([refreshError]);
+  });
+
+  it("reports the usage error rather than a failed metrics refresh", async () => {
+    const h = createProcessor();
+    const persistenceError = new Error("usage write failed");
+    h.usageRepository.recordStepUsage.mockImplementationOnce(() => {
+      throw persistenceError;
+    });
+    h.refreshMetricsAfterStep.mockImplementation(() => {
+      throw new Error("Malformed persisted session row");
+    });
+
+    await expect(
+      h.processor.processSandboxEvent({
+        type: "step_finish",
+        messageId: "msg-1",
+        sandboxId: "sb-1",
+        timestamp: 1000,
+        cost: 0.25,
+      })
+    ).rejects.toBe(persistenceError);
   });
 
   it("records unavailable cost tracking for positive-token steps without cost", async () => {
@@ -674,6 +799,7 @@ describe("SessionSandboxEventProcessor", () => {
     const h = createProcessor();
     const sandboxWs = { readyState: WebSocket.OPEN } as WebSocket;
     h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    h.wsManager.getSandboxCommandTarget.mockReturnValue({ kind: "dispatch", socket: sandboxWs });
 
     const pushPromise = h.pushService.pushBranchToRemote(
       createPushSpec("acme", "web", "feature/test")
@@ -740,6 +866,29 @@ describe("SessionSandboxEventProcessor", () => {
       }
     });
 
+    it("persists a truncated tool call without sending incomplete arguments to callbacks", async () => {
+      const h = createProcessor();
+      await h.processor.processSandboxEvent({
+        type: "tool_call",
+        tool: "bash",
+        args: { command: "partial" },
+        callId: "call-1",
+        messageId: "msg-1",
+        sandboxId: "sb-1",
+        timestamp: 1000,
+        truncated: { fields: ["args.command"], originalBytes: 2_000_000 },
+      });
+
+      expect(h.eventRepository.upsertToolCallEvent).toHaveBeenCalledWith(
+        "msg-1",
+        expect.objectContaining({
+          truncated: { fields: ["args.command"], originalBytes: 2_000_000 },
+        }),
+        expect.any(Number)
+      );
+      expect(h.callbackService.notifyToolCall).not.toHaveBeenCalled();
+    });
+
     it("resets activity timer on step_start", async () => {
       const h = createProcessor();
       await h.processor.processSandboxEvent({
@@ -769,7 +918,6 @@ describe("SessionSandboxEventProcessor", () => {
       await h.processor.processSandboxEvent({
         type: "heartbeat",
         sandboxId: "sb-1",
-        status: "ready",
         timestamp: 1000,
       });
 
@@ -783,7 +931,6 @@ describe("SessionSandboxEventProcessor", () => {
       await h.processor.processSandboxEvent({
         type: "heartbeat",
         sandboxId: "sb-1",
-        status: "ready",
         timestamp: 1000,
       });
 
@@ -797,7 +944,6 @@ describe("SessionSandboxEventProcessor", () => {
       await h.processor.processSandboxEvent({
         type: "heartbeat",
         sandboxId: "sb-1",
-        status: "ready",
         timestamp: 1000,
       });
 
@@ -810,7 +956,6 @@ describe("SessionSandboxEventProcessor", () => {
       await h.processor.processSandboxEvent({
         type: "heartbeat",
         sandboxId: "sb-1",
-        status: "ready",
         timestamp: 1000,
       });
 
@@ -832,6 +977,87 @@ describe("SessionSandboxEventProcessor", () => {
   });
 
   describe("ACK mechanism", () => {
+    it.each([
+      {
+        event: {
+          type: "sandbox_generation_ready",
+          sandboxId: "sb-1",
+          generation: { sandboxId: "sb-1", createdAt: 4000 },
+          timestamp: 1000,
+          ackId: "sandbox_generation_ready:2",
+        } satisfies SandboxEvent,
+      },
+      {
+        event: {
+          type: "preservation_prepared",
+          sandboxId: "sb-1",
+          operationId: "operation-1",
+          generation: { sandboxId: "sb-1", createdAt: 4000 },
+          executionStopped: true,
+          timestamp: 1000,
+          ackId: "preservation_prepared:2",
+        } satisfies SandboxEvent,
+      },
+    ])("rejects $event.type without shutdown handlers and does not ACK", async ({ event }) => {
+      const h = createProcessor();
+      const sandboxWs = {} as WebSocket;
+      h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+
+      await expect(h.processor.processSandboxEvent(event)).rejects.toThrow(
+        "Sandbox graceful shutdown event handlers are not configured"
+      );
+      expect(h.wsManager.send).not.toHaveBeenCalled();
+    });
+
+    it("ACKs a shutdown event only after its configured handler succeeds", async () => {
+      const prepared = vi.fn();
+      const h = createProcessor({ generationReady: vi.fn(), prepared });
+      const sandboxWs = {} as WebSocket;
+      h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+      const event = {
+        type: "preservation_prepared",
+        sandboxId: "sb-1",
+        operationId: "operation-1",
+        generation: { sandboxId: "sb-1", createdAt: 4000 },
+        executionStopped: true,
+        timestamp: 1000,
+        ackId: "preservation_prepared:2",
+      } satisfies SandboxEvent;
+
+      await h.processor.processSandboxEvent(event);
+
+      expect(prepared).toHaveBeenCalledWith(event);
+      expect(prepared.mock.invocationCallOrder[0]).toBeLessThan(
+        h.wsManager.send.mock.invocationCallOrder[0]
+      );
+      expect(h.wsManager.send).toHaveBeenCalledWith(sandboxWs, {
+        type: "ack",
+        ackId: "preservation_prepared:2",
+      });
+    });
+
+    it("does not ACK when a configured shutdown handler throws", async () => {
+      const h = createProcessor({
+        generationReady: vi.fn(() => {
+          throw new Error("generation rejected");
+        }),
+        prepared: vi.fn(),
+      });
+      const sandboxWs = {} as WebSocket;
+      h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+
+      const event = {
+        type: "sandbox_generation_ready",
+        sandboxId: "sb-1",
+        generation: { sandboxId: "sb-1", createdAt: 4000 },
+        timestamp: 1000,
+        ackId: "sandbox_generation_ready:2",
+      } satisfies SandboxEvent;
+
+      await expect(h.processor.processSandboxEvent(event)).rejects.toThrow("generation rejected");
+      expect(h.wsManager.send).not.toHaveBeenCalled();
+    });
+
     it("sends ACK after execution_complete when ackId is present", async () => {
       const h = createProcessor();
       const sandboxWs = {} as WebSocket;

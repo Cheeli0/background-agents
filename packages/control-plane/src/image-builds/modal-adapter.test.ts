@@ -5,6 +5,7 @@ import { SandboxProviderError } from "../sandbox/provider";
 import { ModalImageBuildAdapter } from "./modal-adapter";
 import type { ImageBuildPlan } from "./types";
 import type { ImageBuildFinalizationAttemptError } from "./finalization-error";
+import { immediateFinalizationInput } from "./test-helpers";
 
 function createProvider(): ModalImageBuildProvider {
   return {
@@ -40,6 +41,10 @@ function createPlan(): ImageBuildPlan {
 }
 
 describe("ModalImageBuildAdapter", () => {
+  it("does not advertise unbound source recovery", () => {
+    expect("recoverUnboundSource" in new ModalImageBuildAdapter(createProvider())).toBe(false);
+  });
+
   it("delegates build startup to the Modal provider", async () => {
     const provider = createProvider();
     const adapter = new ModalImageBuildAdapter(provider);
@@ -92,11 +97,13 @@ describe("ModalImageBuildAdapter", () => {
     const correlation = { request_id: "request-1", trace_id: "trace-1" };
 
     expect(
-      await adapter.finalizeSuccessfulBuild?.({
-        buildId: "build-1",
-        providerSessionId: "modal-session-1",
-        correlation,
-      })
+      await adapter.finalizeSuccessfulBuild?.(
+        immediateFinalizationInput({
+          buildId: "build-1",
+          providerSessionId: "modal-session-1",
+          correlation,
+        })
+      )
     ).toEqual({
       providerImageId: "modal-image-1",
       providerSessionId: "modal-session-1",
@@ -148,11 +155,13 @@ describe("ModalImageBuildAdapter", () => {
     );
 
     await expect(
-      new ModalImageBuildAdapter(provider).finalizeSuccessfulBuild({
-        buildId: "build-1",
-        providerSessionId: "modal-session-1",
-        correlation: { request_id: "request-1", trace_id: "trace-1" },
-      })
+      new ModalImageBuildAdapter(provider).finalizeSuccessfulBuild(
+        immediateFinalizationInput({
+          buildId: "build-1",
+          providerSessionId: "modal-session-1",
+          correlation: { request_id: "request-1", trace_id: "trace-1" },
+        })
+      )
     ).rejects.toMatchObject({
       outcome: "definitely_not_created",
     } satisfies Partial<ImageBuildFinalizationAttemptError>);
@@ -166,11 +175,13 @@ describe("ModalImageBuildAdapter", () => {
     });
 
     await expect(
-      new ModalImageBuildAdapter(provider).finalizeSuccessfulBuild({
-        buildId: "build-1",
-        providerSessionId: "modal-session-1",
-        correlation: { request_id: "request-1", trace_id: "trace-1" },
-      })
+      new ModalImageBuildAdapter(provider).finalizeSuccessfulBuild(
+        immediateFinalizationInput({
+          buildId: "build-1",
+          providerSessionId: "modal-session-1",
+          correlation: { request_id: "request-1", trace_id: "trace-1" },
+        })
+      )
     ).rejects.toThrow("snapshot failed after dispatch");
   });
 });

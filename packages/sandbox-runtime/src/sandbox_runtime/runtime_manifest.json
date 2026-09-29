@@ -1,9 +1,11 @@
 {
-  "runtimeVersion": "v67-unbounded-repository-hooks",
-  "generation": 67,
+  "runtimeVersion": "v73-node-24",
+  "generation": 73,
   "minimumCompatibleGeneration": 62,
-  "minimumRebuildGeneration": 67,
+  "minimumPreservationGeneration": 71,
+  "minimumRebuildGeneration": 73,
   "harnessMinimumGeneration": {
-    "claude": 64
+    "claude": 73,
+    "opencode": 73
   }
 }

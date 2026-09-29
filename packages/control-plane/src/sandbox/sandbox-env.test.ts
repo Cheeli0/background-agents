@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   applyScmCloneEnv,
@@ -7,8 +9,10 @@ import {
   buildImageBuildEnvVars,
   buildSandboxEnvVars,
   buildSessionConfig,
+  DEFERRED_START_ENV_VAR,
   deriveCodeServerPassword,
   deriveVncPassword,
+  IMAGE_BUILD_CONTEXT_START_ARGUMENT,
   IMAGE_BUILD_EXECUTION_TIMEOUT_ENV_KEY,
   IMAGE_BUILD_MODE_ENV_VAR,
   imageBuildSandboxIdentity,
@@ -44,7 +48,15 @@ describe("buildSessionConfig", () => {
       model: "anthropic/claude-sonnet-4-5",
       mcp_servers: mcpServers,
       branch: "feature/x",
+      bridge_early_connect: true,
     });
+  });
+
+  it("asks every runtime to connect its bridge ahead of the repository boot", () => {
+    // Set unconditionally: a runtime that predates the flag ignores it and
+    // boots in its old order, and only a control plane that treats the ready
+    // event (not the socket) as readiness may ask for it.
+    expect(buildSessionConfig(baseInput).bridge_early_connect).toBe(true);
   });
 
   it("omits branch when not provided", () => {
@@ -113,6 +125,7 @@ describe("buildSessionConfig", () => {
       harness: "opencode",
       provider: "anthropic",
       model: "anthropic/claude-sonnet-4-5",
+      bridge_early_connect: true,
     });
     expect(parsed).not.toHaveProperty("mcp_servers");
   });
@@ -192,6 +205,7 @@ describe("buildSandboxEnvVars", () => {
       harness: "opencode",
       provider: "anthropic",
       model: "anthropic/claude-sonnet-4-5",
+      bridge_early_connect: true,
     });
     // No embedded git tokens — the sandbox brokers credentials per-request.
     expect(envVars).not.toHaveProperty("VCS_CLONE_TOKEN");
@@ -263,6 +277,25 @@ describe("buildSandboxEnvVars", () => {
     );
     expect(enabled.VNC_PASSWORD).toBe("derived-password");
     expect(enabled.NOVNC_PORT).toBe("6099");
+  });
+
+  it("owns terminal enablement, port, and captured-image disablement", () => {
+    const disabled = buildSandboxEnvVars(
+      {
+        ...baseConfig,
+        userEnvVars: { TERMINAL_ENABLED: "true", TTYD_PROXY_PORT: "7000" },
+      },
+      { scmIdentity: scmCloneIdentity("github"), emitDisabledTerminalEnv: true }
+    );
+    expect(disabled.TERMINAL_ENABLED).toBe("");
+    expect(disabled).not.toHaveProperty("TTYD_PROXY_PORT");
+
+    const enabled = buildSandboxEnvVars(
+      { ...baseConfig, sandboxSettings: { terminalEnabled: true, terminalPort: 7001 } },
+      { scmIdentity: scmCloneIdentity("github") }
+    );
+    expect(enabled.TERMINAL_ENABLED).toBe("true");
+    expect(enabled.TTYD_PROXY_PORT).toBe("7001");
   });
 
   it("strips boot-mode markers from the user layer", () => {
@@ -474,9 +507,9 @@ describe("cross-plane env-key contract manifest", () => {
   // consumption: the runtime constants stay as code.
   const manifest = JSON.parse(
     readFileSync(
-      new URL(
-        "../../../sandbox-runtime/src/sandbox_runtime/image_build_callback_env.json",
-        import.meta.url
+      resolve(
+        dirname(fileURLToPath(import.meta.url)),
+        "../../../sandbox-runtime/src/sandbox_runtime/image_build_callback_env.json"
       ),
       "utf8"
     )
@@ -484,6 +517,8 @@ describe("cross-plane env-key contract manifest", () => {
     callback_env: Record<string, string>;
     build_mode_env_var: string;
     execution_timeout_env_var: string;
+    deferred_start_env_var: string;
+    context_start_argument: string;
     reserved_only_control_plane: string[];
     reserved_only_modal: string[];
   };
@@ -501,6 +536,13 @@ describe("cross-plane env-key contract manifest", () => {
   it("pins the build-mode marker and execution-timeout key to the manifest", () => {
     expect(IMAGE_BUILD_MODE_ENV_VAR).toBe(manifest.build_mode_env_var);
     expect(IMAGE_BUILD_EXECUTION_TIMEOUT_ENV_KEY).toBe(manifest.execution_timeout_env_var);
+  });
+
+  it("pins the deferred-start marker and context-launch argument to the manifest", () => {
+    expect(DEFERRED_START_ENV_VAR).toBe(manifest.deferred_start_env_var);
+    expect(IMAGE_BUILD_CONTEXT_START_ARGUMENT).toBe(manifest.context_start_argument);
+    // The dormant marker is a boot control, so the user layer can never carry it.
+    expect(BOOT_MODE_ENV_KEYS).toContain(manifest.deferred_start_env_var);
   });
 
   it("pins the reserved scrub list to the callback keys plus the control-plane-only extras", () => {
