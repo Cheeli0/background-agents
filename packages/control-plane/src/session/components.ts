@@ -52,6 +52,8 @@ import { McpServerStore } from "../db/mcp-servers";
 import { UserStore } from "../db/user-store";
 import { IntegrationSettingsStore, resolveSlackSettings } from "../db/integration-settings";
 import { SessionIndexStore } from "../db/session-index";
+import { TeamMembershipStore } from "../db/team-memberships";
+import { SessionCollaboratorStore } from "../db/session-collaborators";
 import { parsePersistedSandboxSettings } from "../sandbox/settings";
 import type { SandboxSettings } from "@open-inspect/shared/types/integrations";
 import { createSourceControlProviderFromEnv, type SourceControlProvider } from "../source-control";
@@ -154,6 +156,9 @@ import { createSessionRuntimeClientForTrace } from "./runtime-client";
 import { SessionTitleService } from "./title-service";
 import { parseArtifactMetadata } from "./artifact-metadata";
 import { AuthorizationError, AuthorizationService } from "../authorization/service";
+import { parseTeamsEnforcementMode } from "../authorization/teams-enforcement";
+import { auditSocketPrivateBreakGlass } from "../authorization/session-socket-audit";
+import type { TeamRole } from "@open-inspect/shared/types/teams";
 import type { SessionWebSocket } from "../platform-ports";
 
 /**
@@ -317,6 +322,8 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
   // Shared single instances/closures — every consumer below takes these
   // rather than re-deriving its own copy.
   const sessionIndexStore = new SessionIndexStore(db);
+  const teamMembershipStore = new TeamMembershipStore(db);
+  const sessionCollaboratorStore = new SessionCollaboratorStore(db);
   const sessionPullRequestStore = new SessionPullRequestStore(db);
   const resolveRepoId = (sessionRow: SessionRow) =>
     resolveSessionRepoId(sessionRow, sessionCoreRepository, sourceControlProvider);
@@ -810,8 +817,6 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
   });
 
   const connectionAuthenticator = new SessionConnectionAuthenticator({
-    getSessionOwnerId: async () =>
-      (await sessionIndexStore.get(getPublicSessionId()))?.userId ?? null,
     wsManager,
     sessionCoreRepository,
     sandboxRepository,
@@ -824,12 +829,42 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
     snapshotReader,
     schedulePullRequestRefresh,
     scmProviderName,
-    resolveAuthorization: async (userId) => {
+    resolveSessionViewer: async (userId) => {
       try {
-        const authorization = await new AuthorizationService(db).getEffectiveAuthorization(userId);
-        return authorization.suspendedAt === null
-          ? { kind: "valid", authorization }
-          : { kind: "rejected" };
+        const mode = parseTeamsEnforcementMode(env.TEAMS_ENFORCEMENT);
+        const [authorization, session] = await Promise.all([
+          new AuthorizationService(db).getEffectiveAuthorization(userId),
+          sessionIndexStore.get(getPublicSessionId()),
+        ]);
+        if (authorization.suspendedAt !== null) return { kind: "rejected" };
+        if (!session) return { kind: "rejected" };
+        const [memberships, collaboratorIds] =
+          mode === "on" || session.visibility === "private"
+            ? await Promise.all([
+                teamMembershipStore.listForUser(userId),
+                sessionCollaboratorStore.listUserIds(session.id),
+              ])
+            : [new Map<string, TeamRole>(), []];
+        return {
+          kind: "valid",
+          mode,
+          authorization,
+          viewer: {
+            kind: "user",
+            userId: authorization.userId,
+            roleKey: authorization.role.key,
+            permissions: authorization.permissions,
+            suspended: false,
+            memberships,
+          },
+          row: {
+            id: session.id,
+            ownerUserId: session.userId ?? null,
+            ownerTeamId: session.ownerTeamId,
+            visibility: session.visibility,
+            collaboratorIds,
+          },
+        };
       } catch (error) {
         if (error instanceof AuthorizationError) return { kind: "rejected" };
         log.error("WebSocket authorization verification failed", {
@@ -839,6 +874,7 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
         return { kind: "unavailable" };
       }
     },
+    auditPrivateBreakGlass: (userId, row) => auditSocketPrivateBreakGlass(db, userId, row),
     log,
   });
 
