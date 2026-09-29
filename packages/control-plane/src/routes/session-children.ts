@@ -21,7 +21,9 @@ import {
   GITHUB_SANDBOX_FALLBACK_ROUTE,
   json,
   NO_AUTHORIZATION,
-  requirePermission,
+  requireAll,
+  requireSession,
+  sessionRequirement,
   SCM_AGNOSTIC_SANDBOX_ROUTE,
   type RequestContext,
 } from "./shared";
@@ -260,19 +262,25 @@ export const sessionChildRoutes = new Hono<ControlPlaneHonoEnv>();
 
 sessionChildRoutes.get(
   "/sessions/:id/children",
-  admit({ ...GITHUB_SANDBOX_FALLBACK_ROUTE, authorization: requirePermission("sessions.read") }),
+  admit({ ...GITHUB_SANDBOX_FALLBACK_ROUTE, authorization: requireSession("read") }),
   (c) => dispatch(c, handleListChildren)
 );
 sessionChildRoutes.get(
   "/sessions/:id/children/:childId",
-  admit({ ...GITHUB_SANDBOX_FALLBACK_ROUTE, authorization: requirePermission("sessions.read") }),
+  admit({
+    ...GITHUB_SANDBOX_FALLBACK_ROUTE,
+    authorization: requireAll(sessionRequirement("read"), sessionRequirement("read", "childId")),
+  }),
   (c) => dispatchSession(c, handleGetChild)
 );
 sessionChildRoutes.post(
   "/sessions/:id/children/:childId/cancel",
   admit({
     ...GITHUB_SANDBOX_FALLBACK_ROUTE,
-    authorization: requirePermission("sessions.lifecycle"),
+    authorization: requireAll(
+      sessionRequirement("read"),
+      sessionRequirement("lifecycle", "childId")
+    ),
   }),
   (c) => dispatchSession(c, handleCancelChild)
 );
