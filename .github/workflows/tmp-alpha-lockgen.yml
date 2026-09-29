@@ -57,15 +57,18 @@ jobs:
           }
           JSON
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "12.6.0"
+          run_install: false
+
       - uses: actions/setup-node@v5
         with:
           node-version: "22.13.1"
 
       - name: Resolve pnpm lockfile
         working-directory: lockgen-js
-        run: |
-          corepack enable
-          corepack pnpm install --lockfile-only
+        run: pnpm install --lockfile-only
 
       - name: Create generic uv workspace
         shell: bash
