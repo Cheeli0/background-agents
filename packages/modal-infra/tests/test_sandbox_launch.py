@@ -32,6 +32,7 @@ from src.sandbox.manager import (
     SandboxManager,
 )
 from src.sandbox.tunnels import SandboxTunnels, TunnelUrls
+from src.sandbox.vm_recovery import VMAllocationOutcome, VMServiceLaunch
 
 
 def _fake_create(captured: dict):
@@ -461,9 +462,69 @@ async def test_docker_launch_selects_vm_runtime_and_named_allocation(monkeypatch
     assert kwargs["cpu"] == (2.0, 2.0)
     assert kwargs["memory"] == 4096
     assert kwargs["name"] == docker_allocation_name("session-1")
-    assert kwargs["tags"] == docker_allocation_tags("session-1", "sandbox-acme-repo-1700000000000")
+    assert kwargs["tags"] == {
+        **docker_allocation_tags("session-1", "sandbox-acme-repo-1700000000000"),
+        **VMServiceLaunch(False, False, False, 8080, 6080, 7680, []).tags(),
+    }
     assert kwargs["env"][DOCKER_ENABLED_ENV_VAR] == "true"
     assert handle.sandbox_backend == "modal-vm"
+
+
+@pytest.mark.asyncio
+async def test_docker_launch_does_not_allow_user_env_to_spoof_resolved_access(monkeypatch):
+    manager, captured, _ = _docker_manager(monkeypatch)
+    monkeypatch.setattr(
+        "src.sandbox.launch.modal.Sandbox.from_name",
+        SimpleNamespace(aio=AsyncMock(side_effect=_not_found)),
+    )
+    await manager.create_sandbox(
+        _docker_config(
+            user_env_vars={
+                "CODE_SERVER_PASSWORD": "spoofed",
+                VNC_PASSWORD_ENV_VAR: "spoofed",
+                CODE_SERVER_PORT_ENV_VAR: "9000",
+                EXPECTED_TUNNEL_PORTS_ENV_VAR: "3000",
+            }
+        )
+    )
+
+    for key in (
+        "CODE_SERVER_PASSWORD",
+        VNC_PASSWORD_ENV_VAR,
+        CODE_SERVER_PORT_ENV_VAR,
+        EXPECTED_TUNNEL_PORTS_ENV_VAR,
+    ):
+        assert key not in captured["kwargs"]["env"]
+    assert captured["kwargs"]["tags"]["openinspect_vm_launch"] == "1-000-8080-6080-7680"
+    assert captured["kwargs"]["tags"]["openinspect_vm_ports"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_docker_launch_tags_record_effective_enabled_services_and_ports(monkeypatch):
+    manager, captured, _ = _docker_manager(monkeypatch)
+    monkeypatch.setattr(
+        "src.sandbox.launch.modal.Sandbox.from_name",
+        SimpleNamespace(aio=AsyncMock(side_effect=_not_found)),
+    )
+
+    await manager.create_sandbox(
+        _docker_config(
+            code_server_enabled=True,
+            vnc_enabled=True,
+            settings={
+                **DOCKER_SETTINGS,
+                "terminalEnabled": True,
+                "codeServerPort": 9000,
+                "vncPort": 9001,
+                "terminalPort": 9002,
+                "tunnelPorts": [3000, 3001],
+            },
+        )
+    )
+
+    assert captured["kwargs"]["tags"]["openinspect_vm_launch"] == "1-111-9000-9001-9002"
+    assert captured["kwargs"]["tags"]["openinspect_vm_ports"] == "3000-3001"
+    assert captured["kwargs"]["encrypted_ports"] == [9000, 9001, 9002, 3000, 3001]
 
 
 @pytest.mark.asyncio
@@ -486,8 +547,9 @@ async def test_expired_vm_launch_cannot_materialize_after_lookup(monkeypatch, im
             sandbox_backend="modal-vm",
             launch_deadline_at_ms=1,
         )
-    with pytest.raises(RuntimeError, match="launch deadline"):
+    with pytest.raises(VMAllocationOutcome) as exc:
         await launch
+    assert exc.value.detail == "window_closed"
     assert "kwargs" not in captured
 
 
@@ -638,17 +700,21 @@ async def test_docker_launch_refuses_a_same_named_allocation_it_does_not_own(mon
         SimpleNamespace(aio=AsyncMock(return_value=foreign)),
     )
 
-    with pytest.raises(RuntimeError, match="ownership mismatch") as exc:
+    with pytest.raises(VMAllocationOutcome, match="ownership mismatch") as exc:
         await manager.create_sandbox(_docker_config())
 
-    assert type(exc.value) is RuntimeError
+    assert exc.value.detail == "other_generation"
     assert "kwargs" not in captured
 
 
 @pytest.mark.asyncio
 async def test_docker_launch_retires_the_prior_generation_only_when_owned(monkeypatch):
     manager, captured, _ = _docker_manager(monkeypatch)
-    prior_tags = docker_allocation_tags("session-1", "sandbox-acme-repo-1699999999999")
+    prior_tags = {
+        **docker_allocation_tags("session-1", "sandbox-acme-repo-1699999999999"),
+        "openinspect_vm_launch": "1-000-8080-6080-7680",
+        "openinspect_vm_ports": "none",
+    }
     prior = SimpleNamespace(
         object_id="modal-prior",
         get_tags=AsyncMock(return_value=prior_tags),
@@ -677,7 +743,7 @@ async def test_docker_launch_retires_the_prior_generation_only_when_owned(monkey
     prior.terminate.reset_mock()
     prior.get_tags = AsyncMock(return_value={"openinspect_kind": "other"})
     prior.get_tags.aio = prior.get_tags
-    with pytest.raises(RuntimeError, match="ownership mismatch"):
+    with pytest.raises(VMAllocationOutcome, match="ownership mismatch"):
         await manager.create_sandbox(
             _docker_config(retire_sandbox_id="sandbox-acme-repo-1699999999999")
         )
@@ -708,13 +774,14 @@ async def test_late_predecessor_cannot_materialize_beside_successor(monkeypatch)
         return SimpleNamespace(object_id="duplicate-successor")
 
     monkeypatch.setattr("src.sandbox.launch._create_sandbox", create)
-    with pytest.raises(RuntimeError, match="ownership mismatch"):
+    with pytest.raises(VMAllocationOutcome, match="ownership mismatch"):
         await launcher._launch_docker_sandbox(
             session_id="session-1",
             sandbox_id="successor",
             retire_sandbox_id="prior",
             create_kwargs={},
             repository_image=False,
+            service_launch=VMServiceLaunch(False, False, False, 8080, 6080, 7680, []),
         )
 
 

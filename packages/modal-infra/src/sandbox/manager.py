@@ -46,6 +46,12 @@ from .launch_policy import (
 )
 from .models import DEFAULT_VNC_ENABLED, SandboxConfig, SandboxHandle
 from .tunnels import MAX_TUNNEL_PORTS
+from .vm_recovery import (
+    VMAllocationOutcome,
+    find_owned_vm,
+    owned_vm_tags_match,
+    recover_vm_access,
+)
 
 # Preserve the existing public imports after moving their implementations.
 __all__ = [
@@ -75,6 +81,7 @@ __all__ = [
     "SandboxConfig",
     "SandboxHandle",
     "SandboxManager",
+    "VMAllocationOutcome",
 ]
 
 log = get_logger("manager")
@@ -252,7 +259,9 @@ class SandboxManager:
             except modal.exception.NotFoundError:
                 return None
         tags = await modal_sandbox.get_tags.aio()
-        if identity is not None and tags != docker_allocation_tags(*identity):
+        if identity is not None and not owned_vm_tags_match(
+            tags, docker_allocation_tags(*identity)
+        ):
             raise PendingVMReferenceNotVisible("Docker sandbox allocation ownership mismatch")
         backend = tags.get("openinspect_backend", "modal")
         if backend not in ("modal", "modal-vm"):
@@ -264,6 +273,32 @@ class SandboxManager:
             modal_sandbox=modal_sandbox,
             status=SandboxStatus.READY,
             created_at=time.time(),
+        )
+
+    async def resolve_vm_sandbox(self, session_id: str, sandbox_id: str) -> SandboxHandle:
+        """Recover only the running generation's identity and versioned access metadata."""
+        found = await find_owned_vm(
+            docker_allocation_name(session_id), docker_allocation_tags(session_id, sandbox_id)
+        )
+        if found is None:
+            raise VMAllocationOutcome("not_visible", "VM allocation is not visible")
+        sandbox, tags = found
+        access = await recover_vm_access(
+            sandbox, sandbox_id, tags, SandboxLauncher._read_access_passwords
+        )
+        return SandboxHandle(
+            sandbox_id=sandbox_id,
+            modal_sandbox=sandbox,
+            status=SandboxStatus.WARMING,
+            created_at=time.time(),
+            modal_object_id=sandbox.object_id,
+            code_server_url=access.code_server_url,
+            code_server_password=access.code_server_password,
+            vnc_url=access.vnc_url,
+            vnc_password=access.vnc_password,
+            ttyd_url=access.ttyd_url,
+            tunnel_urls=access.tunnel_urls,
+            sandbox_backend="modal-vm",
         )
 
     async def restore_from_snapshot(

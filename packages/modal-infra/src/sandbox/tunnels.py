@@ -50,12 +50,16 @@ class SandboxTunnels:
         settings: dict[str, Any] | None = None,
     ) -> None:
         settings = settings or {}
-        code_server_port, novnc_port, ttyd_proxy_port = self._resolve_service_ports(settings)
+        self.service_ports = self._resolve_service_ports(settings)
+        self.service_enabled = (
+            code_server_enabled,
+            vnc_enabled,
+            bool(settings.get("terminalEnabled", False)),
+        )
+        code_server_port, novnc_port, ttyd_proxy_port = self.service_ports
         self._code_server_port = code_server_port if code_server_enabled else None
         self._novnc_port = novnc_port if vnc_enabled else None
-        self._ttyd_proxy_port = (
-            ttyd_proxy_port if bool(settings.get("terminalEnabled", False)) else None
-        )
+        self._ttyd_proxy_port = ttyd_proxy_port if self.service_enabled[2] else None
         service_ports = [
             port
             for port in (self._code_server_port, self._novnc_port, self._ttyd_proxy_port)
@@ -63,12 +67,12 @@ class SandboxTunnels:
         ]
         reserved = {VNC_PORT, *service_ports}
         raw_ports = settings.get("tunnelPorts", [])
-        self._extra_ports = (
+        self.extra_ports = (
             [port for port in self._validate_ports(raw_ports) if port not in reserved]
             if raw_ports
             else []
         )
-        self.exposed_ports = service_ports + self._extra_ports
+        self.exposed_ports = service_ports + self.extra_ports
 
     @property
     def environment(self) -> dict[str, str]:
@@ -81,11 +85,13 @@ class SandboxTunnels:
         if self._ttyd_proxy_port is not None:
             env["TERMINAL_ENABLED"] = "true"
             env[TTYD_PROXY_PORT_ENV_VAR] = str(self._ttyd_proxy_port)
-        if self._extra_ports:
-            env[EXPECTED_TUNNEL_PORTS_ENV_VAR] = ",".join(str(p) for p in self._extra_ports)
+        if self.extra_ports:
+            env[EXPECTED_TUNNEL_PORTS_ENV_VAR] = ",".join(str(p) for p in self.extra_ports)
         return env
 
-    async def resolve(self, sandbox: modal.Sandbox, sandbox_id: str) -> TunnelUrls:
+    async def resolve(
+        self, sandbox: modal.Sandbox, sandbox_id: str, *, write_env_file: bool = True
+    ) -> TunnelUrls:
         """Resolve URLs and publish extras; partial resolution/write failures are non-fatal."""
         if not self.exposed_ports:
             return TunnelUrls()
@@ -102,7 +108,7 @@ class SandboxTunnels:
             resolved.pop(self._ttyd_proxy_port, None) if self._ttyd_proxy_port is not None else None
         )
         extra_urls = resolved or None
-        if extra_urls:
+        if extra_urls and write_env_file:
             await self._write_tunnel_env_file(sandbox, sandbox_id, extra_urls)
         return TunnelUrls(
             code_server_url=code_server_url,

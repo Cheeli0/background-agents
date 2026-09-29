@@ -9,9 +9,12 @@ from typing import Any
 import modal
 
 from sandbox_runtime.constants import (
+    CODE_SERVER_PORT_ENV_VAR,
     DOCKER_ENABLED_ENV_VAR,
+    EXPECTED_TUNNEL_PORTS_ENV_VAR,
     NOVNC_PORT_ENV_VAR,
     SANDBOX_TIMEOUT_ENV_VAR,
+    TTYD_PROXY_PORT_ENV_VAR,
     VNC_PASSWORD_ENV_VAR,
     VNC_PASSWORD_MAX_BYTES,
 )
@@ -32,6 +35,7 @@ from .launch_policy import (
 from .models import SandboxConfig, SandboxHandle
 from .tunnels import SandboxTunnels
 from .vcs_env import inject_vcs_env_vars
+from .vm_recovery import VMAllocationOutcome, VMServiceLaunch, find_owned_vm, owned_vm_tags_match
 
 _RESERVED_LAUNCH_ENV_VARS = {
     "RESTORED_FROM_SNAPSHOT",
@@ -41,6 +45,10 @@ _RESERVED_LAUNCH_ENV_VARS = {
     "TERMINAL_ENABLED",
     "AGENT_SLACK_NOTIFY_ENABLED",
     "SESSION_CONFIG",
+    "CODE_SERVER_PASSWORD",
+    CODE_SERVER_PORT_ENV_VAR,
+    TTYD_PROXY_PORT_ENV_VAR,
+    EXPECTED_TUNNEL_PORTS_ENV_VAR,
     VNC_PASSWORD_ENV_VAR,
     NOVNC_PORT_ENV_VAR,
     DOCKER_ENABLED_ENV_VAR,
@@ -225,6 +233,7 @@ class SandboxLauncher:
                 create_kwargs=create_kwargs,
                 repository_image=repository_image,
                 launch_deadline_at_ms=config.launch_deadline_at_ms,
+                service_launch=VMServiceLaunch.from_tunnels(tunnels),
             )
             if adopted:
                 passwords = await self._read_access_passwords(
@@ -263,6 +272,7 @@ class SandboxLauncher:
         retire_sandbox_id: str | None,
         create_kwargs: dict[str, Any],
         repository_image: bool,
+        service_launch: VMServiceLaunch,
         launch_deadline_at_ms: int | None = None,
     ) -> tuple[modal.Sandbox, bool]:
         """Create a named VM or adopt only the allocation owned by this generation."""
@@ -273,17 +283,19 @@ class SandboxLauncher:
         existing = await self._find_owned_docker_allocation(name, tags)
         if existing is None:
             if launch_deadline_at_ms is not None and time.time() * 1000 >= launch_deadline_at_ms:
-                raise RuntimeError("VM launch deadline expired")
+                raise VMAllocationOutcome("window_closed", "VM launch deadline expired")
             try:
                 sandbox = await _create_sandbox(
-                    {**create_kwargs, "name": name, "tags": tags},
+                    {**create_kwargs, "name": name, "tags": {**tags, **service_launch.tags()}},
                     repository_image=repository_image,
                 )
                 return sandbox, False
-            except modal.exception.AlreadyExistsError:
+            except modal.exception.AlreadyExistsError as e:
                 existing = await self._find_owned_docker_allocation(name, tags)
                 if existing is None:
-                    raise
+                    raise VMAllocationOutcome(
+                        "race_pending", "VM allocation is not yet visible"
+                    ) from e
         log.info(
             "sandbox.docker_allocation_adopted",
             sandbox_id=sandbox_id,
@@ -328,13 +340,8 @@ class SandboxLauncher:
     async def _find_owned_docker_allocation(
         name: str, tags: dict[str, str]
     ) -> modal.Sandbox | None:
-        try:
-            sandbox = await modal.Sandbox.from_name.aio(APP_NAME, name)
-        except modal.exception.NotFoundError:
-            return None
-        if await sandbox.get_tags.aio() != tags:
-            raise RuntimeError("Docker sandbox allocation ownership mismatch")
-        return sandbox
+        found = await find_owned_vm(name, tags)
+        return found[0] if found else None
 
     async def _retire_docker_allocation(self, session_id: str, sandbox_id: str) -> None:
         """Terminate a prior named VM only when its ownership tags match."""
@@ -343,7 +350,9 @@ class SandboxLauncher:
             sandbox = await modal.Sandbox.from_name.aio(APP_NAME, name)
         except modal.exception.NotFoundError:
             return
-        if await sandbox.get_tags.aio() != docker_allocation_tags(session_id, sandbox_id):
+        if not owned_vm_tags_match(
+            await sandbox.get_tags.aio(), docker_allocation_tags(session_id, sandbox_id)
+        ):
             log.warn("sandbox.docker_allocation_retire_mismatch", sandbox_id=sandbox_id)
             return
         await sandbox.terminate.aio(wait=True)
