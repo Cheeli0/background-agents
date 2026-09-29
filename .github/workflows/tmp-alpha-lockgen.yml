@@ -1,0 +1,162 @@
+name: Temporary lockfile resolution
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve generic dependency graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Create generic pnpm workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p lockgen-js/apps/web
+          cat > lockgen-js/package.json <<'JSON'
+          {
+            "name": "lockgen",
+            "private": true,
+            "packageManager": "pnpm@12.6.0",
+            "engines": {"node": ">=22.13"},
+            "devDependencies": {"prettier": "^3.9.9"}
+          }
+          JSON
+          cat > lockgen-js/pnpm-workspace.yaml <<'YAML'
+          packages:
+            - apps/*
+          allowBuilds:
+            unrs-resolver: true
+          YAML
+          cat > lockgen-js/apps/web/package.json <<'JSON'
+          {
+            "name": "web",
+            "version": "0.1.0",
+            "private": true,
+            "dependencies": {
+              "next": "^16.3.6",
+              "react": "^19.3.0",
+              "react-dom": "^19.3.0"
+            },
+            "devDependencies": {
+              "@types/node": "^22.20.4",
+              "@types/react": "^19.0.0",
+              "@types/react-dom": "^19.0.0",
+              "eslint": "^9.39.1",
+              "eslint-config-next": "^16.3.6",
+              "typescript": "^5.9.3",
+              "vitest": "^5.0.2"
+            }
+          }
+          JSON
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22.13.1"
+
+      - name: Resolve pnpm lockfile
+        working-directory: lockgen-js
+        run: |
+          corepack enable
+          corepack pnpm install --lockfile-only
+
+      - name: Create generic uv workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p lockgen-py/packages/{core,adapters,analytics,experiments,risk}
+          mkdir -p lockgen-py/services/{api,collector,scheduler,research-worker,research-agent,mcp}
+          cat > lockgen-py/pyproject.toml <<'TOML'
+          [project]
+          name = "lock-workspace"
+          version = "0.0.0"
+          requires-python = ">=3.12"
+          dependencies = [
+            "lock-core>=0.1.0",
+            "lock-adapters>=0.1.0",
+            "lock-analytics>=0.1.0",
+            "lock-experiments>=0.1.0",
+            "lock-risk>=0.1.0",
+            "lock-api>=0.1.0",
+            "lock-collector>=0.1.0",
+            "lock-scheduler>=0.1.0",
+            "lock-research-worker>=0.1.0",
+            "lock-research-agent>=0.1.0",
+            "lock-mcp>=0.1.0",
+          ]
+          [dependency-groups]
+          dev = ["mypy>=1.18", "pytest>=8.4", "ruff>=0.16.9"]
+          [tool.uv]
+          package = false
+          [tool.uv.workspace]
+          members = ["packages/*", "services/*"]
+          [tool.uv.sources]
+          lock-core = { workspace = true }
+          lock-adapters = { workspace = true }
+          lock-analytics = { workspace = true }
+          lock-experiments = { workspace = true }
+          lock-risk = { workspace = true }
+          lock-api = { workspace = true }
+          lock-collector = { workspace = true }
+          lock-scheduler = { workspace = true }
+          lock-research-worker = { workspace = true }
+          lock-research-agent = { workspace = true }
+          lock-mcp = { workspace = true }
+          TOML
+          python - <<'PY'
+          from pathlib import Path
+          members = {
+              "packages/core": ("lock-core", []),
+              "packages/adapters": ("lock-adapters", ["lock-core>=0.1.0"]),
+              "packages/analytics": ("lock-analytics", ["lock-core>=0.1.0"]),
+              "packages/experiments": ("lock-experiments", ["lock-core>=0.1.0", "lock-analytics>=0.1.0"]),
+              "packages/risk": ("lock-risk", ["lock-core>=0.1.0"]),
+              "services/api": ("lock-api", ["lock-core>=0.1.0"]),
+              "services/collector": ("lock-collector", ["lock-core>=0.1.0", "lock-adapters>=0.1.0"]),
+              "services/scheduler": ("lock-scheduler", ["lock-core>=0.1.0"]),
+              "services/research-worker": ("lock-research-worker", ["lock-core>=0.1.0", "lock-analytics>=0.1.0", "lock-experiments>=0.1.0"]),
+              "services/research-agent": ("lock-research-agent", ["lock-core>=0.1.0", "lock-analytics>=0.1.0", "lock-experiments>=0.1.0"]),
+              "services/mcp": ("lock-mcp", ["lock-core>=0.1.0"]),
+          }
+          for rel, (name, deps) in members.items():
+              path = Path("lockgen-py") / rel
+              path.mkdir(parents=True, exist_ok=True)
+              sources = ""
+              if deps:
+                  sources = "\n[tool.uv.sources]\n" + "".join(
+                      f'{dep.split(">=")[0]} = {{ workspace = true }}\n' for dep in deps
+                  )
+              text = (
+                  '[project]\n'
+                  f'name = "{name}"\n'
+                  'version = "0.1.0"\n'
+                  'requires-python = ">=3.12"\n'
+                  f'dependencies = {deps!r}\n'
+                  + sources
+              )
+              path.joinpath("pyproject.toml").write_text(text)
+          PY
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.0"
+
+      - name: Resolve uv lockfile
+        working-directory: lockgen-py
+        run: uv lock
+
+      - name: Upload generic lockfiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: generic-lockfiles
+          path: |
+            lockgen-js/pnpm-lock.yaml
+            lockgen-py/uv.lock
+          if-no-files-found: error
