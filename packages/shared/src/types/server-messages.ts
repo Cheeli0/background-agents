@@ -2,10 +2,11 @@ import { DEFAULT_HARNESS, harnessIdSchema } from "../harnesses";
 import { z } from "zod";
 import { sessionArtifactSchema } from "./artifacts";
 import { sessionRepositoryStateSchema } from "./repositories";
-import { sandboxBootPhaseSchema, sandboxEventSchema } from "./sandbox-events";
-import { sandboxStatusSchema, sessionStatusSchema, timelineSequenceSchema } from "./sessions";
-import { sandboxShutdownSchema, shutdownRecoveryActionSchema } from "./sandbox-shutdown";
+import { sandboxEventSchema } from "./sandbox-events";
+import { sandboxStatusSchema, sessionStatusSchema } from "./sessions";
 import { clientRequestIdSchema } from "./prompts";
+
+const timelineSequenceSchema = z.number().int().nonnegative().safe();
 
 export const promptQueueItemSchema = z.object({
   messageId: z.string(),
@@ -23,7 +24,6 @@ const sessionStateSchema = z.object({
   branchName: z.string().nullable(),
   status: sessionStatusSchema,
   sandboxStatus: sandboxStatusSchema,
-  sandboxPreservation: sandboxShutdownSchema.nullable().optional(),
   messageCount: z.number(),
   createdAt: z.number(),
   /**
@@ -123,8 +123,6 @@ export const sessionSnapshotSchema = z.object({
   artifacts: z.array(sessionArtifactSchema),
   timeline: sessionTimelineSchema,
   spawnError: z.string().nullable().optional(),
-  /** The boot phase a spawning/connecting sandbox last reported; null otherwise. */
-  bootPhase: sandboxBootPhaseSchema.nullable().optional(),
   promptQueue: z.array(promptQueueItemSchema),
 });
 export type SessionSnapshot = z.infer<typeof sessionSnapshotSchema>;
@@ -173,6 +171,7 @@ const serverMessageUnionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("sandbox_warming") }),
   z.object({ type: z.literal("sandbox_spawning") }),
   z.object({ type: z.literal("sandbox_status"), status: sandboxStatusSchema }),
+  z.object({ type: z.literal("sandbox_ready") }),
   z.object({ type: z.literal("sandbox_error"), error: z.string() }),
   z.object({ type: z.literal("artifact_created"), artifact: sessionArtifactSchema }),
   // Existing artifact changed (e.g. PR lifecycle update). Consumers upsert by
@@ -188,12 +187,6 @@ const serverMessageUnionSchema = z.discriminatedUnion("type", [
     repoName: z.string().optional(),
   }),
   z.object({ type: z.literal("snapshot_saved"), imageId: z.string(), reason: z.string() }),
-  z.object({ type: z.literal("sandbox_preservation"), preservation: sandboxShutdownSchema }),
-  z.object({
-    type: z.literal("shutdown_recovery_accepted"),
-    clientRequestId: clientRequestIdSchema,
-    action: shutdownRecoveryActionSchema,
-  }),
   z.object({ type: z.literal("sandbox_restored"), message: z.string() }),
   z.object({ type: z.literal("sandbox_warning"), message: z.string() }),
   z.object({ type: z.literal("processing_status"), isProcessing: z.boolean() }),

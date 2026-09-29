@@ -1,10 +1,9 @@
 import { postMessage } from "@open-inspect/shared/slack";
 import type { CallbackContext } from "@open-inspect/shared/types/session-api";
-import { normalizeValidModels, type ValidModel } from "@open-inspect/shared/models";
-import { getAuthoritativeModels, getAvailableModels } from "../app-home/models";
+import { getAvailableModels } from "../app-home/models";
 import {
   notifyDroppedAttachments,
-  preparePromptImageAttachments,
+  prepareImageAttachments,
   type SlackImageAttachment,
 } from "../attachments";
 import { getUserRepoBranchPreference } from "../branch-preferences";
@@ -12,67 +11,11 @@ import { formatChannelContext, formatThreadContext } from "../messages/context";
 import { branchPreferenceRepo, targetLabel, type SlackSessionTarget } from "../targets";
 import type { Env } from "../types";
 import type { SlackActorIdentity } from "../user-identity";
-import { getResolvedUserPreferences, type ResolvedUserPreferences } from "../user-preferences";
+import { getResolvedUserPreferences } from "../user-preferences";
 import { createSession } from "./control-plane-client";
-import { getSlackSettings, type SlackSettings } from "../slack-settings";
+import { getSlackSettings } from "../slack-settings";
 import { deliverPrompt } from "./prompt-delivery";
 import { buildThreadSession, storeThreadSession } from "./thread-session-store";
-import {
-  EMPTY_INLINE_PROMPT_OPTIONS,
-  normalizeModelSelection,
-  resolveInlinePromptOptions,
-  sameModelSelection,
-  type ModelSelection,
-  type SessionLaunchPlan,
-} from "../inline-flags";
-
-export interface SlackLaunchSettings {
-  enabledModels: ValidModel[];
-  slackConfig: SlackSettings;
-  userPreferences: ResolvedUserPreferences;
-}
-
-async function resolveSlackLaunchSettings(
-  env: Env,
-  userId: string,
-  enabledModels: ValidModel[],
-  slackConfig: SlackSettings
-): Promise<SlackLaunchSettings> {
-  const userPreferences = await getResolvedUserPreferences(env, userId, {
-    defaultModel: slackConfig.defaultModel ?? env.DEFAULT_MODEL,
-    enabledModels,
-  });
-  return { enabledModels, slackConfig, userPreferences };
-}
-
-export async function loadSlackLaunchSettings(
-  env: Env,
-  userId: string,
-  traceId?: string
-): Promise<SlackLaunchSettings> {
-  const [availableModels, slackConfig] = await Promise.all([
-    getAvailableModels(env, traceId),
-    getSlackSettings(env, traceId),
-  ]);
-  return resolveSlackLaunchSettings(
-    env,
-    userId,
-    normalizeValidModels(availableModels.map((modelOption) => modelOption.value)),
-    slackConfig
-  );
-}
-
-export async function loadAuthoritativeSlackLaunchSettings(
-  env: Env,
-  userId: string,
-  traceId?: string
-): Promise<SlackLaunchSettings | null> {
-  const [enabledModels, slackConfig] = await Promise.all([
-    getAuthoritativeModels(env, traceId),
-    getSlackSettings(env, traceId),
-  ]);
-  return enabledModels ? resolveSlackLaunchSettings(env, userId, enabledModels, slackConfig) : null;
-}
 
 export interface StartSessionOptions {
   target: SlackSessionTarget;
@@ -90,27 +33,15 @@ export interface StartSessionOptions {
   channelDescription?: string;
   /** Images attached to the triggering Slack message, normalized at ingress. */
   images?: SlackImageAttachment[];
-  /** Supported images from earlier messages in the selected causal window. */
-  contextImages?: SlackImageAttachment[];
   /** True when the triggering message had no user text, only images. */
   imageOnly?: boolean;
-  launchPlan?: SessionLaunchPlan;
-  launchSettings?: SlackLaunchSettings;
   traceId?: string;
-}
-
-/** What the session was actually created with, for the acknowledgement. */
-export interface StartSessionResult {
-  sessionId: string;
-  sessionDefaults: ModelSelection;
-  /** True when those are not the user's App Home preferences. */
-  differsFromUserDefaults: boolean;
 }
 
 export async function startSessionAndSendPrompt(
   env: Env,
   options: StartSessionOptions
-): Promise<StartSessionResult | null> {
+): Promise<{ sessionId: string } | null> {
   const {
     target,
     channel,
@@ -122,20 +53,12 @@ export async function startSessionAndSendPrompt(
     channelName,
     channelDescription,
     images,
-    contextImages,
     imageOnly,
-    launchPlan,
-    launchSettings: providedLaunchSettings,
     traceId,
   } = options;
   // Download image bytes before creating the session: an image-only request
   // whose images are all lost must never create a session it will not prompt.
-  const preparedImages = await preparePromptImageAttachments(
-    env,
-    images ?? [],
-    imageOnly ? [] : (contextImages ?? []),
-    traceId
-  );
+  const preparedImages = await prepareImageAttachments(env, images ?? [], traceId);
   if (imageOnly && preparedImages.files.length === 0) {
     await notifyDroppedAttachments(
       env,
@@ -146,44 +69,16 @@ export async function startSessionAndSendPrompt(
     );
     return null;
   }
-  const {
-    enabledModels,
-    slackConfig,
-    userPreferences: userPrefs,
-  } = providedLaunchSettings ?? (await loadSlackLaunchSettings(env, actor.userId, traceId));
-  // Whatever the caller asked for is only intent: a plan can be minutes or
-  // hours old by the time a deferred target selection reaches this point, so
-  // the enabled-model set is applied here, against the list just loaded.
-  const requestedDefaults = resolveInlinePromptOptions(
-    EMPTY_INLINE_PROMPT_OPTIONS,
-    launchPlan?.sessionDefaults ?? userPrefs,
-    enabledModels
-  );
-  if (!requestedDefaults.ok) {
-    await postMessage(env.SLACK_BOT_TOKEN, channel, requestedDefaults.error, {
-      thread_ts: threadTs,
-    });
-    return null;
-  }
-  const sessionDefaults = requestedDefaults.turnPlan.effective;
-  const { model, reasoningEffort } = sessionDefaults;
-  const differsFromUserDefaults = !sameModelSelection(
-    sessionDefaults,
-    normalizeModelSelection(userPrefs)
-  );
-  // Overrides were resolved against the models enabled when the follow-up
-  // arrived, and against session defaults that may since have fallen back to
-  // a different model, so they are checked again against what will actually
-  // run. Done before the session exists so a rejection leaves nothing behind.
-  const firstPrompt = resolveInlinePromptOptions(
-    launchPlan?.promptOverrides ?? EMPTY_INLINE_PROMPT_OPTIONS,
-    sessionDefaults,
-    enabledModels
-  );
-  if (!firstPrompt.ok) {
-    await postMessage(env.SLACK_BOT_TOKEN, channel, firstPrompt.error, { thread_ts: threadTs });
-    return null;
-  }
+  const [availableModels, slackConfig] = await Promise.all([
+    getAvailableModels(env, traceId),
+    getSlackSettings(env, traceId),
+  ]);
+  const userPrefs = await getResolvedUserPreferences(env, actor.userId, {
+    defaultModel: slackConfig.defaultModel ?? env.DEFAULT_MODEL,
+    enabledModels: availableModels.map((modelOption) => modelOption.value),
+  });
+  const model = userPrefs.model;
+  const reasoningEffort = userPrefs.reasoningEffort;
   const preferenceRepo = branchPreferenceRepo(target);
   let branch: string | undefined;
   if (preferenceRepo) {
@@ -216,8 +111,8 @@ export async function startSessionAndSendPrompt(
     channel,
     threadTs,
     repoFullName: targetLabel(target),
-    model: firstPrompt.turnPlan.effective.model,
-    reasoningEffort: firstPrompt.turnPlan.effective.reasoningEffort,
+    model,
+    reasoningEffort,
   };
   const channelContext = channelName ? formatChannelContext(channelName, channelDescription) : "";
   const threadContext = previousMessages ? formatThreadContext(previousMessages) : "";
@@ -232,10 +127,6 @@ export async function startSessionAndSendPrompt(
     attachments: preparedImages,
     imageOnly: Boolean(imageOnly),
     callbackContext,
-    // Normally empty — the session was just created with these settings. It is
-    // set only when recovering a stale thread, where the replacement keeps the
-    // thread's defaults and the follow-up's own flags stay a one-turn override.
-    ...firstPrompt.turnPlan.promptOverrides,
     channel,
     threadTs,
     traceId,
@@ -259,5 +150,5 @@ export async function startSessionAndSendPrompt(
     threadTs,
     buildThreadSession(session.sessionId, target, model, reasoningEffort, messageTs)
   );
-  return { sessionId: session.sessionId, sessionDefaults, differsFromUserDefaults };
+  return { sessionId: session.sessionId };
 }

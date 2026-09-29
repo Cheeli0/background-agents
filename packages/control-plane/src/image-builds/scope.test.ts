@@ -79,8 +79,7 @@ function fakeDb(tables: {
   const statement = (sql: string, binds: unknown[] = []) => ({
     bind: (...args: unknown[]) => statement(sql, args),
     first: async () => {
-      if (sql.includes("FROM environments"))
-        return tables.environment ? { owner_team_id: null, ...tables.environment } : null;
+      if (sql.includes("FROM environments")) return tables.environment ?? null;
       if (sql.includes("FROM repo_metadata")) {
         return tables.repoMetadata?.[`${String(binds[0])}/${String(binds[1])}`] ?? null;
       }
@@ -91,9 +90,7 @@ function fakeDb(tables: {
         return { results: tables.repositories ?? [] };
       }
       if (sql.includes("FROM environments")) {
-        return {
-          results: tables.environment ? [{ owner_team_id: null, ...tables.environment }] : [],
-        };
+        return { results: tables.environment ? [tables.environment] : [] };
       }
       if (sql.includes("FROM repo_metadata")) {
         return { results: tables.enabledRepos ?? [] };

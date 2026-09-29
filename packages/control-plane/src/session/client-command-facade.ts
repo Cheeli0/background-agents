@@ -14,16 +14,14 @@ import type {
   ClientPresence,
   ClientPrompt,
   ClientSubscribe,
-  ClientCommandAuthorization,
   FetchHistory,
 } from "./message-router";
 import type { SessionEventStream, SessionHistoryPage } from "./event-stream";
 import type { SessionConnectionAuthenticator } from "./connection-authenticator";
 import type { SessionMessageQueue } from "./message-queue";
 import type { PresenceService } from "./presence-service";
-import type { SessionAction } from "@open-inspect/shared";
+import type { PermissionId } from "@open-inspect/shared/rbac";
 import type { SessionWebSocket } from "../platform-ports";
-import type { ShutdownRecoveryAction } from "@open-inspect/shared/types/sandbox-shutdown";
 
 export class SessionClientCommandFacade implements SessionClientCommands<
   SessionWebSocket,
@@ -34,8 +32,7 @@ export class SessionClientCommandFacade implements SessionClientCommands<
     private readonly prompts: SessionMessageQueue,
     private readonly stop: () => Promise<void>,
     private readonly presence: PresenceService,
-    private readonly events: SessionEventStream,
-    private readonly recover?: (action: ShutdownRecoveryAction) => Promise<void>
+    private readonly events: SessionEventStream
   ) {}
 
   subscribe(connection: SessionWebSocket, message: ClientSubscribe): Promise<void> {
@@ -58,13 +55,6 @@ export class SessionClientCommandFacade implements SessionClientCommands<
     return this.stop();
   }
 
-  recoverShutdown(action: ShutdownRecoveryAction): Promise<void> {
-    if (!this.recover) {
-      return Promise.reject(new Error("Shutdown recovery is not configured"));
-    }
-    return this.recover(action);
-  }
-
   notifyTyping(): Promise<void> {
     return this.presence.handleTyping();
   }
@@ -81,10 +71,9 @@ export class SessionClientCommandFacade implements SessionClientCommands<
   }
 
   authorize(
-    connection: SessionWebSocket,
     client: ClientInfo,
-    action: SessionAction
-  ): Promise<ClientCommandAuthorization> {
-    return this.authenticator.authorizeClientCommand(connection, client.userId, action);
+    permission: PermissionId
+  ): Promise<"allowed" | "denied" | "unavailable"> {
+    return this.authenticator.authorizeClientCommand(client.userId, permission);
   }
 }

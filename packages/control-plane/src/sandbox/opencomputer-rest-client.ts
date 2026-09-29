@@ -45,7 +45,6 @@ export interface OpenComputerApiPaths {
   exec: string;
   checkpoints: string;
   checkpoint: string;
-  checkpointRestore: string;
   secretStores: string;
   secretStore: string;
   secret: string;
@@ -60,7 +59,6 @@ export const openComputerSandboxApiResponseSchema = z
     sandboxDomain: z.string().optional(),
     routes: z.array(z.object({ port: z.number(), url: z.string() })).optional(),
     tunnelUrls: z.record(z.string(), z.string()).optional(),
-    endAt: z.string().optional(),
   })
   .refine((response) => response.id !== undefined || response.sandboxID !== undefined, {
     message: "Expected id or sandboxID",
@@ -88,24 +86,15 @@ export interface OpenComputerForkCheckpointParams {
   secretStore?: string;
 }
 
-export const openComputerCheckpointResponseSchema = z
-  .object({
-    id: z.string(),
-    sandboxId: z.string().optional(),
-    sandboxID: z.string().optional(),
-    orgId: z.string().optional(),
-    name: z.string().optional(),
-    kind: z.enum(["full", "disk_only"]).optional(),
-    status: z.string().optional(),
-    createdAt: z.string().optional(),
-  })
-  .refine(
-    (checkpoint) => checkpoint.sandboxId !== undefined || checkpoint.sandboxID !== undefined,
-    {
-      message: "Expected sandboxId or sandboxID",
-    }
-  );
-const openComputerCheckpointListResponseSchema = z.array(openComputerCheckpointResponseSchema);
+export const openComputerCheckpointResponseSchema = z.object({
+  id: z.string(),
+  sandboxId: z.string(),
+  orgId: z.string().optional(),
+  name: z.string().optional(),
+  kind: z.enum(["full", "disk_only"]).optional(),
+  status: z.string().optional(),
+  createdAt: z.string().optional(),
+});
 
 export type OpenComputerCheckpointResponse = z.infer<typeof openComputerCheckpointResponseSchema>;
 
@@ -201,7 +190,6 @@ const DEFAULT_PATHS: OpenComputerApiPaths = {
   exec: "/sandboxes/:id/exec/run",
   checkpoints: "/sandboxes/:id/checkpoints",
   checkpoint: "/sandboxes/:id/checkpoints/:checkpointId",
-  checkpointRestore: "/sandboxes/:id/checkpoints/:checkpointId/restore",
   secretStores: "/secret-stores",
   secretStore: "/secret-stores/:id",
   secret: "/secret-stores/:id/secrets/:name",
@@ -372,13 +360,12 @@ export class OpenComputerRestClient {
     );
   }
 
-  async getSandbox(id: string, signal?: AbortSignal): Promise<OpenComputerSandboxResponse> {
+  async getSandbox(id: string): Promise<OpenComputerSandboxResponse> {
     const response = await this.requestJson(
       "GET",
       this.expandPath(this.paths.sandbox, { id }),
       TIMEOUT_GET_MS,
-      openComputerSandboxApiResponseSchema,
-      { signal }
+      openComputerSandboxApiResponseSchema
     );
     return this.normalizeSandbox(response);
   }
@@ -399,12 +386,11 @@ export class OpenComputerRestClient {
     return response ? this.normalizeSandbox(response) : undefined;
   }
 
-  async hibernateSandbox(id: string, signal?: AbortSignal): Promise<void> {
+  async hibernateSandbox(id: string): Promise<void> {
     await this.requestVoid(
       "POST",
       this.expandPath(this.paths.hibernate, { id }),
-      TIMEOUT_HIBERNATE_MS,
-      { signal }
+      TIMEOUT_HIBERNATE_MS
     );
   }
 
@@ -490,32 +476,10 @@ export class OpenComputerRestClient {
     );
   }
 
-  async listCheckpoints(
-    id: string,
-    signal?: AbortSignal
-  ): Promise<OpenComputerCheckpointResponse[]> {
-    return await this.requestJson(
-      "GET",
-      this.expandPath(this.paths.checkpoints, { id }),
-      TIMEOUT_GET_MS,
-      openComputerCheckpointListResponseSchema,
-      { signal }
-    );
-  }
-
   async deleteCheckpoint(id: string, checkpointId: string, signal?: AbortSignal): Promise<void> {
     await this.requestVoid(
       "DELETE",
       this.expandPath(this.paths.checkpoint, { id, checkpointId }),
-      TIMEOUT_CHECKPOINT_MS,
-      { signal }
-    );
-  }
-
-  async restoreCheckpoint(id: string, checkpointId: string, signal?: AbortSignal): Promise<void> {
-    await this.requestVoid(
-      "POST",
-      this.expandPath(this.paths.checkpointRestore, { id, checkpointId }),
       TIMEOUT_CHECKPOINT_MS,
       { signal }
     );

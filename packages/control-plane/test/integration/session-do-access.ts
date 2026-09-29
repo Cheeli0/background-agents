@@ -1,12 +1,11 @@
 import { runInDurableObject } from "cloudflare:test";
 import type { SessionDO } from "../../src/cloudflare/durable-object";
 import type { SessionRuntime } from "../../src/session/components";
-import type { Env } from "../../src/types";
 
 /**
  * The DO internals integration tests are allowed to reach: the private
- * `runtime` accessor (which initializes on first touch), the pre-init
- * `appEnv`, and the component graph behind `SessionRuntime.internals`.
+ * `runtime` accessor (which initializes on first touch) and the component
+ * graph behind `SessionRuntime.internals`.
  *
  * NOTE: the `as unknown` cast below has no structural tie to SessionDO — its
  * members are private, so they cannot be `Pick`ed. Renaming the DO's
@@ -17,7 +16,6 @@ import type { Env } from "../../src/types";
  */
 export interface SessionDOInternals {
   runtime: SessionRuntime;
-  appEnv: Env;
 }
 
 /**
@@ -39,16 +37,6 @@ export function runInSessionDO<R>(
 /** Initialize (idempotent) and expose the DO's component graph. */
 export function componentsOf(instance: SessionDO): SessionRuntime["internals"] {
   return (instance as unknown as SessionDOInternals).runtime.internals;
-}
-
-/** Set the real DO's mode before its first request initializes the runtime. */
-export function setSessionTeamsEnforcementMode(
-  stub: DurableObjectStub,
-  mode: string
-): Promise<void> {
-  return runInSessionDO(stub, (instance) => {
-    (instance as unknown as SessionDOInternals).appEnv.TEAMS_ENFORCEMENT = mode;
-  });
 }
 
 /**

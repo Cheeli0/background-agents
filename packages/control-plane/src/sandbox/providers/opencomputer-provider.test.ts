@@ -24,7 +24,6 @@ function createMockClient(overrides: Partial<OpenComputerRestClient> = {}): Open
       async (params: OpenComputerCreateSandboxParams): Promise<OpenComputerSandboxResponse> => ({
         id: "oc-sandbox-1",
         state: "running",
-        endAt: "2032-03-04T05:06:07.000Z",
         routes: [{ port: 3000, url: `https://${params.name}-3000.opencomputer.test` }],
       })
     ),
@@ -38,19 +37,14 @@ function createMockClient(overrides: Partial<OpenComputerRestClient> = {}): Open
     createCheckpoint: vi.fn(async () => ({
       id: "checkpoint-1",
       sandboxId: "oc-sandbox-1",
-      status: "ready",
+      status: "processing",
     })),
-    listCheckpoints: vi.fn(async () => [
-      { id: "checkpoint-1", sandboxId: "oc-sandbox-1", status: "ready" },
-    ]),
     deleteSandbox: vi.fn(async (): Promise<void> => undefined),
     deleteCheckpoint: vi.fn(async (): Promise<void> => undefined),
-    restoreCheckpoint: vi.fn(async (): Promise<void> => undefined),
     getSandbox: vi.fn(
       async (): Promise<OpenComputerSandboxResponse> => ({
         id: "oc-sandbox-1",
-        state: "running",
-        endAt: "2032-03-04T05:06:07.000Z",
+        state: "hibernated",
       })
     ),
     wakeSandbox: vi.fn(
@@ -108,14 +102,7 @@ describe("OpenComputerSandboxProvider", () => {
   });
 
   it("creates a sandbox from the configured template with runtime environment", async () => {
-    const client = createMockClient({
-      createSandbox: vi.fn(async () => ({
-        id: "oc-sandbox-1",
-        state: "running",
-        endAt: "2032-03-04T05:06:07.000Z",
-        routes: [{ port: 3000, url: "https://sandbox-acme-repo-1-3000.opencomputer.test" }],
-      })),
-    });
+    const client = createMockClient();
     const provider = new OpenComputerSandboxProvider(client, {
       scmProvider: "github",
       sandboxAccessPasswordSecret: "secret",
@@ -133,11 +120,6 @@ describe("OpenComputerSandboxProvider", () => {
       providerObjectId: "oc-sandbox-1",
       codeServerUrl: "https://sandbox-acme-repo-1-3000.opencomputer.test",
       tunnelUrls: { "5173": "https://oc-sandbox-1-5173.opencomputer.test" },
-      lifetime: {
-        kind: "finite",
-        expiresAtMs: Date.parse("2032-03-04T05:06:07.000Z"),
-        source: "provider",
-      },
     });
 
     expect(client.createSandbox).toHaveBeenCalledWith(
@@ -186,21 +168,6 @@ describe("OpenComputerSandboxProvider", () => {
     });
   });
 
-  it("reports an unknown lifetime when a v2 response omits endAt", async () => {
-    const client = createMockClient({
-      createSandbox: vi.fn(async () => ({ id: "oc-sandbox-1", state: "running" })),
-    });
-    const provider = new OpenComputerSandboxProvider(client, {
-      scmProvider: "github",
-      sandboxAccessPasswordSecret: "secret",
-    });
-    const result = await provider.createSandbox(baseConfig);
-    expect(result.lifetime).toMatchObject({
-      kind: "unknown",
-      reason: "OpenComputer v2 response omitted endAt",
-    });
-  });
-
   it("returns VNC access across create, restore, and resume without a generic VNC tunnel", async () => {
     const client = createMockClient();
     const provider = new OpenComputerSandboxProvider(client, {
@@ -236,7 +203,7 @@ describe("OpenComputerSandboxProvider", () => {
       expect(result.tunnelUrls).not.toHaveProperty("6099");
     }
     const createEnv = vi.mocked(client.createSandbox).mock.calls[0][0].env;
-    const restoreEnv = vi.mocked(client.createSandbox).mock.calls[1][0].env;
+    const restoreEnv = vi.mocked(client.forkFromCheckpoint).mock.calls[0][0].env;
     expect(createEnv).toMatchObject({ NOVNC_PORT: "6099", VNC_PASSWORD: expect.any(String) });
     expect(restoreEnv).toMatchObject({ NOVNC_PORT: "6099", VNC_PASSWORD: expect.any(String) });
   });
@@ -346,62 +313,6 @@ describe("OpenComputerSandboxProvider", () => {
 
     const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
     expect(createCall.env).toHaveProperty("ANTHROPIC_API_KEY", "sk-repo");
-  });
-
-  describe("an unset deployment LLM key on checkpoint forks", () => {
-    // provider-factory always lists the key; an unset one arrives as undefined.
-    const unsetKeyConfig = {
-      scmProvider: "github" as const,
-      sandboxAccessPasswordSecret: "secret",
-      llmEnvVars: { ANTHROPIC_API_KEY: undefined },
-    };
-
-    it("blanks the key a repo-image checkpoint inherited", async () => {
-      const client = createMockClient();
-      const provider = new OpenComputerSandboxProvider(client, unsetKeyConfig);
-
-      await provider.createSandbox({ ...baseConfig, prebuiltImageId: "checkpoint-repo-1" });
-
-      const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
-      expect(createCall.env).toHaveProperty("ANTHROPIC_API_KEY", "");
-    });
-
-    it("blanks the key a session checkpoint inherited", async () => {
-      const client = createMockClient();
-      const provider = new OpenComputerSandboxProvider(client, unsetKeyConfig);
-
-      await provider.restoreFromSnapshot({
-        ...baseConfig,
-        snapshotImageId: "checkpoint-session-1",
-      });
-
-      const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
-      expect(createCall.env).toHaveProperty("ANTHROPIC_API_KEY", "");
-    });
-
-    it("keeps a repository key", async () => {
-      const client = createMockClient();
-      const provider = new OpenComputerSandboxProvider(client, unsetKeyConfig);
-
-      await provider.restoreFromSnapshot({
-        ...baseConfig,
-        snapshotImageId: "checkpoint-session-1",
-        userEnvVars: { ANTHROPIC_API_KEY: "sk-repo" },
-      });
-
-      const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
-      expect(createCall.env).toHaveProperty("ANTHROPIC_API_KEY", "sk-repo");
-    });
-
-    it("leaves a fresh sandbox's env without the key", async () => {
-      const client = createMockClient();
-      const provider = new OpenComputerSandboxProvider(client, unsetKeyConfig);
-
-      await provider.createSandbox(baseConfig);
-
-      const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
-      expect(createCall.env).not.toHaveProperty("ANTHROPIC_API_KEY");
-    });
   });
 
   it("scopes clone secrets to GitLab hosts for GitLab sessions", async () => {
@@ -578,7 +489,7 @@ describe("OpenComputerSandboxProvider", () => {
     expect(names[0]).not.toBe(names[1]);
   });
 
-  it("restores a repo image checkpoint in place before starting the runtime", async () => {
+  it("forks from a repo image checkpoint when provided", async () => {
     const client = createMockClient();
     const provider = new OpenComputerSandboxProvider(client, {
       scmProvider: "github",
@@ -592,11 +503,12 @@ describe("OpenComputerSandboxProvider", () => {
     });
 
     expect(result).toMatchObject({
-      providerObjectId: "oc-sandbox-1",
+      providerObjectId: "oc-fork-1",
     });
-    expect(client.createSandbox).toHaveBeenCalledWith(
+    expect(client.createSandbox).not.toHaveBeenCalled();
+    expect(client.forkFromCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        template: "openinspect-runtime",
+        checkpointId: "checkpoint-repo-1",
         env: expect.objectContaining({
           FROM_REPO_IMAGE: "true",
           REPO_IMAGE_SHA: "abc123",
@@ -610,19 +522,15 @@ describe("OpenComputerSandboxProvider", () => {
         }),
       })
     );
-    const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
-    expect(createCall).not.toHaveProperty("timeoutSeconds");
+    const forkCall = vi.mocked(client.forkFromCheckpoint).mock.calls[0][0];
+    expect(forkCall).not.toHaveProperty("timeoutSeconds");
     expect(client.setSandboxTimeout).not.toHaveBeenCalled();
-    expect(client.restoreCheckpoint).toHaveBeenCalledWith("oc-sandbox-1", "checkpoint-repo-1");
-    expect(client.startRuntime).toHaveBeenCalledWith("oc-sandbox-1");
-    expect(vi.mocked(client.restoreCheckpoint).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(client.startRuntime).mock.invocationCallOrder[0]
-    );
+    expect(client.startRuntime).toHaveBeenCalledWith("oc-fork-1");
   });
 
   it("reports a missing prebuilt checkpoint explicitly", async () => {
     const client = createMockClient({
-      restoreCheckpoint: vi.fn(async () => {
+      forkFromCheckpoint: vi.fn(async () => {
         throw new OpenComputerNotFoundError("checkpoint not found");
       }),
     });
@@ -634,7 +542,6 @@ describe("OpenComputerSandboxProvider", () => {
     await expect(
       provider.createSandbox({ ...baseConfig, prebuiltImageId: "checkpoint-missing" })
     ).rejects.toBeInstanceOf(PrebuiltImageUnavailableError);
-    expect(client.deleteSandbox).toHaveBeenCalledWith("oc-sandbox-1");
     expect(client.deleteSecretStore).toHaveBeenCalledWith("secret-store-1");
   });
 
@@ -651,8 +558,9 @@ describe("OpenComputerSandboxProvider", () => {
       userEnvVars: { VCS_CLONE_TOKEN: "session-token" },
     });
 
-    expect(client.createSandbox).toHaveBeenCalledWith(
+    expect(client.forkFromCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
+        checkpointId: "checkpoint-repo-1",
         env: expect.objectContaining({
           VCS_CLONE_TOKEN: "session-token",
         }),
@@ -660,7 +568,7 @@ describe("OpenComputerSandboxProvider", () => {
     );
   });
 
-  it("restores session snapshots in place before starting the runtime", async () => {
+  it("restores session snapshots by forking from the checkpoint", async () => {
     const client = createMockClient();
     const provider = new OpenComputerSandboxProvider(client, {
       scmProvider: "github",
@@ -672,24 +580,20 @@ describe("OpenComputerSandboxProvider", () => {
       snapshotImageId: "checkpoint-session-1",
     });
 
-    expect(result).toMatchObject({ success: true, providerObjectId: "oc-sandbox-1" });
-    expect(client.createSandbox).toHaveBeenCalledWith(
+    expect(result).toMatchObject({ success: true, providerObjectId: "oc-fork-1" });
+    expect(client.forkFromCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        template: "openinspect-runtime",
+        checkpointId: "checkpoint-session-1",
         env: expect.objectContaining({
           RESTORED_FROM_SNAPSHOT: "true",
           IMAGE_BUILD_MODE: "false",
         }),
       })
     );
-    const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
-    expect(createCall).not.toHaveProperty("timeoutSeconds");
+    const forkCall = vi.mocked(client.forkFromCheckpoint).mock.calls[0][0];
+    expect(forkCall).not.toHaveProperty("timeoutSeconds");
     expect(client.setSandboxTimeout).not.toHaveBeenCalled();
-    expect(client.restoreCheckpoint).toHaveBeenCalledWith("oc-sandbox-1", "checkpoint-session-1");
-    expect(client.startRuntime).toHaveBeenCalledWith("oc-sandbox-1");
-    expect(vi.mocked(client.restoreCheckpoint).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(client.startRuntime).mock.invocationCallOrder[0]
-    );
+    expect(client.startRuntime).toHaveBeenCalledWith("oc-fork-1");
   });
 
   it("cleans up a restored sandbox when runtime startup fails", async () => {
@@ -710,7 +614,7 @@ describe("OpenComputerSandboxProvider", () => {
       })
     ).rejects.toThrow("Failed to restore OpenComputer sandbox from checkpoint");
 
-    expect(client.deleteSandbox).toHaveBeenCalledWith("oc-sandbox-1");
+    expect(client.deleteSandbox).toHaveBeenCalledWith("oc-fork-1");
     expect(client.deleteSecretStore).toHaveBeenCalledWith("secret-store-1");
   });
 
@@ -727,9 +631,9 @@ describe("OpenComputerSandboxProvider", () => {
       timeoutSeconds: 120,
     });
 
-    const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
-    expect(createCall.timeoutSeconds).toBe(120);
-    expect(client.setSandboxTimeout).toHaveBeenCalledWith("oc-sandbox-1", 120);
+    const forkCall = vi.mocked(client.forkFromCheckpoint).mock.calls[0][0];
+    expect(forkCall.timeoutSeconds).toBe(120);
+    expect(client.setSandboxTimeout).toHaveBeenCalledWith("oc-fork-1", 120);
   });
 
   it("serializes repo-less snapshot restores without nullable repo env or labels", async () => {
@@ -747,13 +651,13 @@ describe("OpenComputerSandboxProvider", () => {
       branch: null,
     });
 
-    const createCall = vi.mocked(client.createSandbox).mock.calls[0][0];
-    expect(createCall.env).toMatchObject({
+    const forkCall = vi.mocked(client.forkFromCheckpoint).mock.calls[0][0];
+    expect(forkCall.env).toMatchObject({
       REPO_OWNER: "",
       REPO_NAME: "",
     });
-    expect(createCall.labels).not.toHaveProperty("openinspect_repo");
-    expect(JSON.parse(createCall.env!.SESSION_CONFIG)).toMatchObject({
+    expect(forkCall.labels).not.toHaveProperty("openinspect_repo");
+    expect(JSON.parse(forkCall.env!.SESSION_CONFIG)).toMatchObject({
       repo_owner: null,
       repo_name: null,
       branch: null,
@@ -800,70 +704,8 @@ describe("OpenComputerSandboxProvider", () => {
       {
         kind: OPENCOMPUTER_CHECKPOINT_KIND,
         retentionPolicy: OPENCOMPUTER_CHECKPOINT_RETENTION_POLICY,
-      },
-      expect.any(AbortSignal)
+      }
     );
-  });
-
-  it("waits for a processing checkpoint to become ready before success", async () => {
-    vi.useFakeTimers();
-    const client = createMockClient({
-      createCheckpoint: vi.fn(async () => ({
-        id: "checkpoint-1",
-        sandboxId: "oc-sandbox-1",
-        status: "processing",
-      })),
-      listCheckpoints: vi.fn(async () => [
-        { id: "checkpoint-1", sandboxId: "oc-sandbox-1", status: "ready" },
-      ]),
-    });
-    const provider = new OpenComputerSandboxProvider(client, {
-      scmProvider: "github",
-      sandboxAccessPasswordSecret: "secret",
-    });
-    const snapshot = provider.takeSnapshot({
-      providerObjectId: "oc-sandbox-1",
-      sessionId: "session-1",
-      reason: "final_preservation",
-      deadlineAtMs: Date.now() + 10_000,
-    });
-    await vi.advanceTimersByTimeAsync(1_000);
-    await expect(snapshot).resolves.toEqual({ success: true, imageId: "checkpoint-1" });
-    expect(client.listCheckpoints).toHaveBeenCalledWith("oc-sandbox-1", expect.any(AbortSignal));
-    vi.useRealTimers();
-  });
-
-  it("bounds checkpoint polling when the caller omits a deadline", async () => {
-    vi.useFakeTimers();
-    try {
-      const processing = {
-        id: "checkpoint-1",
-        sandboxId: "oc-sandbox-1",
-        status: "processing",
-      } as const;
-      const client = createMockClient({
-        createCheckpoint: vi.fn(async () => processing),
-        listCheckpoints: vi.fn(async () => [processing]),
-      });
-      const provider = new OpenComputerSandboxProvider(client, {
-        scmProvider: "github",
-        sandboxAccessPasswordSecret: "secret",
-      });
-
-      const snapshot = provider.takeSnapshot({
-        providerObjectId: "oc-sandbox-1",
-        sessionId: "session-1",
-        reason: "execution_complete",
-      });
-      await vi.advanceTimersByTimeAsync(300_001);
-
-      await expect(snapshot).resolves.toEqual({
-        success: false,
-        error: "Checkpoint was not ready before the deadline",
-      });
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("creates checkpoints for execution-complete snapshots", async () => {
@@ -887,8 +729,7 @@ describe("OpenComputerSandboxProvider", () => {
       {
         kind: OPENCOMPUTER_CHECKPOINT_KIND,
         retentionPolicy: OPENCOMPUTER_CHECKPOINT_RETENTION_POLICY,
-      },
-      expect.any(AbortSignal)
+      }
     );
   });
 
@@ -1058,13 +899,7 @@ describe("OpenComputerSandboxProvider", () => {
   });
 
   it("wakes hibernated sandboxes on resume", async () => {
-    const client = createMockClient({
-      getSandbox: vi.fn(async () => ({
-        id: "oc-sandbox-1",
-        state: "hibernated",
-        endAt: "2032-03-04T05:06:07.000Z",
-      })),
-    });
+    const client = createMockClient();
     const provider = new OpenComputerSandboxProvider(client, {
       scmProvider: "github",
       sandboxAccessPasswordSecret: "secret",
@@ -1084,45 +919,8 @@ describe("OpenComputerSandboxProvider", () => {
     expect(client.startRuntime).toHaveBeenCalledWith("oc-sandbox-1");
   });
 
-  it("returns resumed ownership with unknown lifetime when the post-resume metadata read fails", async () => {
-    const getSandbox = vi
-      .fn()
-      .mockResolvedValueOnce({ id: "oc-sandbox-1", state: "hibernated" })
-      .mockRejectedValueOnce(new Error("metadata unavailable"));
-    const client = createMockClient({ getSandbox });
-    const provider = new OpenComputerSandboxProvider(client, {
-      scmProvider: "github",
-      sandboxAccessPasswordSecret: "secret",
-    });
-
-    const result = await provider.resumeSandbox({
-      providerObjectId: "oc-sandbox-1",
-      sessionId: "session-1",
-      sandboxId: "sandbox-acme-repo-1",
-      codeServerEnabled: false,
-    });
-
-    expect(result).toMatchObject({
-      success: true,
-      providerObjectId: "oc-sandbox-1",
-      lifetime: {
-        kind: "unknown",
-        reason: "Failed to read OpenComputer lifetime after successful resume",
-      },
-    });
-    expect(result.lifetime?.observedAtMs).toEqual(expect.any(Number));
-    expect(client.wakeSandbox).toHaveBeenCalledWith("oc-sandbox-1");
-    expect(client.startRuntime).toHaveBeenCalledWith("oc-sandbox-1");
-  });
-
   it("applies an explicit timeout when waking a hibernated sandbox", async () => {
-    const client = createMockClient({
-      getSandbox: vi.fn(async () => ({
-        id: "oc-sandbox-1",
-        state: "hibernated",
-        endAt: "2032-03-04T05:06:07.000Z",
-      })),
-    });
+    const client = createMockClient();
     const provider = new OpenComputerSandboxProvider(client, {
       scmProvider: "github",
       sandboxAccessPasswordSecret: "secret",
@@ -1164,9 +962,7 @@ describe("OpenComputerSandboxProvider", () => {
   });
 
   it("hibernates sandboxes on stop", async () => {
-    const client = createMockClient({
-      getSandbox: vi.fn(async () => ({ id: "oc-sandbox-1", state: "hibernated" })),
-    });
+    const client = createMockClient();
     const provider = new OpenComputerSandboxProvider(client, {
       scmProvider: "github",
       sandboxAccessPasswordSecret: "secret",
@@ -1177,29 +973,10 @@ describe("OpenComputerSandboxProvider", () => {
         providerObjectId: "oc-sandbox-1",
         sessionId: "session-1",
         reason: "inactivity_timeout",
-        intent: "preserve",
       })
     ).resolves.toEqual({ success: true });
 
     expect(client.hibernateSandbox).toHaveBeenCalledWith("oc-sandbox-1");
-  });
-
-  it("does not claim graceful shutdown when the sandbox is missing", async () => {
-    const client = createMockClient();
-    vi.mocked(client.hibernateSandbox).mockRejectedValueOnce(new OpenComputerNotFoundError("gone"));
-    const provider = new OpenComputerSandboxProvider(client, {
-      scmProvider: "github",
-      sandboxAccessPasswordSecret: "secret",
-    });
-
-    await expect(
-      provider.stopSandbox({
-        providerObjectId: "oc-sandbox-1",
-        sessionId: "session-1",
-        reason: "snapshot",
-        intent: "preserve",
-      })
-    ).resolves.toMatchObject({ success: false });
   });
 
   it("deletes sandboxes on replacement", async () => {
@@ -1215,7 +992,6 @@ describe("OpenComputerSandboxProvider", () => {
         providerObjectId: "oc-sandbox-1",
         sessionId: "session-1",
         reason: "respawn",
-        intent: "destroy",
         signal,
       })
     ).resolves.toEqual({ success: true });

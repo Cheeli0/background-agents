@@ -34,49 +34,7 @@ const tokenUsageDetailsSchema = z
     { message: "Expected at least one token usage count" }
   );
 
-export const tokenUsageSchema = z.union([z.number(), tokenUsageDetailsSchema]);
-export type TokenUsage = z.infer<typeof tokenUsageSchema>;
-
-/** The steps of a sandbox boot, in the order the supervisor runs them. */
-export const bootPhaseNameSchema = z.enum([
-  "starting",
-  "sync",
-  "setup",
-  "start",
-  "skills",
-  "harness",
-]);
-export type BootPhaseName = z.infer<typeof bootPhaseNameSchema>;
-
-export const bootPhaseStatusSchema = z.enum(["started", "completed", "failed"]);
-export type BootPhaseStatus = z.infer<typeof bootPhaseStatusSchema>;
-
-/**
- * The byte budget for a `sandbox-error` report as the public route accepts it.
- * A report valid at the schema must fit through the route.
- */
-export const SANDBOX_ERROR_BODY_MAX_BYTES = 32 * 1024;
-
-/**
- * The latest `boot_progress` report of a booting sandbox, as the control
- * plane stores it and the subscribe snapshot carries it: the same fields
- * the event has, minus the envelope. Present while the sandbox boots and
- * after a boot failed, naming the step that broke; cleared at ready.
- * `sandboxId` identifies the boot that reported, the same identity every
- * `boot_progress` event carries.
- */
-export const sandboxBootPhaseSchema = z.object({
-  phase: bootPhaseNameSchema,
-  status: bootPhaseStatusSchema,
-  bootSeq: z.number().int().optional(),
-  sandboxId: z.string().optional(),
-  warning: z.boolean().optional(),
-  repoOwner: z.string().optional(),
-  repoName: z.string().optional(),
-  elapsedMs: z.number().optional(),
-  detail: z.string().optional(),
-});
-export type SandboxBootPhase = z.infer<typeof sandboxBootPhaseSchema>;
+const tokenUsageSchema = z.union([z.number(), tokenUsageDetailsSchema]);
 
 const sandboxEventBaseSchema = z.object({
   sandboxId: z.string(),
@@ -87,21 +45,16 @@ const sandboxEventBaseSchema = z.object({
 const messageSandboxEventBaseSchema = sandboxEventBaseSchema.extend({
   messageId: z.string(),
 });
-const stepIdSchema = z.string().min(1).optional();
-
-export const sandboxGenerationSchema = z.object({
-  sandboxId: z.string().min(1),
-  createdAt: z.number().int().positive(),
-});
 
 // Sandbox events from Modal or synthesized by the control plane.
 export const sandboxEventSchema = z.discriminatedUnion("type", [
   sandboxEventBaseSchema.extend({
     type: z.literal("heartbeat"),
+    status: z.string(),
   }),
   sandboxEventBaseSchema.extend({
-    // Emitted after the runtime attaches its harness. This is the readiness
-    // signal that moves the sandbox row to `ready`.
+    // Emitted on every sandbox bridge connect (bridge readiness, not vendor
+    // readiness). Present in essentially every session's replay history.
     type: z.literal("ready"),
     opencodeSessionId: z.string().nullable().optional(),
     /** Which harness the runtime booted; the session DO warns when it differs from the session's. */
@@ -109,24 +62,11 @@ export const sandboxEventSchema = z.discriminatedUnion("type", [
     // SANDBOX_VERSION of the image this sandbox booted from. Stamped onto any
     // snapshot it produces so a later restore can be gated on it.
     runtimeVersion: z.string().optional(),
-    preservationProtocolVersion: z.literal(1).optional(),
     repositories: z.array(sessionDiffBaselineRepositorySchema).optional(),
-  }),
-  sandboxEventBaseSchema.extend({
-    type: z.literal("sandbox_generation_ready"),
-    generation: sandboxGenerationSchema,
-  }),
-  sandboxEventBaseSchema.extend({
-    type: z.literal("preservation_prepared"),
-    operationId: z.string().min(1),
-    generation: sandboxGenerationSchema,
-    executionStopped: z.boolean(),
-    error: z.string().optional(),
   }),
   messageSandboxEventBaseSchema.extend({
     type: z.literal("token"),
     content: z.string(),
-    partId: z.string().min(1).optional(),
   }),
   messageSandboxEventBaseSchema.extend({
     type: z.literal("tool_call"),
@@ -135,23 +75,18 @@ export const sandboxEventSchema = z.discriminatedUnion("type", [
     callId: z.string(),
     status: z.string().optional(),
     output: z.string().optional(),
-    truncated: z
-      .object({ fields: z.array(z.string()), originalBytes: z.number().int().nonnegative() })
-      .optional(),
     isSubtask: z.boolean().optional(),
     childSessionId: z.string().optional(),
     taskCallId: z.string().optional(),
   }),
   messageSandboxEventBaseSchema.extend({
     type: z.literal("step_start"),
-    stepId: stepIdSchema,
     isSubtask: z.boolean().optional(),
     childSessionId: z.string().optional(),
     taskCallId: z.string().optional(),
   }),
   messageSandboxEventBaseSchema.extend({
     type: z.literal("step_finish"),
-    stepId: stepIdSchema,
     /** Cost of this step alone; absent when the runtime could not price it. */
     cost: z.number().nullable().optional(),
     /** Cumulative reported cost of the whole turn so far; idempotent on resend. */
@@ -235,27 +170,6 @@ export const sandboxEventSchema = z.discriminatedUnion("type", [
     timestamp: z.number(),
     ackId: z.string().optional(),
   }),
-  // Boot phase reports from the sandbox supervisor, relayed by the bridge
-  // while it is connected ahead of the harness. `bootSeq` is monotonic per
-  // boot so a phase resent after a reconnect can be recognised. Informational:
-  // the control plane never gates admission on a phase, only names it. Live
-  // ingest drops unknown union entries, so this entry must exist before
-  // runtimes emit it.
-  z.object({
-    type: z.literal("boot_progress"),
-    bootSeq: z.number().int(),
-    phase: bootPhaseNameSchema,
-    status: bootPhaseStatusSchema,
-    /** A non-fatal hook exit was tolerated (setup.sh outside an image build). */
-    warning: z.boolean().optional(),
-    repoOwner: z.string().optional(),
-    repoName: z.string().optional(),
-    elapsedMs: z.number().optional(),
-    detail: z.string().optional(),
-    sandboxId: z.string().optional(),
-    timestamp: z.number(),
-    ackId: z.string().optional(),
-  }),
   sandboxEventBaseSchema.extend({
     type: z.literal("session_title"),
     title: z.string(),
@@ -289,14 +203,6 @@ export const sandboxEventSchema = z.discriminatedUnion("type", [
 
 export type SandboxEvent = z.infer<typeof sandboxEventSchema>;
 export type EventType = SandboxEvent["type"];
-
-export type BootProgressEvent = Extract<SandboxEvent, { type: "boot_progress" }>;
-
-/** The boot phase a `boot_progress` event reports: the event without its envelope. */
-export function toSandboxBootPhase(event: BootProgressEvent): SandboxBootPhase {
-  const { type: _type, timestamp: _timestamp, ackId: _ackId, ...phase } = event;
-  return phase;
-}
 
 export interface AgentEvent {
   id: string;
@@ -333,12 +239,10 @@ export const eventTypeSchema = z.enum(
   sandboxEventSchema.options.map((option) => option.shape.type.value) as [EventType, ...EventType[]]
 );
 
-const eventDataSchema = recordSchema.transform(({ outputTail: _outputTail, ...data }) => data);
-
 export const eventResponseSchema = z.object({
   id: z.string(),
   type: eventTypeSchema,
-  data: eventDataSchema,
+  data: recordSchema,
   messageId: z.string().nullable(),
   createdAt: z.number(),
 });

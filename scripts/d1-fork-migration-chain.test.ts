@@ -39,8 +39,6 @@ function schema(database: DatabaseSync): string[] {
 
 test("the reconciled migration chain preserves the deployed fork ledger", () => {
   const files = migrationFiles();
-  assert.equal(new Set(files.map((name) => name.slice(0, 4))).size, files.length);
-  assert.ok(files.includes("0080_github_webhook_deliveries.sql"));
   assert.deepEqual(files.slice(16, 22), forkMigrationNames);
 
   const fresh = new DatabaseSync(":memory:");

@@ -1,7 +1,6 @@
 import type { OpenComputerSandboxProvider } from "../sandbox/providers/opencomputer-provider";
 import type { ImageBuildProviderImageRef } from "./model";
 import type {
-  CompletedImageBuildInput,
   DeleteImageInput,
   FailedImageBuildInput,
   FinalizeImageBuildInput,
@@ -65,7 +64,7 @@ export class OpenComputerImageBuildAdapter implements ImageBuildAdapter {
     };
   }
 
-  async cleanupCompletedBuild(input: CompletedImageBuildInput): Promise<void> {
+  async cleanupCompletedBuild(input: FinalizeImageBuildInput): Promise<void> {
     // Keep the secret store. A successful build was checkpointed in
     // finalizeSuccessfulBuild, and an OpenComputer checkpoint retains its build
     // sandbox's secret store as a base layer that every from-checkpoint fork

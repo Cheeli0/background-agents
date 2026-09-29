@@ -245,8 +245,6 @@ export async function handleCreateSession(
   }
 
   const input: SessionInitInput = {
-    ownerTeamId: null,
-    visibility: "workspace",
     sessionId,
     repoOwner,
     repoName,

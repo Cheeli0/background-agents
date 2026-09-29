@@ -328,7 +328,7 @@ describe("Client WebSocket (via SELF.fetch)", () => {
 
     expect((await denied).find((message) => message.type === "error")).toMatchObject({
       code: "PERMISSION_REQUIRED",
-      message: "Access denied: missing_permission",
+      message: "Permission required: sessions.collaborate",
     });
     ws.close();
   });

@@ -110,7 +110,6 @@ async function handleCreateEnvironment(
   const id = `env_${generateId()}`;
   const row: EnvironmentRow = {
     id,
-    owner_team_id: null,
     name,
     description: normalizeDescription(description),
     prebuild_enabled: prebuildEnabled ? 1 : 0,

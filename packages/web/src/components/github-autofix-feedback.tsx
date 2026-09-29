@@ -171,12 +171,12 @@ function ReviewThreads({
         <span aria-hidden="true" className="h-px flex-1 bg-border" />
       </div>
       <div className="space-y-2">
-        {visibleComments.map((comment) => (
+        {visibleComments.map((comment, index) => (
           <ReviewThread
-            key={comment.url}
+            key={`${comment.url}:${index}`}
             comment={comment}
-            expanded={expandedSections.has(`${messageId}:thread:${comment.url}`)}
-            onToggle={() => onToggleSection(`${messageId}:thread:${comment.url}`)}
+            expanded={expandedSections.has(`${messageId}:thread:${index}`)}
+            onToggle={() => onToggleSection(`${messageId}:thread:${index}`)}
           />
         ))}
       </div>

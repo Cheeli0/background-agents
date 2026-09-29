@@ -36,8 +36,7 @@ resource "null_resource" "modal_secrets" {
 resource "null_resource" "modal_deploy" {
   triggers = {
     # Re-deploy when source files change
-    build_vm_image = tostring(var.build_vm_image)
-    source_hash    = var.source_hash
+    source_hash = var.source_hash
     # Re-deploy when app name changes
     app_name = var.app_name
     # Re-deploy when Modal environment changes
@@ -51,13 +50,12 @@ resource "null_resource" "modal_deploy" {
     interpreter = ["node", "${path.module}/scripts/modal-helper.mjs"]
 
     environment = {
-      MODAL_TOKEN_ID       = var.modal_token_id
-      MODAL_TOKEN_SECRET   = var.modal_token_secret
-      MODAL_ENVIRONMENT    = var.modal_environment
-      APP_NAME             = var.app_name
-      DEPLOY_PATH          = var.deploy_path
-      DEPLOY_MODULE        = var.deploy_module
-      BUILD_MODAL_VM_IMAGE = tostring(var.build_vm_image)
+      MODAL_TOKEN_ID     = var.modal_token_id
+      MODAL_TOKEN_SECRET = var.modal_token_secret
+      MODAL_ENVIRONMENT  = var.modal_environment
+      APP_NAME           = var.app_name
+      DEPLOY_PATH        = var.deploy_path
+      DEPLOY_MODULE      = var.deploy_module
     }
   }
 

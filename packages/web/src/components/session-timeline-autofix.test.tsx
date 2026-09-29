@@ -94,6 +94,7 @@ const eventProps = {
 const timelineProps = {
   ...eventProps,
   isProcessing: false,
+  loadingHistory: false,
   showSkeleton: false,
   onLoadOlder: () => {},
   promptQueue: [],

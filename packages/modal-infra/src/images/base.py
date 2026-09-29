@@ -14,11 +14,6 @@ from sandbox_runtime.runtime_manifest import RUNTIME_VERSION
 
 CACHE_BUSTER = RUNTIME_VERSION
 IMAGE_ID_ENV = "OPENINSPECT_MODAL_BASE_IMAGE_ID"
-# The optional Docker-capable variant: the default image plus one install phase.
-# Provisioned separately; absent until an operator builds and verifies it.
-DOCKER_IMAGE_ID_ENV = "OPENINSPECT_MODAL_DOCKER_IMAGE_ID"
-# The Modal option that launches a Docker-capable VM instead of a gVisor sandbox.
-MODAL_VM_EXPERIMENTAL_OPTIONS: dict[str, bool] = {"vm_runtime": True}
 
 
 def local_image_plan() -> tuple[Path, dict[str, Any]]:
@@ -41,11 +36,7 @@ def deployed_image_environment() -> dict[str, str]:
         image_id = os.environ.get(IMAGE_ID_ENV)
         if not image_id:
             raise RuntimeError("Deployed Modal function is missing its verified sandbox image ID")
-        environment = {IMAGE_ID_ENV: image_id}
-        docker_image_id = os.environ.get(DOCKER_IMAGE_ID_ENV)
-        if docker_image_id:
-            environment[DOCKER_IMAGE_ID_ENV] = docker_image_id
-        return environment
+        return {IMAGE_ID_ENV: image_id}
     path = image_reference_path()
     if not path.is_file():
         raise RuntimeError("Build the Modal sandbox image before deploying functions")
@@ -56,15 +47,7 @@ def deployed_image_environment() -> dict[str, str]:
     image_id = record.get("imageId")
     if not isinstance(image_id, str) or not image_id.strip():
         raise RuntimeError("Built Modal image record is missing its verified sandbox image ID")
-    environment = {IMAGE_ID_ENV: image_id}
-    docker_image_id = record.get("dockerImageId")
-    if docker_image_id is not None:
-        if not isinstance(docker_image_id, str) or not docker_image_id.strip():
-            raise RuntimeError("Built Modal image record has an invalid Docker image ID")
-        environment[DOCKER_IMAGE_ID_ENV] = docker_image_id
-    if os.environ.get("BUILD_MODAL_VM_IMAGE") == "true" and DOCKER_IMAGE_ID_ENV not in environment:
-        raise RuntimeError("Build and verify the Docker sandbox image before deploying functions")
-    return environment
+    return {IMAGE_ID_ENV: image_id}
 
 
 def _define_image() -> tuple[modal.Image, dict[str, Any] | None]:
@@ -85,16 +68,3 @@ def _define_image() -> tuple[modal.Image, dict[str, Any] | None]:
 
 
 base_image, base_image_plan = _define_image()
-
-
-def _define_docker_image() -> modal.Image | None:
-    if not modal.is_local():
-        image_id = os.environ.get(DOCKER_IMAGE_ID_ENV)
-        return modal.Image.from_id(image_id) if image_id else None
-    # Same bundle, one extra phase; the default image layers stay untouched.
-    return base_image.run_commands(
-        "bash /tmp/openinspect-image/packages/sandbox-images/install/install.sh docker"
-    )
-
-
-docker_image = _define_docker_image()

@@ -1,14 +1,13 @@
 import type { Logger } from "../logger";
-import { isSandboxAccessAvailable } from "../sandbox/lifecycle/decisions";
 import { decryptStoredAccessValue } from "./sandbox-access";
-import type { SandboxStateReader } from "./sandbox-ports";
+import type { SandboxRepository } from "./sandbox-repository";
 import type { SessionCoreRepository } from "./session-core-repository";
 import { resolveSandboxDashboardUrl, type SandboxDashboardSettings } from "./sandbox-access";
 import { safeParseTunnelUrls } from "./tunnel-urls";
 
 export interface SessionAccessReaderDeps {
-  sessionCoreRepository: Pick<SessionCoreRepository, "getSession">;
-  sandboxRepository: SandboxStateReader;
+  sessionCoreRepository: SessionCoreRepository;
+  sandboxRepository: SandboxRepository;
   repoSecretsEncryptionKey: string;
   sandboxDashboardSettings: SandboxDashboardSettings;
   log: Logger;
@@ -28,7 +27,7 @@ export class SessionAccessReader {
       return Response.json({ error: "Session not found" }, { status: 404, headers });
     }
     const sandbox = this.deps.sandboxRepository.getSandbox();
-    if (!sandbox || !isSandboxAccessAvailable(sandbox.status)) {
+    if (!sandbox || sandbox.status !== "ready") {
       return Response.json({ error: "Sandbox access is unavailable" }, { status: 409, headers });
     }
 
@@ -42,7 +41,7 @@ export class SessionAccessReader {
     if (
       !current ||
       current.id !== sandbox.id ||
-      !isSandboxAccessAvailable(current.status) ||
+      current.status !== "ready" ||
       current.code_server_url !== sandbox.code_server_url ||
       current.code_server_password !== sandbox.code_server_password ||
       current.vnc_url !== sandbox.vnc_url ||

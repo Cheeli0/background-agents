@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sandbox_runtime.process_output import KILL_SIGNAL
+from sandbox_runtime.process_output import KILL_SIGNAL, PROCESS_OUTPUT_TAIL_BYTES
 from sandbox_runtime.repository_boot import RepositoryBoot
 from sandbox_runtime.runtime_config import BootMode
 from tests.runtime_helpers import make_repository_boot
@@ -114,7 +114,7 @@ class TestSetupScriptSuccess:
         assert call_args[0][0] == "bash"
         assert call_args[0][1] == str(script)
         assert call_args[1]["cwd"] == sup.repo_path
-        assert call_args[1]["stdout"] == asyncio.subprocess.DEVNULL
+        assert call_args[1]["stdout"] == asyncio.subprocess.PIPE
         assert call_args[1]["stderr"] == asyncio.subprocess.STDOUT
         fake_proc.wait.assert_awaited_once()
         fake_proc.communicate.assert_not_awaited()
@@ -170,8 +170,7 @@ class TestSetupScriptFailure:
 
         assert result is False
 
-    @pytest.mark.parametrize("boot_mode", [BootMode.FRESH, BootMode.BUILD])
-    async def test_failure_log_contains_only_metadata(self, tmp_path, boot_mode):
+    async def test_build_failure_log_omits_hook_output(self, tmp_path):
         sup = _make_repository_boot(tmp_path)
         sup.hooks.log = MagicMock()
         _create_setup_script(sup.repo_path, content="#!/bin/bash\nexit 1\n")
@@ -180,37 +179,51 @@ class TestSetupScriptFailure:
         with patch(
             "asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=fake_proc
         ):
-            result = await sup.hooks.run_setup(sup.repositories[0], boot_mode)
+            result = await sup.hooks.run_setup(sup.repositories[0], BootMode.BUILD)
 
         assert result is False
         failure = sup.hooks.log.error.call_args
         assert failure.args == ("setup.failed",)
         assert failure.kwargs["exit_code"] == 1
-        assert failure.kwargs["script"] == str(sup.repo_path / ".openinspect/setup.sh")
-        assert failure.kwargs["boot_mode"] == boot_mode.value
-        assert set(failure.kwargs) == {"exit_code", "script", "duration_ms", "boot_mode"}
+        assert "output_tail" not in failure.kwargs
 
     @pytest.mark.skipif(os.name == "nt", reason="requires a native bash process group")
-    async def test_failed_hook_stops_background_writer_before_returning(self, tmp_path):
+    async def test_fresh_failure_log_preserves_hook_output_tail(self, tmp_path):
         sup = _make_repository_boot(tmp_path)
+        sup.hooks.log = MagicMock()
+        _create_setup_script(sup.repo_path, content="#!/bin/bash\necho diagnostic\nexit 1\n")
+
+        result = await sup.hooks.run_setup(sup.repositories[0], BootMode.FRESH)
+
+        assert result is False
+        failure = sup.hooks.log.error.call_args
+        assert failure.args == ("setup.failed",)
+        assert failure.kwargs["output_tail"] == "diagnostic"
+
+    @pytest.mark.skipif(os.name == "nt", reason="requires a native bash process group")
+    async def test_failed_hook_stops_background_writer_before_reading_bounded_tail(self, tmp_path):
+        sup = _make_repository_boot(tmp_path)
+        sup.hooks.log = MagicMock()
         _create_setup_script(sup.repo_path, content=_background_writer_script(exit_code=1))
         child_pid = None
 
         try:
-            with patch("sandbox_runtime.repository_hooks.os.killpg", wraps=os.killpg) as kill_group:
-                async with asyncio.timeout(2):
-                    result = await sup.hooks.run_setup(sup.repositories[0], BootMode.FRESH)
+            async with asyncio.timeout(2):
+                result = await sup.hooks.run_setup(sup.repositories[0], BootMode.FRESH)
             child_pid = int((sup.repo_path / "child.pid").read_text())
+            output_tail = sup.hooks.log.error.call_args.kwargs["output_tail"]
             assert result is False
-            assert [call.args[1] for call in kill_group.call_args_list] == [KILL_SIGNAL]
+            assert "diagnostic" in output_tail
+            assert len(output_tail.encode()) <= PROCESS_OUTPUT_TAIL_BYTES
         finally:
             if child_pid is not None:
                 with contextlib.suppress(ProcessLookupError):
                     os.kill(child_pid, KILL_SIGNAL)
 
     @pytest.mark.skipif(os.name == "nt", reason="requires a native bash process group")
-    async def test_failed_hook_returns_with_detached_background_writer(self, tmp_path):
+    async def test_failed_hook_closes_output_from_detached_background_writer(self, tmp_path):
         sup = _make_repository_boot(tmp_path)
+        sup.hooks.log = MagicMock()
         _create_setup_script(
             sup.repo_path,
             content=_background_writer_script(exit_code=1, escape_process_group=True),
@@ -222,6 +235,7 @@ class TestSetupScriptFailure:
                 result = await sup.hooks.run_setup(sup.repositories[0], BootMode.FRESH)
             child_pid = int((sup.repo_path / "child.pid").read_text())
             assert result is False
+            assert "diagnostic" in sup.hooks.log.error.call_args.kwargs["output_tail"]
         finally:
             if child_pid is not None:
                 with contextlib.suppress(ProcessLookupError):
@@ -267,6 +281,7 @@ class TestSetupScriptWaitPolicy:
             assert result is True
             await asyncio.sleep(0.1)
             os.kill(child_pid, 0)
+            assert sup.hooks._output_collectors
         finally:
             if child_pid is not None:
                 with contextlib.suppress(ProcessLookupError):

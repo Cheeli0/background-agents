@@ -767,7 +767,6 @@ class TestApplySseEventDispositions:
                 "type": "token",
                 "content": "Continuing after compaction",
                 "messageId": "cp-msg-1",
-                "partId": "part-continuation",
             }
         ]
 

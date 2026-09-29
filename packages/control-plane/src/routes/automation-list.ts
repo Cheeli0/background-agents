@@ -13,13 +13,13 @@ import type { Env } from "../types";
 import { z } from "zod";
 import { AUTOMATIONS_READ } from "./automation-shared";
 import { parseQuery } from "./query";
-import {
-  DEFAULT_AUTOMATION_LIST_PAGE_SIZE,
-  MAX_AUTOMATION_LIST_PAGE_SIZE,
-  MAX_AUTOMATION_NAME_LENGTH,
-} from "@open-inspect/shared/types/automations";
+import { MAX_NAME_LENGTH } from "./automation-validation";
 
 const RECENT_EXECUTION_COUNT = 10;
+
+const DEFAULT_AUTOMATION_LIST_PAGE_SIZE = 25;
+
+const MAX_AUTOMATION_LIST_PAGE_SIZE = 100;
 
 const automationListLimitSchema = z
   .string()
@@ -44,11 +44,7 @@ const automationListQuerySchema = z.object({
       }
       return parsed.cursor;
     }),
-  search: z
-    .string()
-    .trim()
-    .max(MAX_AUTOMATION_NAME_LENGTH, { error: "Search is too long" })
-    .optional(),
+  search: z.string().trim().max(MAX_NAME_LENGTH, { error: "Search is too long" }).optional(),
   repoOwner: z.string().optional(),
   repoName: z.string().optional(),
 });

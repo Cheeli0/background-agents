@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { VercelSandboxProvider } from "../sandbox/providers/vercel/provider";
 import { VercelImageBuildAdapter } from "./vercel-adapter";
 import type { ImageBuildPlan } from "./types";
-import { immediateFinalizationInput } from "./test-helpers";
 
 function createProvider(): VercelSandboxProvider {
   return {
@@ -94,13 +93,11 @@ describe("VercelImageBuildAdapter", () => {
     const adapter = new VercelImageBuildAdapter(provider);
     const correlation = { request_id: "request-1", trace_id: "trace-1" };
 
-    const result = await adapter.finalizeSuccessfulBuild(
-      immediateFinalizationInput({
-        buildId: "build-1",
-        providerSessionId: "vercel-session-1",
-        correlation,
-      })
-    );
+    const result = await adapter.finalizeSuccessfulBuild({
+      buildId: "build-1",
+      providerSessionId: "vercel-session-1",
+      correlation,
+    });
 
     expect(result).toEqual({
       providerImageId: "vercel-snapshot-1",
@@ -128,13 +125,11 @@ describe("VercelImageBuildAdapter", () => {
       providerObjectId: "vercel-session-1",
       sessionId: "build-1",
       reason: "environment_image_build_complete",
-      intent: "destroy",
       correlation: {
         request_id: "request-1",
         trace_id: "trace-1",
         sandbox_id: "vercel-session-1",
       },
-      signal: undefined,
     });
   });
 

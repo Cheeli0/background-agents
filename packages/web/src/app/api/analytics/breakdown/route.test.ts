@@ -25,20 +25,16 @@ describe("analytics breakdown API route", () => {
     await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
   });
 
-  it("forwards days, by, and scope but not unrelated query params", async () => {
+  it("forwards only days and by query params", async () => {
     vi.mocked(controlPlaneUserFetch).mockResolvedValue(
       Response.json({ entries: [] }, { status: 200 })
     );
 
     const response = await GET(
-      new Request(
-        "http://localhost/api/analytics/breakdown?days=90&foo=bar&by=provider&scope=agent"
-      ) as never
+      new Request("http://localhost/api/analytics/breakdown?days=90&foo=bar&by=repo") as never
     );
 
-    expect(controlPlaneUserFetch).toHaveBeenCalledWith(
-      "/analytics/breakdown?days=90&by=provider&scope=agent"
-    );
+    expect(controlPlaneUserFetch).toHaveBeenCalledWith("/analytics/breakdown?days=90&by=repo");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ entries: [] });
   });

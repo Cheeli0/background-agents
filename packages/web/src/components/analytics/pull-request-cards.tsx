@@ -38,7 +38,7 @@ export function AnalyticsPullRequestCards({ days, pullRequests, loading }: PullR
   if (!pullRequests) return null;
 
   const { funnel, openInventory } = pullRequests;
-  const costPerMerged = getCostPerMergedPullRequest(pullRequests.prSessionCost, funnel.merged);
+  const costPerMerged = getCostPerMergedPullRequest(pullRequests);
 
   return (
     <div className="space-y-4">

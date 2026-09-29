@@ -10,8 +10,6 @@ async function createIndexedSession(sessionName: string) {
   const { stub } = await initNamedSessionDO(sessionName);
   await new SessionIndexStore(env.DB).create({
     id: sessionName,
-    ownerTeamId: null,
-    visibility: "workspace",
     title: null,
     repoOwner: "acme",
     repoName: "web-app",

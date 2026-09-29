@@ -11,7 +11,6 @@ import {
   getIntegrationGlobalSettingsSchema,
   getIntegrationRepoSettingsSchema,
   normalizeRoutingRules,
-  slackRoutingRuleSchema,
   type EnvironmentSettingsIntegrationId,
   type IntegrationId,
   type IntegrationSettingsMap,
@@ -370,7 +369,6 @@ export class IntegrationSettingsStore {
     if (integrationId !== "sandbox") return settings;
     return normalizeSandboxSettings(settings, {
       invalid: "omit",
-      partial: true,
     }) as IntegrationSettingsMap[K]["repo"];
   }
 
@@ -404,7 +402,6 @@ export class IntegrationSettingsStore {
       return normalizeSandboxSettings(settings, {
         invalid: "throw",
         createError: (message) => new IntegrationSettingsValidationError(message),
-        partial: level !== "global",
       }) as IntegrationSettingsAtLevel<K, L>;
     }
 
@@ -652,17 +649,16 @@ export class IntegrationSettingsStore {
         `routingRules cannot exceed ${MAX_SLACK_ROUTING_RULES} entries`
       );
     }
-    const parsedRules: SlackRoutingRule[] = [];
     for (const rule of rules) {
       if (typeof rule !== "object" || rule === null) {
         throw new IntegrationSettingsValidationError("each routing rule must be an object");
       }
-      const parsedRule = slackRoutingRuleSchema.safeParse(rule);
-      if (!parsedRule.success) {
-        throw new IntegrationSettingsValidationError("each routing rule must be an object");
-      }
-      const { keyword, target, targetType } = parsedRule.data;
-      if (keyword.trim() === "") {
+      const { keyword, target, targetType } = rule as {
+        keyword?: unknown;
+        target?: unknown;
+        targetType?: unknown;
+      };
+      if (typeof keyword !== "string" || keyword.trim() === "") {
         throw new IntegrationSettingsValidationError(
           "routing rule keyword must be a non-empty string"
         );
@@ -672,9 +668,14 @@ export class IntegrationSettingsStore {
           `routing rule keyword must be ${MAX_SLACK_ROUTING_KEYWORD_LENGTH} characters or fewer`
         );
       }
+      if (targetType !== undefined && targetType !== "repository" && targetType !== "environment") {
+        throw new IntegrationSettingsValidationError(
+          'routing rule targetType must be "repository" or "environment"'
+        );
+      }
       if (targetType === "environment") {
         // The stable environment id, never the rename-able display name.
-        if (!isEnvironmentId(target.trim())) {
+        if (typeof target !== "string" || !isEnvironmentId(target.trim())) {
           throw new IntegrationSettingsValidationError(
             "routing rule target must be an environment id (env_…) when targetType is environment"
           );
@@ -682,7 +683,8 @@ export class IntegrationSettingsStore {
         // The owner segment excludes ":" (GitHub forbids it) so a repository
         // target can never collide with the bots' "env:<id>" value encoding.
       } else {
-        const repository = parseRepositoryFullName(target.trim());
+        const repository =
+          typeof target === "string" ? parseRepositoryFullName(target.trim()) : null;
         if (
           !repository ||
           /[\s:]/.test(repository.repoOwner) ||
@@ -693,9 +695,8 @@ export class IntegrationSettingsStore {
           );
         }
       }
-      parsedRules.push(parsedRule.data);
     }
-    return normalizeRoutingRules(parsedRules);
+    return normalizeRoutingRules(rules as SlackRoutingRule[]);
   }
 }
 

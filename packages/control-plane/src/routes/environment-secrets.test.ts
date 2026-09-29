@@ -35,7 +35,6 @@ function createEnv(encryptionKey: string) {
   const all = vi.fn(async () => ({ results: [] }));
   const first = vi.fn(async () => ({
     id: "env-1",
-    owner_team_id: null,
     name: "Production",
     description: null,
     prebuild_enabled: 0,

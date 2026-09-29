@@ -4,7 +4,6 @@
  */
 
 import type { ImageBuildScopeKind } from "@open-inspect/shared/types/image-builds";
-import type { ImageBuildAdmissionClosedReason } from "./provider-policy";
 
 export type ImageBuildErrorCode =
   | "scope_not_found"
@@ -12,7 +11,6 @@ export type ImageBuildErrorCode =
   | "workflow_unavailable"
   | "provider_unconfigured"
   | "trigger_failed"
-  | "admission_closed"
   | "callback_auth_rejected"
   | "callback_auth_unavailable"
   | "completion_not_accepted"
@@ -55,21 +53,6 @@ export class ImageBuildTriggerFailedError extends ImageBuildError {
 
   constructor(message = "Failed to trigger build", cause?: unknown) {
     super(message, cause);
-  }
-}
-
-/**
- * The deployment is not admitting new builds. Distinct from an unconfigured
- * provider: everything already in flight still finalizes and is cleaned up.
- */
-export class ImageBuildAdmissionClosedError extends ImageBuildError {
-  readonly code = "admission_closed";
-
-  constructor(
-    message: string,
-    readonly reason?: ImageBuildAdmissionClosedReason
-  ) {
-    super(message);
   }
 }
 

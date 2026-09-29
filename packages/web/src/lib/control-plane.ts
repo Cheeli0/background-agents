@@ -35,8 +35,7 @@ function unauthorizedResponse(correlation: { requestId: string; traceId: string 
  */
 export async function controlPlaneUserFetch(
   path: string,
-  options: RequestInit = {},
-  { streamResponse = false }: { streamResponse?: boolean } = {}
+  options: RequestInit = {}
 ): Promise<Response> {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   const correlation = await getRequestCorrelation();
@@ -70,7 +69,6 @@ export async function controlPlaneUserFetch(
       traceId: correlation.traceId,
       correlationFields,
       transportOptions,
-      streamResponse,
     });
   } catch (error) {
     log.error("control_plane.fetch_failed", {

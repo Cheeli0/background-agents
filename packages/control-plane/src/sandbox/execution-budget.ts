@@ -1,20 +1,15 @@
-import {
-  omitUnsupportedSandboxSettings,
-  type SandboxSettings,
-} from "@open-inspect/shared/types/integrations";
+import type { SandboxSettings } from "@open-inspect/shared/types/integrations";
 
 import { DEFAULT_SANDBOX_TIMEOUT_SECONDS } from "./provider";
 import type { Env } from "../types";
-import { resolveSandboxBackendName } from "./provider-name";
 
 /**
  * How long a session may spend processing one message before the control plane
  * declares it stuck.
  *
- * On providers that support it, `sandboxTimeoutMs` is also the sandbox's TTL,
- * so a session cannot outlive it. Unsupported legacy values are ignored. When
- * it is unset, the deployment-wide `EXECUTION_TIMEOUT_MS` applies, and failing
- * that the default sandbox lifetime.
+ * `sandboxTimeoutMs` is also the sandbox's provider TTL, so a session cannot
+ * outlive it; when it is unset the deployment-wide `EXECUTION_TIMEOUT_MS`
+ * applies, and failing that the default sandbox lifetime.
  *
  * Both the session's own watchdog and the scheduler's lost-run sweep read the
  * budget through here. They resolve it from different places — the session
@@ -23,11 +18,7 @@ import { resolveSandboxBackendName } from "./provider-name";
  * the session it is watching is exactly the failure this exists to prevent.
  */
 export function resolveExecutionBudgetMs(sandboxSettings: SandboxSettings, env: Env): number {
-  const effectiveSettings = omitUnsupportedSandboxSettings(
-    sandboxSettings,
-    resolveSandboxBackendName(env.SANDBOX_PROVIDER)
-  );
-  if (effectiveSettings.sandboxTimeoutMs !== undefined) return effectiveSettings.sandboxTimeoutMs;
+  if (sandboxSettings.sandboxTimeoutMs !== undefined) return sandboxSettings.sandboxTimeoutMs;
   return (
     parseConfiguredExecutionTimeoutMs(env.EXECUTION_TIMEOUT_MS) ??
     DEFAULT_SANDBOX_TIMEOUT_SECONDS * 1000

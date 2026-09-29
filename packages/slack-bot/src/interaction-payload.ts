@@ -9,7 +9,6 @@ export const slackInteractionPayloadSchema = z.object({
     .array(
       z.object({
         action_id: z.string(),
-        block_id: z.string().optional(),
         selected_option: z.object({ value: z.string() }).optional(),
         value: z.string().optional(),
       })

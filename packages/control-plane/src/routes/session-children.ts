@@ -11,7 +11,6 @@ import {
 import { DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS } from "@open-inspect/shared/types/integrations";
 import { childSessionListResponseSchema } from "@open-inspect/shared/types/sessions";
 import { SessionIndexStore, type ChildAdmissionLease } from "../db/session-index";
-import { teamsEnforcementMode, viewerFromContext } from "../authorization/session-admission";
 import { createLogger } from "../logger";
 import { SessionInternalPaths } from "../session/contracts";
 import { resolveSandboxSettings } from "../session/integration-settings-resolution";
@@ -22,9 +21,7 @@ import {
   GITHUB_SANDBOX_FALLBACK_ROUTE,
   json,
   NO_AUTHORIZATION,
-  requireAll,
-  requireSession,
-  sessionRequirement,
+  requirePermission,
   SCM_AGNOSTIC_SANDBOX_ROUTE,
   type RequestContext,
 } from "./shared";
@@ -41,16 +38,7 @@ export async function handleListChildren(
   const parentId = params.id;
 
   const sessionStore = new SessionIndexStore(ctx.db);
-  const readScope =
-    ctx.principal?.kind === "sandbox"
-      ? { kind: "internal" as const, reason: "parent-bound sandbox" }
-      : (ctx.sessionAdmission?.viewer ??
-        viewerFromContext(ctx, ctx.sessionMemberships ?? new Map()));
-  const children = await sessionStore.listByParent(
-    parentId,
-    readScope,
-    teamsEnforcementMode(ctx, env)
-  );
+  const children = await sessionStore.listByParent(parentId);
 
   return json(childSessionListResponseSchema.parse({ children }));
 }
@@ -272,25 +260,19 @@ export const sessionChildRoutes = new Hono<ControlPlaneHonoEnv>();
 
 sessionChildRoutes.get(
   "/sessions/:id/children",
-  admit({ ...GITHUB_SANDBOX_FALLBACK_ROUTE, authorization: requireSession("read") }),
+  admit({ ...GITHUB_SANDBOX_FALLBACK_ROUTE, authorization: requirePermission("sessions.read") }),
   (c) => dispatch(c, handleListChildren)
 );
 sessionChildRoutes.get(
   "/sessions/:id/children/:childId",
-  admit({
-    ...GITHUB_SANDBOX_FALLBACK_ROUTE,
-    authorization: requireAll(sessionRequirement("read"), sessionRequirement("read", "childId")),
-  }),
+  admit({ ...GITHUB_SANDBOX_FALLBACK_ROUTE, authorization: requirePermission("sessions.read") }),
   (c) => dispatchSession(c, handleGetChild)
 );
 sessionChildRoutes.post(
   "/sessions/:id/children/:childId/cancel",
   admit({
     ...GITHUB_SANDBOX_FALLBACK_ROUTE,
-    authorization: requireAll(
-      sessionRequirement("read"),
-      sessionRequirement("lifecycle", "childId")
-    ),
+    authorization: requirePermission("sessions.lifecycle"),
   }),
   (c) => dispatchSession(c, handleCancelChild)
 );

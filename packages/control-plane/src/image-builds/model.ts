@@ -13,10 +13,9 @@ import {
   formatRepositoryFullName,
   parseRepositoryFullName,
 } from "@open-inspect/shared/types/repositories";
-import {
-  IMAGE_BUILD_PROVIDER_IDS,
-  type ImageBuildScopeKind,
-  type ImageBuildStatus,
+import type {
+  ImageBuildScopeKind,
+  ImageBuildStatus,
 } from "@open-inspect/shared/types/image-builds";
 import type { HarnessId } from "@open-inspect/shared/harnesses";
 import { z } from "zod";
@@ -25,7 +24,11 @@ import {
   MIN_COMPATIBLE_RUNTIME_GENERATION,
 } from "../sandbox/runtime-manifest";
 
-export { IMAGE_BUILD_PROVIDER_IDS } from "@open-inspect/shared/types/image-builds";
+/**
+ * Providers with image-build support: Modal images, Vercel snapshots,
+ * OpenComputer checkpoints, E2B snapshots. Daytona has no image support.
+ */
+export const IMAGE_BUILD_PROVIDER_IDS = ["modal", "vercel", "opencomputer", "e2b"] as const;
 
 export const imageBuildProviderSchema = z.enum(IMAGE_BUILD_PROVIDER_IDS);
 
@@ -84,11 +87,11 @@ export interface ImageBuildCallbackBuild {
 }
 
 /**
- * Compatibility floor for prebuilt images and session snapshot execution.
+ * Compatibility floor for prebuilt-image runtimes.
  *
  * Bumped ONLY on breaking runtime changes, never on routine CACHE_BUSTER
- * bumps. Snapshot incompatibility holds startup; it must not discard the
- * snapshot or silently replace the session with a clean checkout.
+ * bumps. v60 is the first runtime whose managed-provider plugins use the
+ * generic token broker, so no image baked by an earlier runtime may be selected.
  */
 export const MIN_COMPATIBLE_RUNTIME_VERSION = MIN_COMPATIBLE_RUNTIME_GENERATION;
 

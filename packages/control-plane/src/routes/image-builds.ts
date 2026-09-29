@@ -28,10 +28,7 @@ import {
   repoImageBuildScope,
   type ImageBuildScope,
 } from "../image-builds/model";
-import {
-  getImageBuildsUnsupportedMessage,
-  resolveImageBuildAdmission,
-} from "../image-builds/provider-policy";
+import { getImageBuildsUnsupportedMessage } from "../image-builds/provider-policy";
 import { scheduleImageBuildOnSave } from "../image-builds/save-hooks";
 import {
   listEnabledScopes,
@@ -116,7 +113,6 @@ function imageBuildErrorToResponse(errorValue: unknown): Response {
       return error(errorValue.message, 409);
     case "workflow_unavailable":
     case "provider_unconfigured":
-    case "admission_closed":
       return error(errorValue.message, 503);
     case "planning_failed":
     case "trigger_failed":
@@ -457,20 +453,12 @@ async function handleGetEnabledUnits(
 
   try {
     const units = await listEnabledScopeUnits(env, ctx.db);
-    const admission = resolveImageBuildAdmission(env);
     return json({
       units: units.map((unit) => ({
         scopeKind: unit.scope.kind,
         scopeId: unit.scope.id,
         repositoriesFingerprint: unit.repositoriesFingerprint,
       })),
-      // Scope toggles say what an operator wants; this says whether the
-      // deployment will act on it, so the settings surfaces can stop
-      // promising builds that will be refused.
-      admission: {
-        open: admission.admitted,
-        ...(admission.reason ? { reason: admission.reason } : {}),
-      },
     });
   } catch (e) {
     logger.error("image_build.enabled_error", {

@@ -26,9 +26,7 @@ IMAGE_ENV_KEYS = frozenset(
 )
 
 
-def apply_image_environment(path: Path | None = None) -> None:
-    if path is None:
-        path = IMAGE_ENVIRONMENT_PATH
+def apply_image_environment(path: Path = IMAGE_ENVIRONMENT_PATH) -> None:
     try:
         environment = json.loads(path.read_text())
     except FileNotFoundError:

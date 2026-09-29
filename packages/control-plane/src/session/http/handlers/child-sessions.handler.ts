@@ -5,11 +5,7 @@ import { z } from "zod";
 import { sessionStatusSchema } from "@open-inspect/shared/types/sessions";
 import { parsePersistedSandboxSettings } from "../../../sandbox/settings";
 import type { SessionMessenger } from "../../messenger";
-import {
-  PromptQueueFullError,
-  SandboxPromptBlockedError,
-  SessionNotPromptableError,
-} from "../../message-queue";
+import { PromptQueueFullError, SessionNotPromptableError } from "../../message-queue";
 import type { MessageRepository } from "../../message-repository";
 import type { ParticipantRepository } from "../../participant-repository";
 import type { SessionCoreRepository } from "../../session-core-repository";
@@ -83,11 +79,8 @@ export class ChildSessionsHandler {
     );
     if (promptAuthor instanceof Response) return promptAuthor;
     let sandboxTimeoutMs: number | undefined;
-    let finalSnapshotBufferMs: number | undefined;
     try {
-      const sandboxSettings = parsePersistedSandboxSettings(session.sandbox_settings);
-      sandboxTimeoutMs = sandboxSettings.sandboxTimeoutMs;
-      finalSnapshotBufferMs = sandboxSettings.finalSnapshotBufferMs;
+      sandboxTimeoutMs = parsePersistedSandboxSettings(session.sandbox_settings).sandboxTimeoutMs;
     } catch {
       sandboxTimeoutMs = undefined;
     }
@@ -100,7 +93,6 @@ export class ChildSessionsHandler {
       reasoningEffort: session.reasoning_effort ?? null,
       baseBranch: session.base_branch,
       sandboxTimeoutMs,
-      finalSnapshotBufferMs,
       promptAuthor: {
         userId: promptAuthor.user_id,
         ...(promptAuthor.canonical_user_id
@@ -168,12 +160,6 @@ export class ChildSessionsHandler {
     } catch (error) {
       if (error instanceof SessionNotPromptableError) {
         return Response.json({ error: error.message }, { status: 409 });
-      }
-      if (error instanceof SandboxPromptBlockedError) {
-        return Response.json(
-          { error: error.message, code: "SANDBOX_RECOVERY_REQUIRED" },
-          { status: 409 }
-        );
       }
       if (error instanceof PromptQueueFullError) {
         return Response.json({ error: "Child prompt queue is full" }, { status: 429 });

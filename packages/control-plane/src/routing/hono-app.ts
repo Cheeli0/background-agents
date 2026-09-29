@@ -179,18 +179,13 @@ export function createControlPlaneApp(
     }
 
     if (!unexpected) logRequest(c.res, context, method, pathname, startedAt);
-    const decision = {
-      ...result.decision,
-      ...(context.shadowSessionDenial ? { shadowReason: context.shadowSessionDenial } : {}),
-      ...(context.shadowBatchDenials?.length ? { shadowDenials: context.shadowBatchDenials } : {}),
-    };
-    if (shouldAuditAllowedDecision(decision)) {
+    if (shouldAuditAllowedDecision(result.decision)) {
       await auditRouteAuthorizationDecision({
         ctx: context,
         method,
         path: pathname,
         response: c.res,
-        decision,
+        decision: result.decision,
       });
     }
     replaceResponse(c, finalizeRouteResponse(c.res, policy, context));

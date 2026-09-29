@@ -5,7 +5,7 @@
  * by session ID, Cloudflare request ID, trace ID, or free-text search.
  *
  * Usage:
- *   node scripts/cf-logs.ts --session <session-id>
+ *   node --experimental-strip-types scripts/cf-logs.ts --session <session-id>
  *   bun scripts/cf-logs.ts --session <session-id>
  *
  * Combine filters:

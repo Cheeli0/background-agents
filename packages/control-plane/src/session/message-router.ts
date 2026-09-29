@@ -1,10 +1,7 @@
 import { sandboxEventSchema, type SandboxEvent } from "@open-inspect/shared/types/sandbox-events";
-import { clientRequestIdSchema, promptValidationError } from "@open-inspect/shared/types/prompts";
-import type { ZodError } from "zod";
+import { clientRequestIdSchema } from "@open-inspect/shared/types/prompts";
 import { clientMessageSchema, type ClientMessage } from "@open-inspect/shared/types/websocket";
-import type { SessionAction } from "@open-inspect/shared";
-import type { AccessDenialReason } from "@open-inspect/shared";
-import { ShutdownRecoveryRejectedError } from "../sandbox/lifecycle/ports";
+import type { PermissionId } from "@open-inspect/shared/rbac";
 import type { Logger } from "../logger";
 import type { SessionHistoryPage } from "./event-stream";
 import type { Clock, ConnectedClient, SocketRegistry } from "./ports";
@@ -16,30 +13,21 @@ export type ClientPresence = Extract<ClientMessage, { type: "presence" }>;
 export type ClientPrompt = Extract<ClientMessage, { type: "prompt" }>;
 export type ClientSubscribe = Extract<ClientMessage, { type: "subscribe" }>;
 export type FetchHistory = Extract<ClientMessage, { type: "fetch_history" }>;
-type ValidHistoryRequest = FetchHistory & { cursor: NonNullable<FetchHistory["cursor"]> };
-export type RecoverShutdownCommand = Extract<ClientMessage, { type: "recover_preservation" }>;
-
-export type ClientCommandAuthorization =
-  | { kind: "allowed" }
-  | { kind: "denied"; reason: AccessDenialReason }
-  | { kind: "unavailable" }
-  | { kind: "revoked" };
 
 type BoundarySchema<T> = {
-  safeParse(input: unknown): { success: true; data: T } | { success: false; error: ZodError };
+  safeParse(
+    input: unknown
+  ): { success: true; data: T } | { success: false; error: { issues: unknown } };
 };
 
 // Retain valid JSON on schema failure so correlated errors do not parse the payload twice.
-type ParsedMessage<T> =
-  | { valid: true; data: T }
-  | { valid: false; raw?: unknown; error?: ZodError };
+type ParsedMessage<T> = { valid: true; data: T } | { valid: false; raw?: unknown };
 
 export interface SessionClientCommands<Connection, Client extends ConnectedClient> {
   subscribe: (connection: Connection, message: ClientSubscribe) => Promise<void>;
   submitPrompt: (connection: Connection, client: Client, message: ClientPrompt) => Promise<void>;
   cancelPrompt: (connection: Connection, message: ClientCancelPrompt) => Promise<void>;
   stopExecution: () => Promise<void>;
-  recoverShutdown: (action: RecoverShutdownCommand["action"]) => Promise<void>;
   notifyTyping: () => Promise<void>;
   updatePresence: (client: Client, message: ClientPresence) => void;
   getHistoryPage: (message: {
@@ -47,10 +35,9 @@ export interface SessionClientCommands<Connection, Client extends ConnectedClien
     limit?: number;
   }) => SessionHistoryPage;
   authorize: (
-    connection: Connection,
     client: Client,
-    action: SessionAction
-  ) => Promise<ClientCommandAuthorization>;
+    permission: PermissionId
+  ) => Promise<"allowed" | "denied" | "unavailable">;
 }
 
 export interface SessionMessageRouterDeps<Connection, Client extends ConnectedClient> {
@@ -102,22 +89,15 @@ export class SessionMessageRouter<Connection, Client extends ConnectedClient> {
   }
 
   private async handleClientMessage(connection: Connection, message: string): Promise<void> {
-    let correlatedRequestId: string | undefined;
     try {
       const parsed = this.parseMessage(message, "client", clientMessageSchema);
       if (!parsed.valid) {
         const invalidRequest = this.readInvalidCorrelatedRequest(parsed.raw);
-        const invalidPrompt = invalidRequest?.type === "prompt";
-        let validationMessage = "Failed to process message";
-        if (invalidPrompt) {
-          validationMessage = parsed.error
-            ? promptValidationError(parsed.error, parsed.raw).error
-            : "Invalid prompt";
-        }
         this.deps.sockets.send(connection, {
           type: "error",
-          code: invalidPrompt ? "INVALID_PROMPT" : "INVALID_MESSAGE",
-          message: validationMessage,
+          code: invalidRequest?.type === "prompt" ? "INVALID_PROMPT" : "INVALID_MESSAGE",
+          message:
+            invalidRequest?.type === "prompt" ? "Invalid prompt" : "Failed to process message",
           ...(invalidRequest?.clientRequestId
             ? { clientRequestId: invalidRequest.clientRequestId }
             : {}),
@@ -126,7 +106,6 @@ export class SessionMessageRouter<Connection, Client extends ConnectedClient> {
       }
 
       const data = parsed.data;
-      correlatedRequestId = "clientRequestId" in data ? data.clientRequestId : undefined;
       // Ping and subscribe are the only messages valid before client authentication.
       if (data.type === "ping") {
         this.deps.sockets.send(connection, { type: "pong", timestamp: this.deps.clock.nowMs() });
@@ -138,52 +117,29 @@ export class SessionMessageRouter<Connection, Client extends ConnectedClient> {
       }
 
       const client = this.deps.sockets.getClient(connection);
-      if (!client) {
-        if (data.type === "recover_preservation" && data.clientRequestId)
-          this.deps.sockets.send(connection, {
-            type: "error",
-            code: "AUTHENTICATION_REQUIRED",
-            message: "Authentication required",
-            clientRequestId: data.clientRequestId,
-          });
-        return;
-      }
+      if (!client) return;
 
       switch (data.type) {
         case "prompt":
-          if (!(await this.authorizeCommand(connection, client, "collaborate"))) break;
+          if (!(await this.authorizeCommand(connection, client, "sessions.collaborate"))) break;
           await this.deps.clientCommands.submitPrompt(connection, client, data);
           break;
         case "cancel_prompt":
-          if (!(await this.authorizeCommand(connection, client, "lifecycle"))) break;
+          if (!(await this.authorizeCommand(connection, client, "sessions.lifecycle"))) break;
           await this.deps.clientCommands.cancelPrompt(connection, data);
           break;
         case "stop":
-          if (!(await this.authorizeCommand(connection, client, "lifecycle"))) break;
+          if (!(await this.authorizeCommand(connection, client, "sessions.lifecycle"))) break;
           await this.deps.clientCommands.stopExecution();
           break;
-        case "recover_preservation":
-          if (!(await this.authorizeCommand(connection, client, "lifecycle", data.clientRequestId)))
-            break;
-          await this.deps.clientCommands.recoverShutdown(data.action);
-          if (data.clientRequestId)
-            this.deps.sockets.send(connection, {
-              type: "shutdown_recovery_accepted",
-              clientRequestId: data.clientRequestId,
-              action: data.action,
-            });
-          break;
         case "typing":
-          if (!(await this.authorizeCommand(connection, client, "collaborate"))) break;
+          if (!(await this.authorizeCommand(connection, client, "sessions.collaborate"))) break;
           await this.deps.clientCommands.notifyTyping();
           break;
         case "fetch_history":
-          if (!this.canFetchHistory(connection, client, data)) break;
-          if (!(await this.authorizeCommand(connection, client, "read"))) break;
           this.handleFetchHistory(connection, client, data);
           break;
         case "presence":
-          if (!(await this.authorizeCommand(connection, client, "read"))) break;
           this.deps.clientCommands.updatePresence(client, data);
           break;
         default:
@@ -196,15 +152,8 @@ export class SessionMessageRouter<Connection, Client extends ConnectedClient> {
       });
       this.deps.sockets.send(connection, {
         type: "error",
-        code:
-          error instanceof ShutdownRecoveryRejectedError
-            ? "RECOVERY_UNAVAILABLE"
-            : "INVALID_MESSAGE",
-        message:
-          error instanceof ShutdownRecoveryRejectedError
-            ? error.message
-            : "Failed to process message",
-        ...(correlatedRequestId ? { clientRequestId: correlatedRequestId } : {}),
+        code: "INVALID_MESSAGE",
+        message: "Failed to process message",
       });
     }
   }
@@ -212,29 +161,22 @@ export class SessionMessageRouter<Connection, Client extends ConnectedClient> {
   private async authorizeCommand(
     connection: Connection,
     client: Client,
-    action: SessionAction,
-    clientRequestId?: string
+    permission: PermissionId
   ): Promise<boolean> {
-    const result = await this.deps.clientCommands.authorize(connection, client, action);
-    if (result.kind === "allowed") return true;
-    if (result.kind === "revoked") return false;
+    const result = await this.deps.clientCommands.authorize(client, permission);
+    if (result === "allowed") return true;
     this.deps.sockets.send(connection, {
       type: "error",
-      code: result.kind === "unavailable" ? "AUTHORIZATION_UNAVAILABLE" : "PERMISSION_REQUIRED",
+      code: result === "unavailable" ? "AUTHORIZATION_UNAVAILABLE" : "PERMISSION_REQUIRED",
       message:
-        result.kind === "unavailable"
+        result === "unavailable"
           ? "Authorization is temporarily unavailable"
-          : `Access denied: ${result.reason}`,
-      ...(clientRequestId ? { clientRequestId } : {}),
+          : `Permission required: ${permission}`,
     });
     return false;
   }
 
-  private canFetchHistory(
-    connection: Connection,
-    client: Client,
-    data: FetchHistory
-  ): data is ValidHistoryRequest {
+  private handleFetchHistory(connection: Connection, client: Client, data: FetchHistory): void {
     if (
       !data.cursor ||
       typeof data.cursor.timestamp !== "number" ||
@@ -247,7 +189,7 @@ export class SessionMessageRouter<Connection, Client extends ConnectedClient> {
         code: "INVALID_CURSOR",
         message: "Invalid cursor",
       });
-      return false;
+      return;
     }
 
     const now = this.deps.clock.nowMs();
@@ -260,17 +202,10 @@ export class SessionMessageRouter<Connection, Client extends ConnectedClient> {
         code: "RATE_LIMITED",
         message: "Too many requests",
       });
-      return false;
+      return;
     }
     client.lastFetchHistoryAtMs = now;
-    return true;
-  }
 
-  private handleFetchHistory(
-    connection: Connection,
-    client: Client,
-    data: ValidHistoryRequest
-  ): void {
     const page = this.deps.clientCommands.getHistoryPage({
       cursor: data.cursor,
       limit: data.limit,
@@ -301,23 +236,17 @@ export class SessionMessageRouter<Connection, Client extends ConnectedClient> {
         issues: result.error.issues,
       });
       // Keep the parsed object for clientRequestId correlation on invalid prompts.
-      return { valid: false, raw, error: result.error };
+      return { valid: false, raw };
     }
     return { valid: true, data: result.data };
   }
 
-  private readInvalidCorrelatedRequest(raw: unknown): {
-    type: "prompt" | "cancel_prompt" | "recover_preservation";
-    clientRequestId?: string;
-  } | null {
+  private readInvalidCorrelatedRequest(
+    raw: unknown
+  ): { type: "prompt" | "cancel_prompt"; clientRequestId?: string } | null {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const candidate = raw as Record<string, unknown>;
-    if (
-      candidate.type !== "prompt" &&
-      candidate.type !== "cancel_prompt" &&
-      candidate.type !== "recover_preservation"
-    )
-      return null;
+    if (candidate.type !== "prompt" && candidate.type !== "cancel_prompt") return null;
     const clientRequestId = clientRequestIdSchema.safeParse(candidate.clientRequestId);
     return clientRequestId.success
       ? { type: candidate.type, clientRequestId: clientRequestId.data }

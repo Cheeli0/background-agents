@@ -41,7 +41,6 @@ import { resolveHarnessModelSelection } from "@/lib/session-harness";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { useSessionDiffs } from "@/hooks/use-session-diffs";
 import { resolveDiffSelection, type DiffSelection } from "@/lib/session-diffs";
-import { SessionFileLinksProvider } from "@/lib/session-file-links";
 import type {
   SessionDiffFile,
   SessionDiffRepository,
@@ -65,8 +64,6 @@ import { useSessionSnapshot } from "./session-snapshot-provider";
 import { useSessionRename } from "@/hooks/use-session-rename";
 import { useCurrentUserAuthorization } from "@/hooks/use-current-user-authorization";
 import { resolveSessionCapabilities } from "@/lib/session-capabilities";
-import { SandboxShutdownBanner } from "@/components/sandbox-shutdown-banner";
-import { sandboxPromptBlockReason } from "@open-inspect/shared/types/sandbox-shutdown";
 
 type SessionState = ReturnType<typeof useSessionSocket>["sessionState"];
 
@@ -89,7 +86,6 @@ export default function SessionPage() {
     connectionError,
     sessionState,
     sandboxError,
-    boot,
     events,
     participants,
     artifacts,
@@ -97,10 +93,10 @@ export default function SessionPage() {
     canManageBudget,
     isProcessing,
     promptQueue,
+    loadingHistory,
     sendPrompt,
     cancelPrompt,
     stopExecution,
-    recoverShutdown,
     sendTyping,
     reconnect,
     loadOlderEvents,
@@ -129,7 +125,6 @@ export default function SessionPage() {
   });
   // Fixed at create; per-message model overrides must stay within it.
   const sessionHarness = sessionState?.harness ?? initialSnapshot.session.harness;
-  const sandboxBlockReason = sandboxPromptBlockReason(sessionState?.sandboxPreservation);
   const {
     selectedModel,
     reasoningEffort,
@@ -158,7 +153,7 @@ export default function SessionPage() {
     reasoningEffort,
     loadingEnabledModels,
     sessionState?.status ?? DEFAULT_SESSION_STATUS,
-    ready && capabilities.collaborate && !sessionState?.budgetExhausted && !sandboxBlockReason,
+    ready && capabilities.collaborate && !sessionState?.budgetExhausted,
     shortcuts["send-prompt"]
   );
   const [cancellingPromptIds, setCancellingPromptIds] = useState<ReadonlySet<string>>(new Set());
@@ -288,16 +283,12 @@ export default function SessionPage() {
         : ["session-main"],
     storage: changesLayoutStorage,
   });
-  const openDiffSelection = useCallback((selection: DiffSelection) => {
+  const openDiff = useCallback((repository: SessionDiffRepository, file: SessionDiffFile) => {
+    const selection = { repositoryPosition: repository.position, path: file.path };
     diffReturnFocusRef.current = selection;
     setSelectedDiff(selection);
     setIsDetailsOpen(false);
   }, []);
-  const openDiff = useCallback(
-    (repository: SessionDiffRepository, file: SessionDiffFile) =>
-      openDiffSelection({ repositoryPosition: repository.position, path: file.path }),
-    [openDiffSelection]
-  );
   const closeDiff = useCallback(() => {
     const returnSelection = diffReturnFocusRef.current;
     setSelectedDiff(null);
@@ -329,22 +320,18 @@ export default function SessionPage() {
             minSize="30%"
             style={{ minHeight: 0, overflow: "clip" }}
           >
-            <SessionFileLinksProvider
-              manifest={diffState?.current ?? null}
-              onOpen={openDiffSelection}
-            >
-              <SessionTimeline
-                events={events}
-                sessionId={sessionId}
-                currentParticipantId={currentParticipantId}
-                participantProfiles={profiles}
-                isProcessing={isProcessing}
-                promptQueue={promptQueue}
-                showSkeleton={false}
-                onLoadOlder={loadOlderEvents}
-                onOpenMedia={setSelectedMediaArtifactId}
-              />
-            </SessionFileLinksProvider>
+            <SessionTimeline
+              events={events}
+              sessionId={sessionId}
+              currentParticipantId={currentParticipantId}
+              participantProfiles={profiles}
+              isProcessing={isProcessing}
+              promptQueue={promptQueue}
+              loadingHistory={loadingHistory}
+              showSkeleton={false}
+              onLoadOlder={loadOlderEvents}
+              onOpenMedia={setSelectedMediaArtifactId}
+            />
           </Panel>
           {showTerminal && (
             <>
@@ -380,18 +367,15 @@ export default function SessionPage() {
             draftLocked: isSubmitting || sessionAttachments.isUploading,
             sendBlocked:
               !ready ||
-              Boolean(sandboxBlockReason) ||
               Boolean(sessionState?.budgetExhausted) ||
               modelAvailability.status === "unavailable",
-            blockedReason:
-              sandboxBlockReason ??
-              (sessionState?.budgetExhausted
-                ? canManageBudget
-                  ? `Session cost limit reached at ${formatSessionCost(sessionState.totalCost ?? 0)} of ${formatSessionCost(sessionState.maxSessionCostUsd ?? 0)}. Raise or remove the limit to continue.`
-                  : `Session cost limit reached at ${formatSessionCost(sessionState.totalCost ?? 0)} of ${formatSessionCost(sessionState.maxSessionCostUsd ?? 0)}. The session owner must raise or remove the limit to continue.`
-                : modelAvailability.status === "unavailable"
-                  ? modelAvailability.message
-                  : undefined),
+            blockedReason: sessionState?.budgetExhausted
+              ? canManageBudget
+                ? `Session cost limit reached at ${formatSessionCost(sessionState.totalCost ?? 0)} of ${formatSessionCost(sessionState.maxSessionCostUsd ?? 0)}. Raise or remove the limit to continue.`
+                : `Session cost limit reached at ${formatSessionCost(sessionState.totalCost ?? 0)} of ${formatSessionCost(sessionState.maxSessionCostUsd ?? 0)}. The session owner must raise or remove the limit to continue.`
+              : modelAvailability.status === "unavailable"
+                ? modelAvailability.message
+                : undefined,
             submitError,
             inputRef,
             onSubmit: handleSubmit,
@@ -424,7 +408,6 @@ export default function SessionPage() {
       <SessionHeader
         sessionState={sessionState}
         sandboxError={sandboxError}
-        bootPhase={boot?.phase ?? null}
         fallbackSessionInfo={fallbackSessionInfo}
         connected={connected && ready}
         connecting={connecting || (connected && !ready)}
@@ -463,13 +446,6 @@ export default function SessionPage() {
             Reconnect
           </button>
         </div>
-      )}
-
-      {capabilities.read && (
-        <SandboxShutdownBanner
-          shutdown={sessionState?.sandboxPreservation}
-          onRecover={capabilities.lifecycle && ready ? recoverShutdown : undefined}
-        />
       )}
 
       {/* Main content */}

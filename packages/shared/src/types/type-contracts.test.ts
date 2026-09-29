@@ -1,9 +1,6 @@
 import type { z } from "zod";
 import { expectTypeOf, it } from "vitest";
-import type { ANALYTICS_RUN_ORDER_BY } from ".";
 import type {
-  AnalyticsRunOrderBy,
-  AnalyticsRunsResponse,
   AutomationTriggerType,
   ConditionConfigMap,
   ConditionType,
@@ -23,7 +20,6 @@ import type {
   ModelProviderSelections,
   RepositoryInput,
   ServerMessage,
-  SessionRun,
   SessionListRepository,
   SessionListResponse,
   SessionListSummary,
@@ -64,8 +60,6 @@ import type {
 } from "./session-api";
 
 it("preserves public Zod input and output relationships", () => {
-  expectTypeOf<AnalyticsRunOrderBy>().toEqualTypeOf<(typeof ANALYTICS_RUN_ORDER_BY)[number]>();
-  expectTypeOf<AnalyticsRunsResponse["runs"][number]>().toEqualTypeOf<SessionRun>();
   expectTypeOf<RepositoryInput>().toEqualTypeOf<z.input<typeof repositoryInputSchema>>();
   expectTypeOf<CreateEnvironmentInput>().toEqualTypeOf<
     z.input<typeof createEnvironmentInputSchema>

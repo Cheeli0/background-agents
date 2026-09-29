@@ -1,28 +1,16 @@
 import type { PullRequestSummary } from "@open-inspect/shared/types/sessions";
 import type { SessionListRepository } from "@open-inspect/shared/types/repositories";
-import { z } from "zod";
 import { MAX_D1_QUERY_PARAMETERS } from "./query-limits";
 import { SessionPullRequestStore } from "./session-pull-request-store";
 import type { SqlDatabase } from "./sql-database";
 
-export const sessionRepositoryRowSchema = z.object({
-  session_id: z.string(),
-  position: z.number(),
-  repo_owner: z.string(),
-  repo_name: z.string(),
-  repo_id: z.number().nullable(),
-  base_branch: z.string(),
-});
-
-export function toSessionRepository(
-  row: z.infer<typeof sessionRepositoryRowSchema>
-): SessionListRepository {
-  return {
-    repoOwner: row.repo_owner,
-    repoName: row.repo_name,
-    repoId: row.repo_id,
-    baseBranch: row.base_branch,
-  };
+interface SessionRepositoryRow {
+  session_id: string;
+  position: number;
+  repo_owner: string;
+  repo_name: string;
+  repo_id: number | null;
+  base_branch: string;
 }
 
 /** Load repository rows and PR summaries in parallel for one D1-safe ID chunk. */
@@ -31,7 +19,7 @@ async function loadSessionMetadataChunk(
   pullRequestStore: SessionPullRequestStore,
   sessionIds: string[]
 ): Promise<{
-  repositoryRows: Array<z.infer<typeof sessionRepositoryRowSchema>>;
+  repositoryRows: SessionRepositoryRow[];
   summaries: Map<string, PullRequestSummary>;
 }> {
   const placeholders = sessionIds.map(() => "?").join(", ");
@@ -43,14 +31,11 @@ async function loadSessionMetadataChunk(
          ORDER BY session_id, position`
       )
       .bind(...sessionIds)
-      .all(),
+      .all<SessionRepositoryRow>(),
     pullRequestStore.summariesForSessions(sessionIds),
   ]);
 
-  return {
-    repositoryRows: z.array(sessionRepositoryRowSchema).parse(repositoryResult.results),
-    summaries,
-  };
+  return { repositoryRows: repositoryResult.results ?? [], summaries };
 }
 
 /**
@@ -78,7 +63,12 @@ export async function attachSessionListMetadata<T extends { id: string }>(
   const repositoriesBySession = new Map<string, SessionListRepository[]>();
   for (const row of chunkResults.flatMap((result) => result.repositoryRows)) {
     const repositories = repositoriesBySession.get(row.session_id) ?? [];
-    repositories.push(toSessionRepository(row));
+    repositories.push({
+      repoOwner: row.repo_owner,
+      repoName: row.repo_name,
+      repoId: row.repo_id,
+      baseBranch: row.base_branch,
+    });
     repositoriesBySession.set(row.session_id, repositories);
   }
   const summariesBySession = new Map(

@@ -1,11 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const repositoryDirectory = resolve(packageDirectory, "../..");
+const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
+const repositoryDirectory = fileURLToPath(new URL("../../..", import.meta.url));
 const WORKER_BUILD_TIMEOUT_MS = 60_000;
 
 describe("control-plane worker build", () => {
@@ -21,7 +20,7 @@ describe("control-plane worker build", () => {
         stdio: "pipe",
       });
 
-      const bundle = readFileSync(resolve(packageDirectory, "dist/index.js"), "utf8");
+      const bundle = readFileSync(new URL("../dist/index.js", import.meta.url), "utf8");
 
       expect(bundle.includes('"node:async_hooks"')).toBe(true);
       expect(bundle.includes("AsyncLocalStoragePolyfill")).toBe(false);
@@ -30,7 +29,7 @@ describe("control-plane worker build", () => {
 
       // The Node host's adapters (src/node/**) never reach the worker bundle.
       const metafile = JSON.parse(
-        readFileSync(resolve(packageDirectory, "dist/meta.json"), "utf8")
+        readFileSync(new URL("../dist/meta.json", import.meta.url), "utf8")
       ) as { inputs: Record<string, unknown> };
       const bundledSources = Object.keys(metafile.inputs);
       expect(bundledSources).toContain("src/cloudflare/durable-object.ts");

@@ -2,12 +2,7 @@
  * Sandbox backend selection utilities.
  */
 
-import {
-  isSandboxProviderName,
-  type SandboxProviderName,
-} from "@open-inspect/shared/types/integrations";
-
-export type SandboxBackendName = SandboxProviderName;
+export type SandboxBackendName = "modal" | "daytona" | "vercel" | "opencomputer" | "e2b";
 
 /**
  * Resolve the configured sandbox backend.
@@ -17,8 +12,25 @@ export type SandboxBackendName = SandboxProviderName;
 export function resolveSandboxBackendName(value: string | undefined): SandboxBackendName {
   const normalized = value?.trim().toLowerCase();
 
-  if (!normalized) return "modal";
-  if (isSandboxProviderName(normalized)) return normalized;
+  if (!normalized || normalized === "modal") {
+    return "modal";
+  }
+
+  if (normalized === "daytona") {
+    return "daytona";
+  }
+
+  if (normalized === "vercel") {
+    return "vercel";
+  }
+
+  if (normalized === "opencomputer") {
+    return "opencomputer";
+  }
+
+  if (normalized === "e2b") {
+    return "e2b";
+  }
 
   throw new Error(`Unsupported SANDBOX_PROVIDER: ${value}`);
 }

@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { buildSkillRevision, hashSessionSkillManifest } from "./content-addressing";
 import {
   MAX_MANAGED_SKILL_MANIFEST_BYTES,
@@ -16,10 +14,7 @@ import {
 describe("managed skill content addressing", () => {
   const golden = JSON.parse(
     readFileSync(
-      resolve(
-        dirname(fileURLToPath(import.meta.url)),
-        "../../../shared/test-fixtures/managed-skills-golden.json"
-      ),
+      new URL("../../../shared/test-fixtures/managed-skills-golden.json", import.meta.url),
       "utf8"
     )
   );

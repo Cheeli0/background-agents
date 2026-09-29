@@ -85,19 +85,9 @@ async function getServiceBinding(
 export async function dispatchControlPlaneFetch(
   url: string,
   fetchOptions: RequestInit,
-  correlationFields: Record<string, string>,
-  streamResponse = false
+  correlationFields: Record<string, string>
 ): Promise<Response> {
-  const timeoutController = streamResponse ? new AbortController() : null;
-  const timeoutSignal = timeoutController
-    ? timeoutController.signal
-    : AbortSignal.timeout(CONTROL_PLANE_FETCH_TIMEOUT_MS);
-  const timeoutId = timeoutController
-    ? setTimeout(
-        () => timeoutController.abort(new DOMException("Timed out", "TimeoutError")),
-        CONTROL_PLANE_FETCH_TIMEOUT_MS
-      )
-    : null;
+  const timeoutSignal = AbortSignal.timeout(CONTROL_PLANE_FETCH_TIMEOUT_MS);
   const signal = fetchOptions.signal
     ? AbortSignal.any([fetchOptions.signal, timeoutSignal])
     : timeoutSignal;
@@ -106,14 +96,12 @@ export async function dispatchControlPlaneFetch(
     signal,
   };
 
-  try {
-    // On Cloudflare Workers, use the service binding to call the control plane.
-    const binding = await getServiceBinding(correlationFields);
-    return await (binding
-      ? binding.fetch(url, boundedFetchOptions)
-      : fetch(url, boundedFetchOptions));
-  } finally {
-    // A streamed response still has an active body after fetch resolves headers.
-    if (timeoutId !== null) clearTimeout(timeoutId);
+  // On Cloudflare Workers, use the service binding to call the control plane
+  const binding = await getServiceBinding(correlationFields);
+  if (binding) {
+    return binding.fetch(url, boundedFetchOptions);
   }
+
+  // Fallback: direct fetch (works on Vercel / local dev)
+  return fetch(url, boundedFetchOptions);
 }

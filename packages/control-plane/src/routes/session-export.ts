@@ -1,73 +1,35 @@
 /**
- * GET /sessions/export and /sessions/:id/export - session-trace NDJSON.
+ * GET /sessions/export - bulk session-trace export as newline-delimited JSON.
  *
- * Each line is a complete session, a session-scoped include error, a page
- * cursor, or a terminal stream error. `include` inlines a session's messages,
- * timeline events and per-step usage, which the session runtime reads in one
- * storage snapshot under one byte budget and page cap. A failed read never
- * turns a partial trace into a successful session record.
- * With `scope=runs`, root creation time defines the window. Families stay
- * consecutive across pages, but can cross page boundaries: limit still counts
- * sessions (at most five with include). Rows whose root no longer exists are
- * excluded by the root join. This is a best-effort export, not a snapshot:
- * the first page's MAX(rowid) fences inserts unless deletion of the newest
- * session lets SQLite reuse its rowid. Deletions are not fenced; deleting a
- * root mid-export re-roots its children and may leave that run incomplete.
- * Re-exporting a window covering the new root reflects its current lineage.
+ * Each line is a complete session, a session-scoped message error, a page
+ * cursor, or a terminal stream error. Message failures never turn partial
+ * histories into successful session records.
  */
 
+import type { SessionMessage } from "@open-inspect/shared/types/sessions";
 import { Hono } from "hono";
 import { z } from "zod";
-import {
-  TRACE_EXPORT_SCHEMA_VERSION,
-  type TraceExportLine,
-} from "@open-inspect/shared/types/trace-export";
-import {
-  encodeRunsExportCursor,
-  encodeSessionExportCursor,
-  parseRunsExportCursor,
-  parseSessionExportCursor,
-} from "../db/session-export-cursor";
-import {
-  DEFAULT_EXPORT_LIMIT,
-  SessionExportStore,
-  type ExportSelection,
-  type SessionExportRow,
-} from "../db/session-export-store";
+import { encodeSessionExportCursor, parseSessionExportCursor } from "../db/session-export-cursor";
+import { SessionExportStore, type SessionExportRow } from "../db/session-export-store";
 import { createLogger, type Logger } from "../logger";
-import { teamsEnforcementMode, viewerFromContext } from "../authorization/session-admission";
-import { TeamMembershipStore } from "../db/team-memberships";
 import { readBoundedBytes } from "../http/bounded-body";
 import { admit } from "../routing/admit";
 import type { ControlPlaneHonoEnv } from "../routing/hono-env";
-import {
-  MAX_INCLUDED_BYTES_PER_SESSION,
-  SessionInternalPaths,
-  sessionTraceExportSchema,
-  sessionTraceFormatSchema,
-  sessionTraceIncludeSchema,
-  type SessionTrace,
-  type SessionTraceCollection,
-  type SessionTraceFormat,
-} from "../session/contracts";
+import { SessionInternalPaths, sessionMessagePageSchema } from "../session/contracts";
 import type { SessionRuntimeClient } from "../session/runtime-client";
 import type { Env } from "../types";
 import { parseQuery } from "./query";
 import { dispatchSession, type SessionRouteContext } from "./session-route";
-import {
-  error,
-  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
-  requirePermission,
-  requireAll,
-  permissionRequirement,
-  sessionRequirement,
-} from "./shared";
+import { error, GITHUB_USER_OR_SERVICE_ROUTE, requirePermission } from "./shared";
 
-export const EXPORT_SCHEMA_VERSION = TRACE_EXPORT_SCHEMA_VERSION;
+export const EXPORT_SCHEMA_VERSION = 1;
+const DEFAULT_EXPORT_LIMIT = 100;
 const MAX_EXPORT_LIMIT = 500;
-export const MAX_INCLUDED_EXPORT_LIMIT = 5;
-const TRACE_READ_TIMEOUT_MS = 10_000;
-const FULL_TRACE_INCLUDE: readonly SessionTraceCollection[] = ["messages", "events", "usage"];
+export const MAX_MESSAGE_EXPORT_LIMIT = 5;
+const EXPORT_MESSAGE_PAGE_LIMIT = 100;
+export const MAX_MESSAGE_PAGES_PER_SESSION = 25;
+export const MAX_MESSAGE_BYTES_PER_SESSION = 4 * 1024 * 1024;
+const MESSAGE_PAGE_TIMEOUT_MS = 10_000;
 const encoder = new TextEncoder();
 
 function epochMsQuery(paramName: string) {
@@ -79,8 +41,17 @@ function epochMsQuery(paramName: string) {
 }
 
 const exportQuerySchema = z.object({
-  scope: z.enum(["sessions", "runs"]).default("sessions"),
-  cursor: z.string().optional(),
+  cursor: z
+    .string()
+    .optional()
+    .transform((raw, context) => {
+      const parsed = parseSessionExportCursor(raw);
+      if (!parsed.ok) {
+        context.addIssue({ code: "custom", message: parsed.error });
+        return z.NEVER;
+      }
+      return parsed.cursor;
+    }),
   limit: z
     .string()
     .regex(/^[1-9]\d*$/, { error: "Invalid limit" })
@@ -89,136 +60,185 @@ const exportQuerySchema = z.object({
       error: `limit must be an integer between 1 and ${MAX_EXPORT_LIMIT}`,
     })
     .optional(),
-  include: sessionTraceIncludeSchema.optional(),
-  format: sessionTraceFormatSchema.optional(),
+  include: z.enum(["messages"], { error: "include must be messages" }).optional(),
   createdAfter: epochMsQuery("createdAfter").optional(),
   createdBefore: epochMsQuery("createdBefore").optional(),
 });
 
-const singleExportQuerySchema = exportQuerySchema.pick({
-  include: true,
-  format: true,
-});
-
-type TraceReadFailure =
+type MessageFetchFailure =
   | { ok: false; reason: "http_error"; status: number }
   | {
       ok: false;
-      reason: "runtime_failure" | "page_cap_reached" | "trace_budget_exceeded";
+      reason: "runtime_failure" | "page_cap_reached" | "message_budget_exceeded";
     };
-type TraceReadResult = { ok: true; trace: SessionTrace } | TraceReadFailure;
+type MessageFetchResult = { ok: true; messages: SessionMessage[] } | MessageFetchFailure;
+type BoundedJson = { value: unknown; byteLength: number } | null;
 
-type SessionExportLine = Extract<TraceExportLine, { type: "session" }>;
-type SessionErrorLine = Extract<TraceExportLine, { type: "session_error" }>;
-type ExportLine = TraceExportLine;
+type SessionExportLine = {
+  schemaVersion: typeof EXPORT_SCHEMA_VERSION;
+  type: "session";
+  messages?: SessionMessage[];
+} & SessionExportRow;
+type SessionErrorLineBase = {
+  schemaVersion: typeof EXPORT_SCHEMA_VERSION;
+  type: "session_error";
+  sessionId: string;
+};
+type SessionErrorLine = SessionErrorLineBase &
+  (
+    | { reason: "http_error"; status: number }
+    | { reason: "runtime_failure" | "page_cap_reached" | "message_budget_exceeded" }
+  );
+type ExportLine =
+  | SessionExportLine
+  | SessionErrorLine
+  | {
+      schemaVersion: typeof EXPORT_SCHEMA_VERSION;
+      type: "cursor";
+      nextCursor: string;
+    }
+  | { schemaVersion: typeof EXPORT_SCHEMA_VERSION; type: "error" };
 
 function encodeLine(line: ExportLine): Uint8Array {
   return encoder.encode(`${JSON.stringify(line)}\n`);
 }
 
-function sessionLine(row: SessionExportRow, trace?: SessionTrace): SessionExportLine {
+function sessionLine(row: SessionExportRow, messages?: SessionMessage[]): SessionExportLine {
   return {
     schemaVersion: EXPORT_SCHEMA_VERSION,
     type: "session",
     ...row,
-    ...trace,
+    ...(messages === undefined ? {} : { messages }),
   };
 }
 
-function sessionErrorLine(sessionId: string, failure: TraceReadFailure): SessionErrorLine {
-  const line = {
+function sessionErrorLine(sessionId: string, failure: MessageFetchFailure): SessionErrorLine {
+  const line: SessionErrorLineBase = {
     schemaVersion: EXPORT_SCHEMA_VERSION,
     type: "session_error",
     sessionId,
-  } satisfies Pick<SessionErrorLine, "schemaVersion" | "type" | "sessionId">;
+  };
   return failure.reason === "http_error"
     ? { ...line, reason: failure.reason, status: failure.status }
     : { ...line, reason: failure.reason };
 }
 
-async function readBoundedJson(
-  response: Response,
-  maxBytes: number
-): Promise<{ value: unknown } | null> {
+async function readBoundedJson(response: Response, maxBytes: number): Promise<BoundedJson> {
   const result = await readBoundedBytes(
     response.body,
     maxBytes,
     response.headers.get("content-length")
   );
   return result.ok
-    ? { value: JSON.parse(new TextDecoder().decode(result.bytes)) as unknown }
+    ? {
+        value: JSON.parse(new TextDecoder().decode(result.bytes)) as unknown,
+        byteLength: result.bytes.byteLength,
+      }
     : null;
 }
 
-/** Reads one session's included collections from its runtime in a single snapshot. */
-async function readTrace(
+async function fetchAllMessages(
   runtime: SessionRuntimeClient,
   sessionId: string,
-  include: readonly SessionTraceCollection[],
-  format: SessionTraceFormat | undefined,
   log: Pick<Logger, "warn">,
   signal: AbortSignal
-): Promise<TraceReadResult> {
+): Promise<MessageFetchResult> {
+  const messages: SessionMessage[] = [];
+  const seenCursors = new Set<string>();
+  let messageBytes = 0;
+  let responseBytes = 0;
+  let cursor: string | undefined;
+
   try {
-    const response = await runtime.fetch(
-      sessionId,
-      SessionInternalPaths.traceExport,
-      { signal: AbortSignal.any([signal, AbortSignal.timeout(TRACE_READ_TIMEOUT_MS)]) },
-      `?${new URLSearchParams({ include: include.join(","), ...(format ? { format } : {}) })}`
-    );
-    if (!response.ok) {
-      log.warn("session_export.trace_read_failed", {
-        session_id: sessionId,
-        status: response.status,
-      });
-      return { ok: false, reason: "http_error", status: response.status };
-    }
+    for (let page = 0; page < MAX_MESSAGE_PAGES_PER_SESSION; page++) {
+      const search = new URLSearchParams({ limit: String(EXPORT_MESSAGE_PAGE_LIMIT) });
+      if (cursor) search.set("cursor", cursor);
+      const response = await runtime.fetch(
+        sessionId,
+        SessionInternalPaths.messages,
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(MESSAGE_PAGE_TIMEOUT_MS)]) },
+        `?${search}`
+      );
+      if (!response.ok) {
+        log.warn("session_export.message_page_failed", {
+          session_id: sessionId,
+          status: response.status,
+        });
+        return { ok: false, reason: "http_error", status: response.status };
+      }
 
-    const body = await readBoundedJson(response, MAX_INCLUDED_BYTES_PER_SESSION);
-    if (!body) {
-      log.warn("session_export.trace_budget_exceeded", { session_id: sessionId });
-      return { ok: false, reason: "trace_budget_exceeded" };
-    }
+      const pageBody = await readBoundedJson(
+        response,
+        MAX_MESSAGE_BYTES_PER_SESSION - responseBytes
+      );
+      if (!pageBody) {
+        log.warn("session_export.message_budget_exceeded", { session_id: sessionId });
+        return { ok: false, reason: "message_budget_exceeded" };
+      }
+      responseBytes += pageBody.byteLength;
 
-    const parsed = sessionTraceExportSchema.safeParse(body.value);
-    if (!parsed.success) {
-      log.warn("session_export.trace_invalid", {
-        session_id: sessionId,
-        error: parsed.error.issues[0]?.message,
-      });
-      return { ok: false, reason: "runtime_failure" };
+      const parsed = sessionMessagePageSchema.safeParse(pageBody.value);
+      if (!parsed.success) {
+        log.warn("session_export.message_page_invalid", {
+          session_id: sessionId,
+          error: parsed.error.issues[0]?.message,
+        });
+        return { ok: false, reason: "runtime_failure" };
+      }
+
+      for (const message of parsed.data.messages) {
+        messageBytes += encoder.encode(JSON.stringify(message)).byteLength + 1;
+        if (messageBytes > MAX_MESSAGE_BYTES_PER_SESSION) {
+          log.warn("session_export.message_budget_exceeded", { session_id: sessionId });
+          return { ok: false, reason: "message_budget_exceeded" };
+        }
+        messages.push(message);
+      }
+
+      if (!parsed.data.hasMore) return { ok: true, messages };
+      if (seenCursors.has(parsed.data.cursor)) {
+        log.warn("session_export.message_cursor_repeated", { session_id: sessionId });
+        return { ok: false, reason: "runtime_failure" };
+      }
+      seenCursors.add(parsed.data.cursor);
+      cursor = parsed.data.cursor;
     }
-    if (!parsed.data.ok) {
-      log.warn("session_export.trace_limit_reached", {
-        session_id: sessionId,
-        reason: parsed.data.reason,
-      });
-    }
-    return parsed.data;
   } catch (caught) {
     if (signal.aborted) throw caught;
-    log.warn("session_export.trace_runtime_failure", {
+    log.warn("session_export.message_runtime_failure", {
       session_id: sessionId,
       error: caught instanceof Error ? caught.message : String(caught),
     });
     return { ok: false, reason: "runtime_failure" };
   }
+
+  log.warn("session_export.message_page_cap_reached", { session_id: sessionId });
+  return { ok: false, reason: "page_cap_reached" };
 }
 
-type ExportRecord = SessionExportRow | { nextCursor: string };
-
-function streamExport(
+async function handleExport(
   request: Request,
-  ctx: SessionRouteContext,
-  include: readonly SessionTraceCollection[],
-  format: SessionTraceFormat | undefined,
-  records: AsyncIterator<ExportRecord>
-): Response {
+  _env: Env,
+  _params: object,
+  ctx: SessionRouteContext
+): Promise<Response> {
+  const query = parseQuery(request, exportQuerySchema);
+  if (query instanceof Response) return query;
+
+  const includeMessages = query.include === "messages";
+  const limit = query.limit ?? (includeMessages ? MAX_MESSAGE_EXPORT_LIMIT : DEFAULT_EXPORT_LIMIT);
+  if (includeMessages && limit > MAX_MESSAGE_EXPORT_LIMIT) {
+    return error(`limit must be at most ${MAX_MESSAGE_EXPORT_LIMIT} when include=messages`, 400);
+  }
+
   const log = createLogger("session-export");
+  const store = new SessionExportStore(ctx.db);
   const streamAbort = new AbortController();
   const signal = AbortSignal.any([request.signal, streamAbort.signal]);
   let cancelled = false;
   let closed = false;
+  let page: Awaited<ReturnType<SessionExportStore["list"]>> | undefined;
+  let sessionIndex = 0;
 
   const close = (controller: ReadableStreamDefaultController<Uint8Array>) => {
     if (closed || cancelled) return;
@@ -229,39 +249,54 @@ function streamExport(
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
       if (closed || cancelled) return;
-      if (signal.aborted) return close(controller);
+      if (signal.aborted) {
+        close(controller);
+        return;
+      }
 
       try {
-        const { value, done } = await records.next();
-        if (cancelled) return;
-        if (signal.aborted) return close(controller);
-        if (done) return close(controller);
-        if ("nextCursor" in value) {
+        page ??= await store.list({
+          cursor: query.cursor,
+          limit,
+          ...(query.createdAfter === undefined ? {} : { createdAfter: query.createdAfter }),
+          ...(query.createdBefore === undefined ? {} : { createdBefore: query.createdBefore }),
+        });
+
+        const row = page.sessions[sessionIndex++];
+        if (row) {
+          if (!includeMessages) {
+            controller.enqueue(encodeLine(sessionLine(row)));
+            return;
+          }
+
+          const result = await fetchAllMessages(ctx.sessionRuntime, row.id, log, signal);
+          controller.enqueue(
+            encodeLine(
+              result.ok ? sessionLine(row, result.messages) : sessionErrorLine(row.id, result)
+            )
+          );
+          return;
+        }
+
+        if (page.nextCursor) {
           controller.enqueue(
             encodeLine({
               schemaVersion: EXPORT_SCHEMA_VERSION,
               type: "cursor",
-              nextCursor: value.nextCursor,
+              nextCursor: encodeSessionExportCursor(page.nextCursor),
             })
           );
           close(controller);
           return;
         }
 
-        if (include.length === 0) {
-          controller.enqueue(encodeLine(sessionLine(value)));
-          return;
-        }
-
-        const result = await readTrace(ctx.sessionRuntime, value.id, include, format, log, signal);
-        controller.enqueue(
-          encodeLine(
-            result.ok ? sessionLine(value, result.trace) : sessionErrorLine(value.id, result)
-          )
-        );
+        close(controller);
       } catch (caught) {
         if (cancelled) return;
-        if (signal.aborted) return close(controller);
+        if (signal.aborted) {
+          close(controller);
+          return;
+        }
         log.error("session_export.stream_failed", {
           error: caught instanceof Error ? caught.message : String(caught),
         });
@@ -275,105 +310,18 @@ function streamExport(
     },
   });
 
-  return new Response(stream, { headers: { "Content-Type": "application/x-ndjson" } });
-}
-
-async function handleExport(
-  request: Request,
-  env: Env,
-  _params: object,
-  ctx: SessionRouteContext
-): Promise<Response> {
-  const query = parseQuery(request, exportQuerySchema);
-  if (query instanceof Response) return query;
-  let selection: ExportSelection;
-  if (query.scope === "runs") {
-    const parsed = parseRunsExportCursor(query.cursor);
-    if (!parsed.ok) return error(parsed.error, 400);
-    selection = { scope: "runs", cursor: parsed.cursor };
-  } else {
-    const parsed = parseSessionExportCursor(query.cursor);
-    if (!parsed.ok) return error(parsed.error, 400);
-    selection = { scope: "sessions", cursor: parsed.cursor };
-  }
-
-  const include = query.include ?? [];
-  const limit =
-    query.limit ?? (include.length > 0 ? MAX_INCLUDED_EXPORT_LIMIT : DEFAULT_EXPORT_LIMIT);
-  if (include.length > 0 && limit > MAX_INCLUDED_EXPORT_LIMIT) {
-    return error(`limit must be at most ${MAX_INCLUDED_EXPORT_LIMIT} when include is set`, 400);
-  }
-
-  const store = new SessionExportStore(ctx.db);
-  const mode = teamsEnforcementMode(ctx, env);
-  const memberships = ctx.authorization
-    ? (ctx.sessionMemberships ??= await new TeamMembershipStore(ctx.db).listForUser(
-        ctx.authorization.userId
-      ))
-    : new Map();
-  const viewer = viewerFromContext(ctx, memberships);
-  const { createdAfter, createdBefore } = query;
-  async function* records(): AsyncGenerator<ExportRecord> {
-    const page = await store.list({
-      ...selection,
-      readScope: viewer,
-      mode,
-      limit,
-      ...(createdAfter === undefined ? {} : { createdAfter }),
-      ...(createdBefore === undefined ? {} : { createdBefore }),
-    });
-    yield* page.sessions;
-    if (page.nextCursor) {
-      yield {
-        nextCursor:
-          page.scope === "runs"
-            ? encodeRunsExportCursor(page.nextCursor)
-            : encodeSessionExportCursor(page.nextCursor),
-      };
-    }
-  }
-
-  return streamExport(request, ctx, include, query.format, records());
-}
-
-async function handleSingleExport(
-  request: Request,
-  _env: Env,
-  params: { id: string },
-  ctx: SessionRouteContext
-): Promise<Response> {
-  const query = parseQuery(request, singleExportQuerySchema);
-  if (query instanceof Response) return query;
-  if (new URL(request.url).searchParams.has("scope")) return error("scope is not supported", 400);
-
-  const store = new SessionExportStore(ctx.db);
-  const selected = await store.get(params.id);
-  if (!selected) return error("Session not found", 404);
-
-  const include = query.include ?? FULL_TRACE_INCLUDE;
-  const session = selected;
-  async function* records(): AsyncGenerator<ExportRecord> {
-    yield session;
-  }
-
-  return streamExport(request, ctx, include, query.format, records());
+  return new Response(stream, {
+    status: 200,
+    headers: { "Content-Type": "application/x-ndjson" },
+  });
 }
 
 const EXPORT_READ = admit({
-  ...SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
-  authorization: requirePermission("sessions.export"),
+  ...GITHUB_USER_OR_SERVICE_ROUTE,
+  authorization: requirePermission("sessions.read"),
   cacheControl: "private, no-store",
 });
 
 export const sessionExportRoutes = new Hono<ControlPlaneHonoEnv>();
 
 sessionExportRoutes.get("/sessions/export", EXPORT_READ, (c) => dispatchSession(c, handleExport));
-sessionExportRoutes.get(
-  "/sessions/:id/export",
-  admit({
-    ...SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
-    authorization: requireAll(sessionRequirement("read"), permissionRequirement("sessions.export")),
-    cacheControl: "private, no-store",
-  }),
-  (c) => dispatchSession(c, handleSingleExport)
-);

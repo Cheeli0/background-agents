@@ -11,7 +11,6 @@ import {
 } from "./event-cursor";
 import type { EventRow } from "./types";
 import type { EventRepository } from "./event-repository";
-import { sessionEventSchema, type SessionEvent } from "@open-inspect/shared/types/sessions";
 import {
   sessionTimelineEventSchema,
   type ServerMessage,
@@ -113,14 +112,6 @@ function toEventStreamCursor(cursor: EventTimelineCursor): EventStreamCursor {
     id: cursor.id,
     ...(cursor.sequence === undefined ? {} : { sequence: cursor.sequence }),
   };
-}
-
-/** A persisted event with its timeline position, as the trace export lists it. */
-export function toSessionEvent(event: EventRow): SessionEvent {
-  return sessionEventSchema.parse({
-    ...toEventResponse(event),
-    timelineSequence: event.timeline_sequence,
-  });
 }
 
 function toEventResponse(event: EventRow): EventResponse {

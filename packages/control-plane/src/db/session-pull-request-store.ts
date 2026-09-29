@@ -1,6 +1,5 @@
 import type { PullRequestSummary } from "@open-inspect/shared/types/sessions";
 import type { PullRequestLifecycleState } from "@open-inspect/shared/types/artifacts";
-import { z } from "zod";
 import type { SqlDatabase } from "./sql-database";
 
 /**
@@ -44,26 +43,26 @@ export interface UpsertResult {
   applied: boolean;
 }
 
-const sessionPullRequestRowSchema = z.object({
-  artifact_id: z.string(),
-  session_id: z.string(),
-  repository_external_id: z.string().nullable(),
-  repo_owner: z.string(),
-  repo_name: z.string(),
-  pr_number: z.number(),
-  url: z.string(),
-  lifecycle_state: z.enum(["open", "closed", "merged"]),
-  is_draft: z.union([z.literal(0), z.literal(1)]),
-  head_branch: z.string(),
-  base_branch: z.string(),
-  head_sha: z.string().nullable(),
-  provider_created_at: z.number().nullable(),
-  provider_updated_at: z.number().nullable(),
-  merged_at: z.number().nullable(),
-  closed_at: z.number().nullable(),
-  created_at: z.number(),
-  updated_at: z.number(),
-});
+interface SessionPullRequestRow {
+  artifact_id: string;
+  session_id: string;
+  repository_external_id: string | null;
+  repo_owner: string;
+  repo_name: string;
+  pr_number: number;
+  url: string;
+  lifecycle_state: PullRequestLifecycleState;
+  is_draft: number;
+  head_branch: string;
+  base_branch: string;
+  head_sha: string | null;
+  provider_created_at: number | null;
+  provider_updated_at: number | null;
+  merged_at: number | null;
+  closed_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
 
 interface SummaryRow {
   session_id: string;
@@ -74,7 +73,7 @@ interface SummaryRow {
   closed: number;
 }
 
-function toRecord(row: z.infer<typeof sessionPullRequestRowSchema>): SessionPullRequestRecord {
+function toRecord(row: SessionPullRequestRow): SessionPullRequestRecord {
   return {
     artifactId: row.artifact_id,
     sessionId: row.session_id,
@@ -95,10 +94,6 @@ function toRecord(row: z.infer<typeof sessionPullRequestRowSchema>): SessionPull
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-export function decodeSessionPullRequest(row: unknown): SessionPullRequestRecord {
-  return toRecord(sessionPullRequestRowSchema.parse(row));
 }
 
 /**
@@ -178,9 +173,9 @@ export class SessionPullRequestStore {
     const row = await this.db
       .prepare("SELECT * FROM session_pull_requests WHERE artifact_id = ?")
       .bind(artifactId)
-      .first();
+      .first<SessionPullRequestRow>();
 
-    return row ? decodeSessionPullRequest(row) : null;
+    return row ? toRecord(row) : null;
   }
 
   /**
@@ -205,8 +200,8 @@ export class SessionPullRequestStore {
           "SELECT * FROM session_pull_requests WHERE repository_external_id = ? AND pr_number = ?"
         )
         .bind(identity.repositoryExternalId, identity.prNumber)
-        .first();
-      if (row) return decodeSessionPullRequest(row);
+        .first<SessionPullRequestRow>();
+      if (row) return toRecord(row);
     }
 
     const legacyRow = await this.db
@@ -218,9 +213,9 @@ export class SessionPullRequestStore {
            AND pr_number = ?`
       )
       .bind(identity.repoOwner, identity.repoName, identity.prNumber)
-      .first();
+      .first<SessionPullRequestRow>();
 
-    return legacyRow ? decodeSessionPullRequest(legacyRow) : null;
+    return legacyRow ? toRecord(legacyRow) : null;
   }
 
   /**

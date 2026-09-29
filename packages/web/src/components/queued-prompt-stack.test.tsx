@@ -12,7 +12,6 @@ const FULL_CAPABILITIES = {
   collaborate: true,
   lifecycle: true,
   sandboxAccess: true,
-  exportTrace: true,
 } satisfies SessionCapabilities;
 
 expect.extend(matchers);

@@ -17,7 +17,6 @@ const FULL_CAPABILITIES: SessionCapabilities = {
   collaborate: true,
   lifecycle: true,
   sandboxAccess: true,
-  exportTrace: true,
 };
 
 vi.mock("@/components/action-bar", () => ({

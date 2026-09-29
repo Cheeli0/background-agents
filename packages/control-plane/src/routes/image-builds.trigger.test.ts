@@ -205,7 +205,6 @@ const registerBuildSpy = vi.spyOn(ImageBuildStore.prototype, "registerBuild");
 const getActiveBuildSpy = vi.spyOn(ImageBuildStore.prototype, "getActiveBuild");
 const hasReadyImageSpy = vi.spyOn(ImageBuildStore.prototype, "hasReadyImageForFingerprint");
 const markBuildFailedSpy = vi.spyOn(ImageBuildStore.prototype, "markBuildFailed");
-const markSourceCreateIntentSpy = vi.spyOn(ImageBuildStore.prototype, "markSourceCreateIntent");
 const bindProviderSessionSpy = vi.spyOn(ImageBuildStore.prototype, "bindProviderSession");
 const setImageBuildEnabledSpy = vi.spyOn(RepoMetadataStore.prototype, "setImageBuildEnabled");
 
@@ -221,7 +220,6 @@ beforeEach(() => {
   markBuildFailedSpy.mockResolvedValue(true);
   setImageBuildEnabledSpy.mockResolvedValue(undefined);
   bindProviderSessionSpy.mockResolvedValue(true);
-  markSourceCreateIntentSpy.mockResolvedValue(true);
   modalClient.createImageBuildSandbox.mockResolvedValue({
     providerSessionId: "modal-session-1",
   });

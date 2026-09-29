@@ -23,7 +23,7 @@ sign-in are supported, while GitHub App repository credentials remain required f
 
 Required:
 
-- Node.js `24+`
+- Node.js `22+` (minimum supported: `20+`)
 - npm
 - Git
 

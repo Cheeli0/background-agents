@@ -6,8 +6,10 @@ import { describe, it, expect } from "vitest";
 import { evaluateImageBuildForSpawn, type ImageBuildSpawnRow } from "./image-selection";
 import { computeRepositoriesFingerprint } from "../../image-builds/fingerprint";
 import { COMPATIBLE_RUNTIME_VERSION } from "../../image-builds/test-helpers";
-import { minCompatibleRuntimeVersionFor } from "../../image-builds/model";
-import { MIN_SHUTDOWN_PROTOCOL_RUNTIME_GENERATION } from "../runtime-manifest";
+import {
+  MIN_COMPATIBLE_RUNTIME_VERSION,
+  minCompatibleRuntimeVersionFor,
+} from "../../image-builds/model";
 
 const SESSION_REPOSITORIES = [
   { repoOwner: "acme", repoName: "web", baseBranch: "main" },
@@ -86,9 +88,20 @@ describe("evaluateImageBuildForSpawn", () => {
     });
   });
 
-  it("enforces the shutdown protocol floor", async () => {
+  it("enforces the runtime compatibility floor", async () => {
+    expect(
+      (
+        await evaluateImageBuildForSpawn(
+          await readyImage({
+            runtime_version: `v${MIN_COMPATIBLE_RUNTIME_VERSION}-compatible-runtime`,
+          }),
+          SESSION_REPOSITORIES
+        )
+      ).outcome
+    ).toBe("selected");
+
     for (const runtimeVersion of [
-      `v${MIN_SHUTDOWN_PROTOCOL_RUNTIME_GENERATION - 1}-before-preservation`,
+      `v${MIN_COMPATIBLE_RUNTIME_VERSION - 1}-legacy-runtime`,
       "dev",
       "",
     ]) {
@@ -102,29 +115,25 @@ describe("evaluateImageBuildForSpawn", () => {
     }
   });
 
-  it("applies the higher of the harness and shutdown protocol floors", async () => {
-    const preservation = await readyImage({
-      runtime_version: `v${MIN_SHUTDOWN_PROTOCOL_RUNTIME_GENERATION}-preservation`,
+  it("applies the session harness's own floor without raising everyone else's", async () => {
+    // The Claude harness arrived after the global floor: its sessions skip
+    // images from before it, while OpenCode sessions keep using them.
+    const claudeFloor = minCompatibleRuntimeVersionFor("claude");
+    expect(claudeFloor).toBeGreaterThan(MIN_COMPATIBLE_RUNTIME_VERSION);
+    const image = await readyImage({ runtime_version: `v${claudeFloor - 1}-before-claude` });
+
+    expect(await evaluateImageBuildForSpawn(image, SESSION_REPOSITORIES, "claude")).toEqual({
+      outcome: "miss",
+      reason: "runtime_below_floor",
+      imageBuildId: "imgb-1",
     });
-
-    for (const harness of ["claude", "opencode"] as const) {
-      expect(
-        await evaluateImageBuildForSpawn(preservation, SESSION_REPOSITORIES, harness),
-        harness
-      ).toEqual({
-        outcome: "miss",
-        reason: "runtime_below_floor",
-        imageBuildId: "imgb-1",
-      });
-
-      const current = await readyImage({
-        runtime_version: `v${minCompatibleRuntimeVersionFor(harness)}-current`,
-      });
-      expect(
-        (await evaluateImageBuildForSpawn(current, SESSION_REPOSITORIES, harness)).outcome,
-        harness
-      ).toBe("selected");
-    }
+    expect(
+      (await evaluateImageBuildForSpawn(image, SESSION_REPOSITORIES, "opencode")).outcome
+    ).toBe("selected");
+    const current = await readyImage({ runtime_version: `v${claudeFloor}-claude` });
+    expect(
+      (await evaluateImageBuildForSpawn(current, SESSION_REPOSITORIES, "claude")).outcome
+    ).toBe("selected");
   });
 
   it("misses when the environment was edited after the session was created", async () => {

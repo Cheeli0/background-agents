@@ -7,7 +7,6 @@ export const { GET } = controlPlaneJsonGetProxy(
     buildControlPlanePath("/analytics/breakdown", new URL(request.url).searchParams, [
       "days",
       "by",
-      "scope",
     ]),
   "analytics breakdown"
 );

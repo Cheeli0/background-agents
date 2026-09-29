@@ -6,7 +6,6 @@ export interface SessionCapabilities {
   collaborate: boolean;
   lifecycle: boolean;
   sandboxAccess: boolean;
-  exportTrace: boolean;
 }
 
 export function resolveSessionCapabilities(
@@ -17,6 +16,5 @@ export function resolveSessionCapabilities(
     collaborate: hasPermission("sessions.collaborate"),
     lifecycle: hasPermission("sessions.lifecycle"),
     sandboxAccess: hasPermission("sessions.sandbox_access"),
-    exportTrace: hasPermission("sessions.export"),
   };
 }

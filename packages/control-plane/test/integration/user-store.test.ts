@@ -46,11 +46,6 @@ describe("UserStore", () => {
       expect(user).not.toBeNull();
       expect(user!.displayName).toBe("Alice");
       expect(user!.email).toBeNull();
-      expect(
-        await env.DB.prepare("SELECT team_id, source FROM team_memberships WHERE user_id = ?")
-          .bind(result.id)
-          .first()
-      ).toBeNull();
     });
 
     it("creates a new user with email normalized to lowercase", async () => {
@@ -377,6 +372,7 @@ describe("UserStore", () => {
   describe("createIdentity", () => {
     it.each(providerIssuers)("stores the canonical issuer for %s", async (provider, issuer) => {
       const user = await store.createUser({ displayName: "Alice" });
+
       await store.createIdentity({
         userId: user.id,
         provider,

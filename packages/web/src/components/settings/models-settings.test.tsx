@@ -67,11 +67,6 @@ function renderSettings(
   );
 }
 
-function getModelSwitch(name: RegExp) {
-  const container = screen.getByLabelText(name).parentElement!;
-  return within(container).getByRole("switch", { name });
-}
-
 describe("ModelsSettings", () => {
   it("automatically saves toggles and updates other model selectors", async () => {
     const fetchMock = createSaveMock(["openai/gpt-5.4"]);
@@ -81,7 +76,7 @@ describe("ModelsSettings", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
-    await user.click(getModelSwitch(/Claude Haiku 4.5/));
+    await user.click(screen.getByRole("switch", { name: /Claude Haiku 4.5/ }));
     await waitFor(() => expect(screen.getByRole("status")).toBeEmptyDOMElement());
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -95,7 +90,7 @@ describe("ModelsSettings", () => {
       "openai/gpt-5.4",
       "anthropic/claude-haiku-4-5",
     ]);
-    await user.click(getModelSwitch(/GPT 5.4/));
+    await user.click(screen.getByRole("switch", { name: /GPT 5.4/ }));
     expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
       changes: [{ modelId: "openai/gpt-5.4", enabled: false }],
     });
@@ -122,14 +117,14 @@ describe("ModelsSettings", () => {
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     const { unmount } = renderSettings(["openai/gpt-5.2", "openai/gpt-5.4"]);
-    await user.click(getModelSwitch(/GPT 5.4/));
-    expect(getModelSwitch(/GPT 5.4/)).toBeChecked();
+    await user.click(screen.getByRole("switch", { name: /GPT 5.4/ }));
+    expect(screen.getByRole("switch", { name: /GPT 5.4/ })).toBeChecked();
     expect(fetchMock).not.toHaveBeenCalled();
     unmount();
     renderSettings(MODEL_OPTIONS[0].models.map((model) => model.id));
     await user.click(screen.getByRole("button", { name: "Disable all" }));
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(getModelSwitch(/Claude Haiku 4.5/)).toBeChecked();
+    expect(screen.getByRole("switch", { name: /Claude Haiku 4.5/ })).toBeChecked();
   });
 
   it.each(["server", "network"])(
@@ -149,7 +144,7 @@ describe("ModelsSettings", () => {
       vi.stubGlobal("fetch", fetchMock);
       const user = userEvent.setup();
       renderSettings();
-      const toggle = getModelSwitch(/Claude Haiku 4.5/);
+      const toggle = screen.getByRole("switch", { name: /Claude Haiku 4.5/ });
       await user.click(toggle);
       await waitFor(() => expect(screen.getByRole("status")).toBeEmptyDOMElement());
       expect(toggle).not.toBeChecked();
@@ -184,9 +179,9 @@ describe("ModelsSettings", () => {
         { revalidate: false }
       );
     });
-    expect(getModelSwitch(/GPT 5.4/)).not.toBeChecked();
-    expect(getModelSwitch(/Claude Sonnet 4.6/)).toBeChecked();
-    await user.click(getModelSwitch(/Claude Haiku 4.5/));
+    expect(screen.getByRole("switch", { name: /GPT 5.4/ })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: /Claude Sonnet 4.6/ })).toBeChecked();
+    await user.click(screen.getByRole("switch", { name: /Claude Haiku 4.5/ }));
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
       changes: [{ modelId: "anthropic/claude-haiku-4-5", enabled: true }],
     });

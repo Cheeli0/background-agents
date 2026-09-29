@@ -315,7 +315,7 @@ describe("automation cron submission", () => {
     expect(screen.getByPlaceholderText(/Exact workflow name/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("combobox", { name: "Event Type" }));
-    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /PR Opened/ }));
+    fireEvent.click(screen.getByRole("option", { name: /PR Opened/ }));
 
     expect(screen.queryByPlaceholderText(/Exact workflow name/)).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -352,13 +352,11 @@ describe("automation cron submission", () => {
     );
 
     fireEvent.click(screen.getByRole("combobox", { name: "Event Type" }));
-    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /PR Opened/ }));
+    fireEvent.click(screen.getByRole("option", { name: /PR Opened/ }));
     expect(screen.queryByPlaceholderText(/Exact workflow name/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("combobox", { name: "Event Type" }));
-    fireEvent.click(
-      within(screen.getByRole("listbox")).getByRole("option", { name: /Workflow Run Completed/ })
-    );
+    fireEvent.click(screen.getByRole("option", { name: /Workflow Run Completed/ }));
 
     expect(screen.getByPlaceholderText(/Exact workflow name/)).toHaveValue("CI");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -388,28 +386,22 @@ describe("automation cron submission", () => {
     expect(screen.getAllByText("startup_failure").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("combobox", { name: "Event Type" }));
-    fireEvent.click(
-      within(screen.getByRole("listbox")).getByRole("option", { name: /Workflow Run Completed/ })
-    );
+    fireEvent.click(screen.getByRole("option", { name: /Workflow Run Completed/ }));
     expect(screen.getByRole("status")).toHaveTextContent(
       "Removed Conclusion — not available for this event type."
     );
 
     fireEvent.click(screen.getByText("Add condition..."));
-    fireEvent.click(
-      within(screen.getByRole("listbox")).getByRole("option", { name: "Conclusion" })
-    );
+    fireEvent.click(screen.getByRole("option", { name: "Conclusion" }));
     const conclusionSelect = screen
       .getAllByRole("combobox")
       .find((element) => element.textContent?.includes("success"));
     expect(conclusionSelect).toBeDefined();
     fireEvent.click(conclusionSelect!);
-    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "failure" }));
+    fireEvent.click(screen.getByRole("option", { name: "failure" }));
 
     fireEvent.click(screen.getByRole("combobox", { name: "Event Type" }));
-    fireEvent.click(
-      within(screen.getByRole("listbox")).getByRole("option", { name: /Check Suite Completed/ })
-    );
+    fireEvent.click(screen.getByRole("option", { name: /Check Suite Completed/ }));
 
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
@@ -1274,9 +1266,7 @@ describe("agent harness", () => {
     const { onSubmit, submit } = renderForm({}, "create");
 
     fireEvent.click(screen.getByRole("combobox", { name: "Agent harness" }));
-    fireEvent.click(
-      within(screen.getByRole("listbox")).getByRole("option", { name: "Claude Agent" })
-    );
+    fireEvent.click(screen.getByRole("option", { name: "Claude Agent" }));
     submit();
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -1296,7 +1286,7 @@ describe("agent harness", () => {
     );
 
     fireEvent.click(screen.getByRole("combobox", { name: "Agent harness" }));
-    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "OpenCode" }));
+    fireEvent.click(screen.getByRole("option", { name: "OpenCode" }));
     submit();
 
     expect(onSubmit).toHaveBeenCalledTimes(1);

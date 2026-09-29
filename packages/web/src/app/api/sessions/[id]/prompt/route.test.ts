@@ -11,7 +11,6 @@ vi.mock("@/lib/control-plane", () => ({
 import { getServerAuthSession } from "@/lib/server-auth-session";
 import { controlPlaneUserFetch } from "@/lib/control-plane";
 import { POST } from "./route";
-import { MAX_WEB_PROMPT_CHARS } from "@open-inspect/shared/types/prompts";
 
 describe("session prompt API route", () => {
   beforeEach(() => {
@@ -30,24 +29,6 @@ describe("session prompt API route", () => {
     );
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "content is required" });
-    expect(controlPlaneUserFetch).not.toHaveBeenCalled();
-  });
-
-  it("reports oversized content before proxying", async () => {
-    const response = await POST(
-      new Request("http://localhost/api/sessions/session-1/prompt", {
-        method: "POST",
-        body: JSON.stringify({ content: "x".repeat(MAX_WEB_PROMPT_CHARS + 1) }),
-      }) as never,
-      { params: Promise.resolve({ id: "session-1" }) }
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: `content exceeds ${MAX_WEB_PROMPT_CHARS} characters (got ${MAX_WEB_PROMPT_CHARS + 1})`,
-      code: "prompt_too_long",
-    });
     expect(controlPlaneUserFetch).not.toHaveBeenCalled();
   });
 
@@ -65,7 +46,7 @@ describe("session prompt API route", () => {
     );
 
     expect(response.status).toBe(400);
-    expect((await response.json()).error).toContain("attachments");
+    await expect(response.json()).resolves.toEqual({ error: "Invalid prompt request" });
     expect(controlPlaneUserFetch).not.toHaveBeenCalled();
   });
 

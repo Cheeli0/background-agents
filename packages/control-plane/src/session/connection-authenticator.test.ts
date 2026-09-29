@@ -6,8 +6,6 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { hashToken } from "../auth/crypto";
-import { permissionsForBuiltInRole } from "@open-inspect/shared/rbac";
-import type { SessionAccessRow, SessionViewer } from "@open-inspect/shared";
 import type { Logger } from "../logger";
 import type { BackgroundTasks } from "../platform-ports";
 import {
@@ -37,7 +35,6 @@ async function sandboxRow(overrides: Partial<SandboxRow> = {}): Promise<SandboxR
     auth_token: null,
     auth_token_hash: await hashToken(TOKEN),
     status: "ready",
-    created_at: 5000,
     ...overrides,
   } as SandboxRow;
 }
@@ -70,18 +67,13 @@ interface Harness {
   wsManager: {
     acceptClientSocket: ReturnType<typeof vi.fn>;
     acceptAndSetSandboxSocket: ReturnType<typeof vi.fn>;
-    getSandboxCommandTarget: ReturnType<typeof vi.fn>;
     enforceAuthTimeout: ReturnType<typeof vi.fn>;
-    close: ReturnType<typeof vi.fn>;
   };
   lifecycleManager: {
     isProviderStartupPending: ReturnType<typeof vi.fn>;
     onSandboxConnected: ReturnType<typeof vi.fn>;
-    onSandboxSocketAttached: ReturnType<typeof vi.fn>;
     updateLastActivity: ReturnType<typeof vi.fn>;
     scheduleInactivityCheck: ReturnType<typeof vi.fn>;
-    scheduleDisconnectCheck: ReturnType<typeof vi.fn>;
-    onRefusedReconnect: ReturnType<typeof vi.fn>;
   };
   broadcast: ReturnType<typeof vi.fn>;
   submitted: string[];
@@ -108,18 +100,13 @@ function createHarness(opts: {
   const wsManager = {
     acceptClientSocket: vi.fn(),
     acceptAndSetSandboxSocket: vi.fn(() => ({ replaced: false })),
-    getSandboxCommandTarget: vi.fn(() => ({ kind: "unavailable" })),
     enforceAuthTimeout: vi.fn(async () => undefined),
-    close: vi.fn(),
   };
   const lifecycleManager = {
     isProviderStartupPending: vi.fn(() => false),
     onSandboxConnected: vi.fn(),
-    onSandboxSocketAttached: vi.fn(),
     updateLastActivity: vi.fn(),
     scheduleInactivityCheck: vi.fn(async () => undefined),
-    scheduleDisconnectCheck: vi.fn(async () => undefined),
-    onRefusedReconnect: vi.fn((): "retry" | "exit" => "exit"),
   };
   const broadcast = vi.fn();
   const submitted: string[] = [];
@@ -218,34 +205,13 @@ describe("SessionConnectionAuthenticator.authorize", () => {
 
   it("rejects a terminal session with 410 on a read taken after authentication", async () => {
     const h = createHarness({ sandbox: await sandboxRow(), session: sessionRow("cancelled") });
-    h.lifecycleManager.onRefusedReconnect.mockReturnValue("retry");
 
     const decision = await h.authenticator.authorize(
       upgradeRequest({ sandbox: true, token: TOKEN, sandboxId: SANDBOX_ID })
     );
 
-    // A cancelled session's sandbox is destroyed, never kept for a save.
     expect(await rejection(decision)).toEqual({ status: 410, body: "Session is terminal" });
-    expect(h.lifecycleManager.onRefusedReconnect).not.toHaveBeenCalled();
   });
-
-  it.each([
-    { instruction: "retry" as const, expected: { status: 503, body: "Sandbox is being saved" } },
-    { instruction: "exit" as const, expected: { status: 410, body: "Session is terminal" } },
-  ])(
-    "answers an archived session's sandbox with $expected.status when told to $instruction",
-    async ({ instruction, expected }) => {
-      const h = createHarness({ sandbox: await sandboxRow(), session: sessionRow("archived") });
-      h.lifecycleManager.onRefusedReconnect.mockReturnValue(instruction);
-
-      const decision = await h.authenticator.authorize(
-        upgradeRequest({ sandbox: true, token: TOKEN, sandboxId: SANDBOX_ID })
-      );
-
-      expect(await rejection(decision)).toEqual(expected);
-      expect(h.lifecycleManager.onRefusedReconnect).toHaveBeenCalledOnce();
-    }
-  );
 
   it("rejects a sandbox that stopped during the token hash with 410", async () => {
     const row = await sandboxRow();
@@ -259,34 +225,6 @@ describe("SessionConnectionAuthenticator.authorize", () => {
     );
 
     expect(await rejection(decision)).toEqual({ status: 410, body: "Sandbox is stopped" });
-  });
-
-  it("tells a stale sandbox that a save still needs to retry instead of exiting", async () => {
-    const h = createHarness({ sandbox: await sandboxRow({ status: "stale" }) });
-    h.lifecycleManager.onRefusedReconnect.mockReturnValue("retry");
-
-    const decision = await h.authenticator.authorize(
-      upgradeRequest({ sandbox: true, token: TOKEN, sandboxId: SANDBOX_ID })
-    );
-
-    expect(await rejection(decision)).toEqual({ status: 503, body: "Sandbox is being saved" });
-    expect(h.lifecycleManager.onRefusedReconnect).toHaveBeenCalledOnce();
-  });
-
-  it("does not keep a superseded generation up for the current generation's save", async () => {
-    const row = await sandboxRow({ status: "stale" });
-    const h = createHarness({
-      sandbox: row,
-      duringTokenHash: () => ({ ...row, created_at: row.created_at + 1 }),
-    });
-    h.lifecycleManager.onRefusedReconnect.mockReturnValue("retry");
-
-    const decision = await h.authenticator.authorize(
-      upgradeRequest({ sandbox: true, token: TOKEN, sandboxId: SANDBOX_ID })
-    );
-
-    expect(await rejection(decision)).toEqual({ status: 410, body: "Sandbox is stopped" });
-    expect(h.lifecycleManager.onRefusedReconnect).not.toHaveBeenCalled();
   });
 
   it("rejects credentials rotated during the token hash with 403", async () => {
@@ -355,60 +293,31 @@ describe("UpgradeDecision.attach", () => {
     expect(h.broadcast).not.toHaveBeenCalled();
   });
 
-  it("moves the sandbox to connecting for its generation, stamps the heartbeat, arms boot liveness, and publishes access", async () => {
-    const h = createHarness({ sandbox: await sandboxRow({ status: "spawning" }) });
+  it("marks the sandbox ready, publishes access, arms the inactivity check, and drains the queue", async () => {
+    const h = createHarness({ sandbox: await sandboxRow() });
 
     await (await accepted(h, sandboxUpgrade())).attach(socket);
 
     expect(h.wsManager.acceptAndSetSandboxSocket).toHaveBeenCalledWith(socket, SANDBOX_ID);
-    expect(h.sandboxRepository.updateSandboxHeartbeat).toHaveBeenCalledOnce();
     expect(h.lifecycleManager.onSandboxConnected).toHaveBeenCalledOnce();
-    expect(h.lifecycleManager.onSandboxSocketAttached).toHaveBeenCalledWith({
-      sandboxId: SANDBOX_ID,
-      createdAt: 5000,
-    });
-    expect(h.lifecycleManager.scheduleDisconnectCheck).toHaveBeenCalledOnce();
+    expect(h.sandboxRepository.updateSandboxStatus).toHaveBeenCalledWith("ready");
     expect(h.broadcast.mock.calls.map(([message]) => message.type)).toEqual([
+      "sandbox_status",
       "sandbox_access_changed",
     ]);
+    expect(h.lifecycleManager.scheduleInactivityCheck).toHaveBeenCalledOnce();
+    expect(h.submitted).toEqual(["message_queue.process"]);
+    expect(h.processMessageQueue).toHaveBeenCalledOnce();
     expect(h.log.info).toHaveBeenCalledWith(
       "ws.connect",
       expect.objectContaining({ outcome: "success", sandbox_id: SANDBOX_ID })
     );
   });
 
-  it("neither publishes ready nor pumps the queue nor stamps activity: those wait for the ready event", async () => {
-    const h = createHarness({ sandbox: await sandboxRow({ status: "connecting" }) });
-
-    await (await accepted(h, sandboxUpgrade())).attach(socket);
-
-    expect(h.sandboxRepository.updateSandboxStatus).not.toHaveBeenCalled();
-    expect(h.lifecycleManager.updateLastActivity).not.toHaveBeenCalled();
-    expect(h.lifecycleManager.scheduleInactivityCheck).not.toHaveBeenCalled();
-    expect(h.submitted).toEqual([]);
-    expect(h.processMessageQueue).not.toHaveBeenCalled();
-    expect(h.broadcast.mock.calls.map(([message]) => message.type)).not.toContain("sandbox_status");
-  });
-
-  it("pumps the queue when the bridge of an already-ready sandbox reconnects", async () => {
-    // A bridge restart or a hibernation wake: the sandbox never stopped
-    // being ready, so a prompt queued while the socket was down must not
-    // wait for a user action. Readiness itself is still not re-published.
-    const h = createHarness({ sandbox: await sandboxRow({ status: "ready" }) });
-    h.wsManager.getSandboxCommandTarget.mockReturnValue({ kind: "dispatch", socket });
-
-    await (await accepted(h, sandboxUpgrade())).attach(socket);
-
-    expect(h.submitted).toEqual(["message_queue.process"]);
-    expect(h.processMessageQueue).toHaveBeenCalledOnce();
-    expect(h.sandboxRepository.updateSandboxStatus).not.toHaveBeenCalled();
-    expect(h.broadcast.mock.calls.map(([message]) => message.type)).not.toContain("sandbox_status");
-  });
-
-  it("arms the boot liveness check before adopting the socket", async () => {
+  it("arms the inactivity check before adopting the socket", async () => {
     const h = createHarness({ sandbox: await sandboxRow() });
     const order: string[] = [];
-    h.lifecycleManager.scheduleDisconnectCheck.mockImplementation(async () => {
+    h.lifecycleManager.scheduleInactivityCheck.mockImplementation(async () => {
       order.push("schedule");
     });
     h.wsManager.acceptAndSetSandboxSocket.mockImplementation(() => {
@@ -421,112 +330,19 @@ describe("UpgradeDecision.attach", () => {
     expect(order).toEqual(["schedule", "accept"]);
   });
 
-  it("commits nothing when the liveness check cannot be armed", async () => {
+  it("commits nothing when the inactivity check cannot be armed", async () => {
     const h = createHarness({ sandbox: await sandboxRow() });
-    h.lifecycleManager.scheduleDisconnectCheck.mockRejectedValue(new Error("alarm unavailable"));
+    h.lifecycleManager.scheduleInactivityCheck.mockRejectedValue(new Error("alarm unavailable"));
 
     await expect((await accepted(h, sandboxUpgrade())).attach(socket)).rejects.toThrow(
       "alarm unavailable"
     );
 
     expect(h.wsManager.acceptAndSetSandboxSocket).not.toHaveBeenCalled();
-    expect(h.sandboxRepository.updateSandboxHeartbeat).not.toHaveBeenCalled();
     expect(h.lifecycleManager.onSandboxConnected).not.toHaveBeenCalled();
-    expect(h.lifecycleManager.onSandboxSocketAttached).not.toHaveBeenCalled();
+    expect(h.sandboxRepository.updateSandboxStatus).not.toHaveBeenCalled();
     expect(h.broadcast).not.toHaveBeenCalled();
     expect(h.submitted).toEqual([]);
-  });
-
-  it("rejects a replacement installed after authorization but before attachment", async () => {
-    const original = await sandboxRow({ status: "spawning" });
-    const h = createHarness({ sandbox: original });
-    const decision = await accepted(h, sandboxUpgrade());
-    h.sandboxRepository.getSandbox.mockReturnValue({
-      ...original,
-      modal_sandbox_id: "sb-replacement",
-      auth_token_hash: "replacement-token-hash",
-      created_at: 9000,
-    });
-
-    await decision.attach(socket);
-
-    expect(h.wsManager.close).toHaveBeenCalledWith(socket, 4003, "Sandbox generation replaced");
-    expect(h.lifecycleManager.scheduleDisconnectCheck).not.toHaveBeenCalled();
-    expect(h.wsManager.acceptAndSetSandboxSocket).not.toHaveBeenCalled();
-    expect(h.sandboxRepository.updateSandboxHeartbeat).not.toHaveBeenCalled();
-  });
-
-  it("rejects a generation timestamp changed after authorization", async () => {
-    const original = await sandboxRow({ status: "spawning" });
-    const h = createHarness({ sandbox: original });
-    const decision = await accepted(h, sandboxUpgrade());
-    h.sandboxRepository.getSandbox.mockReturnValue({ ...original, created_at: 9000 });
-
-    await decision.attach(socket);
-
-    expect(h.wsManager.close).toHaveBeenCalledWith(socket, 4003, "Sandbox generation replaced");
-    expect(h.lifecycleManager.scheduleDisconnectCheck).not.toHaveBeenCalled();
-    expect(h.wsManager.acceptAndSetSandboxSocket).not.toHaveBeenCalled();
-  });
-
-  it("rejects credentials changed after authorization", async () => {
-    const original = await sandboxRow({ status: "spawning" });
-    const h = createHarness({ sandbox: original });
-    const decision = await accepted(h, sandboxUpgrade());
-    h.sandboxRepository.getSandbox.mockReturnValue({ ...original, auth_token_hash: "" });
-
-    await decision.attach(socket);
-
-    expect(h.wsManager.close).toHaveBeenCalledWith(socket, 4003, "Sandbox generation replaced");
-    expect(h.lifecycleManager.scheduleDisconnectCheck).not.toHaveBeenCalled();
-    expect(h.wsManager.acceptAndSetSandboxSocket).not.toHaveBeenCalled();
-  });
-
-  it("closes the socket and commits nothing when the generation rotated while the liveness check was arming", async () => {
-    // A cancel or a replacement spawn can rewrite the row while the alarm
-    // write is pending. The socket that was admitted belongs to the old
-    // generation; adopting it would hand the new row a stranger's bridge.
-    const original = await sandboxRow({ status: "spawning" });
-    const h = createHarness({ sandbox: original });
-    const decision = await accepted(h, sandboxUpgrade());
-    h.lifecycleManager.scheduleDisconnectCheck.mockImplementation(async () => {
-      h.sandboxRepository.getSandbox.mockReturnValue({
-        ...original,
-        modal_sandbox_id: "sb-replacement",
-        created_at: 9000,
-      });
-    });
-
-    await decision.attach(socket);
-
-    expect(h.wsManager.close).toHaveBeenCalledWith(socket, 4003, "Sandbox generation replaced");
-    expect(h.wsManager.acceptAndSetSandboxSocket).not.toHaveBeenCalled();
-    expect(h.sandboxRepository.updateSandboxHeartbeat).not.toHaveBeenCalled();
-    expect(h.lifecycleManager.onSandboxConnected).not.toHaveBeenCalled();
-    expect(h.lifecycleManager.onSandboxSocketAttached).not.toHaveBeenCalled();
-    expect(h.broadcast).not.toHaveBeenCalled();
-    expect(h.submitted).toEqual([]);
-    expect(h.log.warn).toHaveBeenCalledWith(
-      "ws.connect",
-      expect.objectContaining({ ws_type: "sandbox", outcome: "generation_replaced" })
-    );
-  });
-
-  it("stamps the heartbeat only once the liveness check is armed", async () => {
-    // The heartbeat is the "has connected" mark the connect watchdog stands
-    // down for; a generation whose socket was never adopted must not earn it.
-    const h = createHarness({ sandbox: await sandboxRow({ status: "spawning" }) });
-    const order: string[] = [];
-    h.lifecycleManager.scheduleDisconnectCheck.mockImplementation(async () => {
-      order.push("schedule");
-    });
-    h.sandboxRepository.updateSandboxHeartbeat.mockImplementation(() => {
-      order.push("heartbeat");
-    });
-
-    await (await accepted(h, sandboxUpgrade())).attach(socket);
-
-    expect(order).toEqual(["schedule", "heartbeat"]);
   });
 
   it("withholds the access broadcast while provider startup is still persisting", async () => {
@@ -535,14 +351,14 @@ describe("UpgradeDecision.attach", () => {
 
     await (await accepted(h, sandboxUpgrade())).attach(socket);
 
-    expect(h.broadcast).not.toHaveBeenCalled();
+    expect(h.broadcast.mock.calls.map(([message]) => message.type)).toEqual(["sandbox_status"]);
   });
 
-  it("passes the authenticated sandbox id through, or undefined when the row has none", async () => {
+  it("passes the presented sandbox id through, or undefined when the bridge sent none", async () => {
     const h = createHarness({ sandbox: await sandboxRow({ modal_sandbox_id: null }) });
 
     await (
-      await accepted(h, upgradeRequest({ sandbox: true, token: TOKEN, sandboxId: "untrusted-id" }))
+      await accepted(h, upgradeRequest({ sandbox: true, token: TOKEN, sandboxId: null }))
     ).attach(socket);
 
     expect(h.wsManager.acceptAndSetSandboxSocket).toHaveBeenCalledWith(socket, undefined);
@@ -556,227 +372,5 @@ describe("UpgradeDecision.attach", () => {
 
     await expect(decision.attach({} as WebSocket)).rejects.toThrow("already attached");
     expect(h.wsManager.acceptAndSetSandboxSocket).toHaveBeenCalledOnce();
-  });
-});
-
-describe("client session access", () => {
-  type UserViewer = Extract<SessionViewer, { kind: "user" }>;
-  const teamRow: SessionAccessRow = {
-    id: "session",
-    ownerUserId: "owner-user",
-    ownerTeamId: "team-b",
-    visibility: "team",
-    collaboratorIds: [],
-  };
-  const member: UserViewer = {
-    kind: "user",
-    userId: "member-user",
-    roleKey: "member",
-    suspended: false,
-    permissions: permissionsForBuiltInRole("member"),
-    memberships: new Map([["team-a", "member"]]),
-  };
-  const owner: UserViewer = {
-    ...member,
-    userId: "workspace-owner",
-    roleKey: "owner",
-    permissions: permissionsForBuiltInRole("owner"),
-  };
-
-  function accessHarness(mode: "off" | "shadow" | "on", viewer: UserViewer, row: SessionAccessRow) {
-    const authorization = {
-      userId: viewer.userId,
-      role: { key: viewer.roleKey },
-      permissions: viewer.permissions,
-      suspendedAt: null,
-    };
-    const resolution = { kind: "valid" as const, mode, authorization, viewer, row };
-    const close = vi.fn();
-    const removeClient = vi.fn();
-    const auditPrivateBreakGlass = vi.fn(async () => undefined);
-    const send = vi.fn((_ws: WebSocket, _message: { type: string; session?: unknown }) => true);
-    const snapshot = {
-      session: {
-        codeServerUrl: "https://code.example.test",
-        sandboxDashboardUrl: "https://dashboard.example.test",
-        ttydUrl: "https://terminal.example.test",
-        vncUrl: "https://vnc.example.test",
-        tunnelUrls: { app: "https://app.example.test" },
-      },
-      artifacts: [],
-      timeline: { events: [], hasMore: false, cursor: null },
-      promptQueue: [],
-    };
-    const deps = {
-      resolveSessionViewer: vi.fn(async () => resolution),
-      wsManager: {
-        close,
-        removeClient,
-        send,
-        isClientAuthenticated: vi.fn(() => false),
-        isClientSynchronizing: vi.fn(() => false),
-        setClientSynchronizing: vi.fn(),
-        activateClient: vi.fn(async (_ws: WebSocket, _info: unknown, synchronize: () => boolean) =>
-          synchronize()
-        ),
-      },
-      participantService: {
-        getByWsTokenHash: vi.fn(() => ({
-          id: "participant-1",
-          user_id: "member-user",
-          canonical_user_id: authorization.userId,
-          ws_token_created_at: Date.now(),
-          scm_login: null,
-        })),
-      },
-      snapshotReader: {
-        resolveSessionSnapshotEnrichment: vi.fn(async () => ({})),
-        readSessionSnapshot: vi.fn(() => snapshot),
-      },
-      scmProviderName: "github",
-      presenceService: { sendPresence: vi.fn(), broadcastPresence: vi.fn() },
-      schedulePullRequestRefresh: vi.fn(),
-      auditPrivateBreakGlass,
-      log: createLogger(),
-    } as unknown as SessionConnectionAuthenticatorDeps;
-    return {
-      authenticator: new SessionConnectionAuthenticator(deps),
-      close,
-      removeClient,
-      send,
-      auditPrivateBreakGlass,
-      resolveSessionViewer: deps.resolveSessionViewer,
-    };
-  }
-
-  it.each(["off", "shadow", "on"] as const)(
-    "uses the %s mode for the team rule at subscribe and on commands",
-    async (mode) => {
-      const { authenticator, close } = accessHarness(mode, member, teamRow);
-      await authenticator.handleSubscribe({} as WebSocket, { token: "token", clientId: "client" });
-      expect(close).toHaveBeenCalledTimes(mode === "on" ? 1 : 0);
-      if (mode === "on") expect(close).toHaveBeenCalledWith({}, 4010, expect.any(String));
-      expect(
-        await authenticator.authorizeClientCommand({} as WebSocket, member.userId, "collaborate")
-      ).toEqual(mode === "on" ? { kind: "revoked" } : { kind: "allowed" });
-    }
-  );
-
-  it("retains a read-only socket when only collaboration is denied", async () => {
-    const viewer: UserViewer = {
-      ...member,
-      memberships: new Map([["team-b", "member"]]),
-      permissions: ["sessions.read"],
-    };
-    const { authenticator, close, removeClient } = accessHarness("on", viewer, teamRow);
-    const socket = {} as WebSocket;
-    await authenticator.handleSubscribe(socket, { token: "token", clientId: "read-only" });
-
-    expect(
-      await authenticator.authorizeClientCommand(socket, viewer.userId, "collaborate")
-    ).toEqual({
-      kind: "denied",
-      reason: "missing_permission",
-    });
-    expect(close).not.toHaveBeenCalled();
-    expect(removeClient).not.toHaveBeenCalled();
-  });
-
-  it("closes on lost read access but not on a collaboration-only denial", async () => {
-    const memberships = new Map([["team-b", "member"]] as const);
-    const row = { ...teamRow };
-    const viewer: UserViewer = { ...member, memberships };
-    const { authenticator, close, removeClient, resolveSessionViewer } = accessHarness(
-      "on",
-      viewer,
-      row
-    );
-    const socket = {} as WebSocket;
-
-    await authenticator.handleSubscribe(socket, { token: "token", clientId: "member" });
-    expect(close).not.toHaveBeenCalled();
-    expect(
-      await authenticator.authorizeClientCommand(socket, viewer.userId, "collaborate")
-    ).toEqual({
-      kind: "allowed",
-    });
-
-    memberships.delete("team-b");
-    expect(
-      await authenticator.authorizeClientCommand(socket, viewer.userId, "collaborate")
-    ).toEqual({
-      kind: "revoked",
-    });
-    expect(removeClient).toHaveBeenCalledWith(socket);
-    expect(close).toHaveBeenCalledWith(socket, 4010, expect.any(String));
-
-    memberships.set("team-b", "member");
-    row.ownerTeamId = "team-a";
-    expect(await authenticator.authorizeClientCommand(socket, viewer.userId, "read")).toEqual({
-      kind: "revoked",
-    });
-    expect(resolveSessionViewer).toHaveBeenCalledTimes(4);
-  });
-
-  it.each(["off", "shadow", "on"] as const)(
-    "refuses private non-collaborators in %s mode",
-    async (mode) => {
-      const { authenticator, close } = accessHarness(mode, member, {
-        ...teamRow,
-        visibility: "private",
-      });
-      await authenticator.handleSubscribe({} as WebSocket, { token: "token", clientId: "client" });
-      expect(close).toHaveBeenCalledWith({}, 4010, expect.any(String));
-      expect(
-        await authenticator.authorizeClientCommand({} as WebSocket, member.userId, "read")
-      ).toEqual({
-        kind: "revoked",
-      });
-    }
-  );
-
-  it.each(["off", "shadow", "on"] as const)(
-    "redacts sandbox URLs for an Owner break-glass read in %s, permits lifecycle but not collaboration",
-    async (mode) => {
-      const { authenticator, send, close, auditPrivateBreakGlass } = accessHarness(mode, owner, {
-        ...teamRow,
-        visibility: "private",
-      });
-      await authenticator.handleSubscribe({} as WebSocket, { token: "token", clientId: "client" });
-
-      expect(close).not.toHaveBeenCalled();
-      const subscribed = send.mock.calls.find(([, message]) => message.type === "subscribed")?.[1];
-      expect(subscribed).toBeDefined();
-      expect(subscribed).not.toHaveProperty("session.codeServerUrl");
-      expect(subscribed).not.toHaveProperty("session.sandboxDashboardUrl");
-      expect(subscribed).not.toHaveProperty("session.ttydUrl");
-      expect(subscribed).not.toHaveProperty("session.vncUrl");
-      expect(subscribed).not.toHaveProperty("session.tunnelUrls");
-      expect(auditPrivateBreakGlass).toHaveBeenCalledExactlyOnceWith(
-        owner.userId,
-        expect.objectContaining({ id: "session", visibility: "private" })
-      );
-      expect(
-        await authenticator.authorizeClientCommand({} as WebSocket, owner.userId, "collaborate")
-      ).toEqual({ kind: "denied", reason: "not_collaborator" });
-      expect(
-        await authenticator.authorizeClientCommand({} as WebSocket, owner.userId, "lifecycle")
-      ).toEqual({ kind: "allowed" });
-      expect(auditPrivateBreakGlass).toHaveBeenCalledOnce();
-    }
-  );
-
-  it("refuses a break-glass subscription if its audit write fails", async () => {
-    const { authenticator, auditPrivateBreakGlass, close, send } = accessHarness("on", owner, {
-      ...teamRow,
-      visibility: "private",
-    });
-    auditPrivateBreakGlass.mockRejectedValue(new Error("D1 unavailable"));
-    const socket = {} as WebSocket;
-
-    await authenticator.handleSubscribe(socket, { token: "token", clientId: "owner" });
-
-    expect(close).toHaveBeenCalledWith(socket, 1011, "Authorization temporarily unavailable");
-    expect(send).not.toHaveBeenCalled();
   });
 });

@@ -1,17 +1,9 @@
 import { DEFAULT_HARNESS, type HarnessId } from "@open-inspect/shared/harnesses";
 import type { SessionStatus, SpawnSource } from "@open-inspect/shared/types/sessions";
 import { buildSessionRepositories, type SessionRepositoryEntry } from "./repository-target";
-import type { SqlStorage, TransactionSync } from "./sql-storage";
-import {
-  sessionRepositoryRowSchema,
-  sessionRowSchema,
-  SessionStorageIntegrityError,
-  type SessionRepositoryRow,
-  type SessionRow,
-} from "./types";
+import type { SqlResult, SqlStorage, TransactionSync } from "./sql-storage";
+import type { SessionRepositoryRow, SessionRow } from "./types";
 import { DEFAULT_BASE_BRANCH } from "../repos/default-branch";
-
-const sessionCostRowSchema = sessionRowSchema.pick({ total_cost: true });
 
 /** Data for upserting a session. */
 export interface UpsertSessionData {
@@ -59,14 +51,18 @@ export class SessionCoreRepository {
     private readonly transactionSync: TransactionSync
   ) {}
 
+  private rows<T>(result: SqlResult): T[] {
+    return result.toArray() as T[];
+  }
+
   transaction<T>(callback: () => T): T {
     return this.transactionSync(callback);
   }
 
   getSession(): SessionRow | null {
     const result = this.sql.exec(`SELECT * FROM session LIMIT 1`);
-    const row = result.toArray()[0];
-    return row === undefined ? null : parseSessionRow(row);
+    const rows = this.rows<SessionRow>(result);
+    return rows[0] ?? null;
   }
 
   /**
@@ -196,11 +192,8 @@ export class SessionCoreRepository {
         cost,
         updatedAt
       )
-      .one();
-    const parsed = sessionCostRowSchema.safeParse(row);
-    if (!parsed.success)
-      throw new SessionStorageIntegrityError("Malformed persisted session cost row");
-    return parsed.data.total_cost;
+      .one() as { total_cost: number };
+    return row.total_cost;
   }
 
   setSessionBudget(maxCostUsd: number | null, exhausted: boolean, updatedAt: number): void {
@@ -243,7 +236,7 @@ export class SessionCoreRepository {
 
   getSessionRepositoryRows(): SessionRepositoryRow[] {
     const result = this.sql.exec(`SELECT * FROM session_repositories ORDER BY position`);
-    return result.toArray().map((row) => parseSessionRepositoryRow(row));
+    return this.rows<SessionRepositoryRow>(result);
   }
 
   /**
@@ -309,16 +302,4 @@ export class SessionCoreRepository {
       }
     });
   }
-}
-
-function parseSessionRow(row: unknown): SessionRow {
-  const parsed = sessionRowSchema.safeParse(row);
-  if (parsed.success) return parsed.data;
-  throw new SessionStorageIntegrityError("Malformed persisted session row");
-}
-
-function parseSessionRepositoryRow(row: unknown): SessionRepositoryRow {
-  const parsed = sessionRepositoryRowSchema.safeParse(row);
-  if (parsed.success) return parsed.data;
-  throw new SessionStorageIntegrityError("Malformed persisted session repository row");
 }

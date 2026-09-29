@@ -80,8 +80,7 @@ export function resolveSandboxDashboardUrl(
   settings: SandboxDashboardSettings,
   providerObjectId: string | null | undefined
 ): string | null {
-  const backend = resolveSandboxBackendName(settings.sandboxProvider);
-  if (backend !== "modal" && backend !== "modal-vm") return null;
+  if (resolveSandboxBackendName(settings.sandboxProvider) !== "modal") return null;
   return buildModalSandboxDashboardUrl({
     workspace: settings.modalWorkspace,
     modalEnvironment: settings.modalEnvironment,

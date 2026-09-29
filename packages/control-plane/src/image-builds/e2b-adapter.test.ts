@@ -6,7 +6,6 @@ import type { E2BSandboxProvider } from "../sandbox/providers/e2b-provider";
 import { E2BImageBuildAdapter } from "./e2b-adapter";
 import { resolveImageBuildProviderSessionTimeoutSeconds } from "./timeouts";
 import type { ImageBuildPlan } from "./types";
-import { immediateFinalizationInput } from "./test-helpers";
 
 function createProvider(): E2BSandboxProvider {
   return {
@@ -70,13 +69,11 @@ describe("E2BImageBuildAdapter", () => {
     const provider = createProvider();
     const adapter = new E2BImageBuildAdapter(provider);
 
-    const result = await adapter.finalizeSuccessfulBuild(
-      immediateFinalizationInput({
-        buildId: "build-1",
-        providerSessionId: "e2b-session-1",
-        correlation: { request_id: "request-1", trace_id: "trace-1" },
-      })
-    );
+    const result = await adapter.finalizeSuccessfulBuild({
+      buildId: "build-1",
+      providerSessionId: "e2b-session-1",
+      correlation: { request_id: "request-1", trace_id: "trace-1" },
+    });
 
     expect(result).toEqual({
       providerImageId: "snap-abc:default",
@@ -102,7 +99,7 @@ describe("E2BImageBuildAdapter", () => {
       signal,
     };
 
-    await adapter.finalizeSuccessfulBuild(immediateFinalizationInput(input));
+    await adapter.finalizeSuccessfulBuild(input);
     await adapter.cleanupCompletedBuild(input);
     await adapter.deleteImage({
       image: { providerImageId: "snap-abc:default", providerSessionId: "e2b-session-1" },
@@ -126,13 +123,11 @@ describe("E2BImageBuildAdapter", () => {
     const adapter = new E2BImageBuildAdapter(provider);
 
     await expect(
-      adapter.finalizeSuccessfulBuild(
-        immediateFinalizationInput({
-          buildId: "build-1",
-          providerSessionId: "e2b-session-1",
-          correlation: { request_id: "request-1", trace_id: "trace-1" },
-        })
-      )
+      adapter.finalizeSuccessfulBuild({
+        buildId: "build-1",
+        providerSessionId: "e2b-session-1",
+        correlation: { request_id: "request-1", trace_id: "trace-1" },
+      })
     ).rejects.toThrow(/boom/);
   });
 
@@ -150,13 +145,11 @@ describe("E2BImageBuildAdapter", () => {
     // A 429 rejects the request, so no template exists; the finalizer retries
     // definitely_not_created instead of failing the build and killing the sandbox.
     await expect(
-      adapter.finalizeSuccessfulBuild(
-        immediateFinalizationInput({
-          buildId: "build-1",
-          providerSessionId: "e2b-session-1",
-          correlation: { request_id: "request-1", trace_id: "trace-1" },
-        })
-      )
+      adapter.finalizeSuccessfulBuild({
+        buildId: "build-1",
+        providerSessionId: "e2b-session-1",
+        correlation: { request_id: "request-1", trace_id: "trace-1" },
+      })
     ).rejects.toMatchObject({
       name: "ImageBuildFinalizationAttemptError",
       outcome: "definitely_not_created",
@@ -171,13 +164,11 @@ describe("E2BImageBuildAdapter", () => {
     const adapter = new E2BImageBuildAdapter(provider);
 
     await expect(
-      adapter.finalizeSuccessfulBuild(
-        immediateFinalizationInput({
-          buildId: "build-1",
-          providerSessionId: "e2b-session-1",
-          correlation: { request_id: "request-1", trace_id: "trace-1" },
-        })
-      )
+      adapter.finalizeSuccessfulBuild({
+        buildId: "build-1",
+        providerSessionId: "e2b-session-1",
+        correlation: { request_id: "request-1", trace_id: "trace-1" },
+      })
     ).rejects.not.toBeInstanceOf(ImageBuildFinalizationAttemptError);
   });
 

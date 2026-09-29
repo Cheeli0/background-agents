@@ -20,7 +20,7 @@ describe("buildTimelineVirtualRows", () => {
     const rows = buildTimelineVirtualRows({
       items: buildSessionTimelineItems(
         [
-          { type: "heartbeat", sandboxId: "sandbox", timestamp: 1 },
+          { type: "heartbeat", sandboxId: "sandbox", timestamp: 1, status: "ready" },
           {
             type: "tool_result",
             sandboxId: "sandbox",
@@ -34,6 +34,7 @@ describe("buildTimelineVirtualRows", () => {
         ],
         new Set(["pending"])
       ),
+      loadingHistory: false,
       isProcessing: false,
     });
 
@@ -41,7 +42,7 @@ describe("buildTimelineVirtualRows", () => {
     expect(rows[0]).toMatchObject({ type: "item", item: { id: "warning:session:4" } });
   });
 
-  it("includes content and thinking rows", () => {
+  it("frames the items with loading and thinking rows", () => {
     const items = [
       single({
         type: "token",
@@ -58,11 +59,11 @@ describe("buildTimelineVirtualRows", () => {
         success: true,
       }),
     ];
-    const rows = buildTimelineVirtualRows({ items, isProcessing: true });
+    const rows = buildTimelineVirtualRows({ items, loadingHistory: true, isProcessing: true });
 
-    expect(rows.map((row) => row.type)).toEqual(["item", "item", "thinking"]);
-    expect(estimateTimelineRowSize(rows[0])).toBe(TIMELINE_ROW_SIZE_ESTIMATES.assistantMessage);
-    expect(estimateTimelineRowSize(rows[2])).toBe(TIMELINE_ROW_SIZE_ESTIMATES.status);
+    expect(rows.map((row) => row.type)).toEqual(["loading", "item", "item", "thinking"]);
+    expect(estimateTimelineRowSize(rows[0])).toBe(TIMELINE_ROW_SIZE_ESTIMATES.status);
+    expect(estimateTimelineRowSize(rows[1])).toBe(TIMELINE_ROW_SIZE_ESTIMATES.assistantMessage);
   });
 });
 

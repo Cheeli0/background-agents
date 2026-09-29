@@ -25,18 +25,16 @@ describe("analytics timeseries API route", () => {
     await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
   });
 
-  it("forwards days and scope but not unrelated query params", async () => {
+  it("forwards only the days query param", async () => {
     vi.mocked(controlPlaneUserFetch).mockResolvedValue(
       Response.json({ series: [] }, { status: 200 })
     );
 
     const response = await GET(
-      new Request(
-        "http://localhost/api/analytics/timeseries?trace=1&view=status&days=7&scope=all"
-      ) as never
+      new Request("http://localhost/api/analytics/timeseries?trace=1&view=status&days=7") as never
     );
 
-    expect(controlPlaneUserFetch).toHaveBeenCalledWith("/analytics/timeseries?days=7&scope=all");
+    expect(controlPlaneUserFetch).toHaveBeenCalledWith("/analytics/timeseries?days=7");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ series: [] });
   });

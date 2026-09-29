@@ -22,13 +22,17 @@ const sessionInboxItemClientSchema = sessionInboxItemSchema.extend({
   descendantSessions: z.array(sessionInboxSessionClientSchema),
 });
 const sessionInboxPageClientSchema = z
-  .looseObject({
+  .object({
     items: z.array(sessionInboxItemClientSchema),
   })
+  .passthrough()
   .pipe(sessionInboxPageSchema);
-const sessionInboxSnapshotClientSchema = sessionInboxSnapshotSchema.extend({
-  categories: z.record(sessionInboxCategorySchema, sessionInboxPageClientSchema),
-});
+const sessionInboxSnapshotClientSchema = z
+  .object({
+    categories: z.record(sessionInboxCategorySchema, sessionInboxPageClientSchema),
+  })
+  .passthrough()
+  .pipe(sessionInboxSnapshotSchema);
 
 const SESSION_INBOX_API_PATH = "/api/sessions/inbox";
 

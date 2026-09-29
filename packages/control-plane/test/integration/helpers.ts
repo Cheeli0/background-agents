@@ -57,7 +57,7 @@ export const INTEGRATION_WEBSOCKET_TIMEOUT_MS = 2000;
 const TEST_BROWSER_USER_ID = "11111111111111111111111111111111";
 const TEST_BROWSER_ACCOUNT_ID = "test-browser-account";
 const TEST_BROWSER_PROVIDER_SUBJECT = "583231";
-type InitialUserRole = BuiltInRoleKey;
+type InitialUserRole = Exclude<BuiltInRoleKey, "viewer">;
 const DEFAULT_INITIAL_USER_ROLE = "owner" as const;
 const TEST_BROWSER_SESSION_ID = "test-browser-session";
 const TEST_BROWSER_SESSION_TOKEN = "test-browser-session-token";
@@ -96,21 +96,15 @@ async function signCookieValue(value: string, secret: string): Promise<string> {
  * web request must carry the same compound credential as production. Direct
  * service-auth tests intentionally build their own bare sig1 requests.
  */
-async function testBrowserSessionCookie(
-  initialRole: InitialUserRole,
-  as?: { userId: string; role: BuiltInRoleKey }
-): Promise<string> {
+async function testBrowserSessionCookie(initialRole: InitialUserRole): Promise<string> {
   const secret = env.BROWSER_AUTH_SECRET;
   if (!secret) throw new Error("BROWSER_AUTH_SECRET is not configured for integration tests");
 
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   const applicationTimestamp = now.getTime();
-  const browserUserId = as?.userId ?? TEST_BROWSER_USER_ID;
-  const sessionId = as ? `test-browser-session-${browserUserId}` : TEST_BROWSER_SESSION_ID;
-  const sessionToken = as ? `test-browser-token-${browserUserId}` : TEST_BROWSER_SESSION_TOKEN;
   const existingUser = await env.DB.prepare("SELECT 1 FROM users WHERE id = ?")
-    .bind(browserUserId)
+    .bind(TEST_BROWSER_USER_ID)
     .first();
   await env.DB.batch([
     env.DB.prepare(
@@ -118,11 +112,11 @@ async function testBrowserSessionCookie(
          (id, display_name, email, email_verified, avatar_url, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).bind(
-      browserUserId,
+      TEST_BROWSER_USER_ID,
       "Integration Browser User",
-      as ? `${browserUserId}@test.local` : "browser@test.local",
+      "browser@test.local",
       1,
-      as ? `${browserUserId}@test.local` : "browser@test.local",
+      "browser@test.local",
       applicationTimestamp,
       applicationTimestamp
     ),
@@ -132,12 +126,12 @@ async function testBrowserSessionCookie(
           provider_issuer, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
-      as ? `test-browser-account-${browserUserId}` : TEST_BROWSER_ACCOUNT_ID,
-      browserUserId,
+      TEST_BROWSER_ACCOUNT_ID,
+      TEST_BROWSER_USER_ID,
       "github",
-      as ? browserUserId : TEST_BROWSER_PROVIDER_SUBJECT,
+      TEST_BROWSER_PROVIDER_SUBJECT,
       null,
-      as ? `${browserUserId}@test.local` : "browser@test.local",
+      "browser@test.local",
       "https://github.com",
       applicationTimestamp,
       applicationTimestamp
@@ -147,23 +141,23 @@ async function testBrowserSessionCookie(
          (id, expiresAt, token, createdAt, updatedAt, ipAddress, userAgent, userId)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
-      sessionId,
+      TEST_BROWSER_SESSION_ID,
       expiresAt.getTime(),
-      sessionToken,
+      TEST_BROWSER_SESSION_TOKEN,
       applicationTimestamp,
       applicationTimestamp,
       "127.0.0.1",
       "integration-test",
-      browserUserId
+      TEST_BROWSER_USER_ID
     ),
   ]);
-  if (!existingUser && (as || initialRole !== "member")) {
+  if (initialRole !== "member" && !existingUser) {
     await env.DB.prepare(`UPDATE user_role_assignments SET role_id = ? WHERE user_id = ?`)
-      .bind(BUILT_IN_ROLE_REGISTRY[as?.role ?? initialRole].id, browserUserId)
+      .bind(BUILT_IN_ROLE_REGISTRY[initialRole].id, TEST_BROWSER_USER_ID)
       .run();
   }
 
-  const signedToken = await signCookieValue(sessionToken, secret);
+  const signedToken = await signCookieValue(TEST_BROWSER_SESSION_TOKEN, secret);
   return `${TEST_BROWSER_SESSION_COOKIE}=${signedToken}`;
 }
 
@@ -182,7 +176,6 @@ export interface ServiceRequestInit {
   service?: ServiceName;
   actor?: string;
   initialUserRole?: InitialUserRole;
-  as?: { userId: string; role: BuiltInRoleKey };
 }
 
 /**
@@ -205,7 +198,7 @@ export async function serviceRequestHeaders(
   });
   const browserCookie =
     service === "web"
-      ? await testBrowserSessionCookie(init?.initialUserRole ?? DEFAULT_INITIAL_USER_ROLE, init?.as)
+      ? await testBrowserSessionCookie(init?.initialUserRole ?? DEFAULT_INITIAL_USER_ROLE)
       : undefined;
   return {
     ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -259,8 +252,6 @@ export async function initSession(overrides?: {
   const now = Date.now();
   await new SessionIndexStore(env.DB).create({
     id: defaults.sessionName,
-    ownerTeamId: null,
-    visibility: "workspace",
     title: defaults.title ?? null,
     repoOwner: defaults.repoOwner,
     repoName: defaults.repoName,
@@ -404,8 +395,7 @@ export async function initNamedSession(
     spawnDepth?: number;
     sandboxSettings?: Record<string, unknown>;
     providerAuth?: SessionModelProviderAuthInput[];
-  },
-  beforeInit?: (stub: DurableObjectStub) => Promise<void>
+  }
 ) {
   const defaults = {
     sessionName,
@@ -416,8 +406,6 @@ export async function initNamedSession(
   const now = Date.now();
   await new SessionIndexStore(env.DB).create({
     id: sessionName,
-    ownerTeamId: null,
-    visibility: "workspace",
     title: defaults.title ?? null,
     repoOwner: defaults.repoOwner ?? null,
     repoName: defaults.repoName ?? null,
@@ -434,7 +422,6 @@ export async function initNamedSession(
     updatedAt: now,
   });
 
-  await beforeInit?.(env.SESSION.get(env.SESSION.idFromName(sessionName)));
   return initNamedSessionDO(sessionName, doDefaults);
 }
 
@@ -601,9 +588,6 @@ export async function seedSandboxAuth(
   const tokenHash = await hashToken(opts.authToken);
 
   await runInSessionDO(stub, (instance: SessionDO, state) => {
-    // This helper replaces the failed test spawn with a legacy fixture.
-    // Shutdown-aware tests seed their matching generation explicitly.
-    state.storage.sql.exec("DELETE FROM sandbox_preservation");
     state.storage.sql.exec(
       "UPDATE sandbox SET auth_token = ?, auth_token_hash = ?, modal_sandbox_id = ?, status = ?",
       opts.authToken,
@@ -628,7 +612,6 @@ export async function seedSandboxAuthHash(
   const tokenHash = await hashToken(opts.authToken);
 
   await runInSessionDO(stub, (instance: SessionDO, state) => {
-    state.storage.sql.exec("DELETE FROM sandbox_preservation");
     state.storage.sql.exec(
       "UPDATE sandbox SET auth_token_hash = ?, auth_token = NULL, modal_sandbox_id = ?, status = ?",
       tokenHash,

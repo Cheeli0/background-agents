@@ -55,8 +55,6 @@ function ToolIcon({ name }: { name: string | null }) {
 function ToolCallDetails({ event }: { event: ToolCallItemProps["event"] }) {
   const formatted = formatToolCall(event);
   const isApplyPatch = event.tool?.toLowerCase() === "apply_patch";
-  const truncatedArgs = event.truncated?.fields.some((field) => field.startsWith("args."));
-  const truncatedOutput = event.truncated?.fields.includes("output");
   const { args, output } = formatted.getDetails();
   const patchText = isApplyPatch && typeof args?.patchText === "string" ? args.patchText : null;
   const nonPatchArgs =
@@ -67,15 +65,6 @@ function ToolCallDetails({ event }: { event: ToolCallItemProps["event"] }) {
 
   return (
     <div className="min-w-0 max-w-full overflow-hidden border border-border-muted bg-card p-3 text-xs">
-      {event.truncated && (
-        <p className="mb-2 text-muted-foreground">
-          {truncatedArgs && truncatedOutput
-            ? "Arguments and output were truncated."
-            : truncatedArgs
-              ? "Arguments were truncated."
-              : "Output was truncated."}
-        </p>
-      )}
       {hasNonPatchArgs && (
         <div className="mb-2 min-w-0 max-w-full">
           <div className="text-muted-foreground mb-1 font-medium">Arguments:</div>
@@ -108,7 +97,7 @@ function ToolCallDetails({ event }: { event: ToolCallItemProps["event"] }) {
 }
 
 export function ToolCallItem({ event, isExpanded, onToggle, showTime = true }: ToolCallItemProps) {
-  if (event.tool?.toLowerCase() === "create-pull-request" && !event.truncated) {
+  if (event.tool?.toLowerCase() === "create-pull-request") {
     return (
       <CreatePullRequestEvent
         event={event}
@@ -119,7 +108,7 @@ export function ToolCallItem({ event, isExpanded, onToggle, showTime = true }: T
     );
   }
 
-  if (event.tool === "slack-notify" && !event.truncated) {
+  if (event.tool === "slack-notify") {
     return (
       <SlackNotifyEvent
         event={event}
@@ -149,7 +138,6 @@ export function ToolCallItem({ event, isExpanded, onToggle, showTime = true }: T
         <TimelineRowContent time={showTime ? time : undefined}>
           <span className="block truncate">
             {formatted.toolName} {formatted.summary}
-            {event.truncated && " (truncated)"}
           </span>
         </TimelineRowContent>
       </button>

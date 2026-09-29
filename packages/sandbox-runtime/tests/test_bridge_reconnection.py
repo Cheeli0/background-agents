@@ -1,11 +1,9 @@
 """Tests for bridge reconnection and error handling logic."""
 
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from websockets import State
 
 from sandbox_runtime.bridge import AgentBridge, SessionTerminatedError
 from sandbox_runtime.git_signing import GitSigningError
@@ -41,12 +39,6 @@ class TestIsFatalConnectionError:
 
     def test_http_500_is_not_fatal(self, bridge):
         error_str = "server rejected WebSocket connection: HTTP 500"
-        assert bridge._is_fatal_connection_error(error_str) is False
-
-    def test_http_503_is_not_fatal(self, bridge):
-        # The control plane answers 503 while a save still needs this sandbox;
-        # exiting would shut the sandbox down under the save.
-        error_str = "server rejected WebSocket connection: HTTP 503"
         assert bridge._is_fatal_connection_error(error_str) is False
 
     def test_network_error_is_not_fatal(self, bridge):
@@ -123,7 +115,7 @@ class TestIsFatalConnectionError:
         )
 
     @pytest.mark.asyncio
-    async def test_run_complete_does_not_retain_transient_outcome(self, bridge):
+    async def test_run_complete_does_not_retain_transient_outcome(self, bridge, monkeypatch):
         attempts = 0
 
         async def connect_and_run():
@@ -137,7 +129,7 @@ class TestIsFatalConnectionError:
         bridge.git_signing.initialize = AsyncMock()
         bridge._load_session_id = AsyncMock()
         bridge._connect_and_run = connect_and_run
-        bridge.RECONNECT_BACKOFF_BASE = 0
+        monkeypatch.setattr("sandbox_runtime.bridge.asyncio.sleep", AsyncMock())
 
         await bridge.run()
 
@@ -151,7 +143,7 @@ class TestIsFatalConnectionError:
         )
 
     @pytest.mark.asyncio
-    async def test_run_retries_signing_initialization_before_connecting(self, bridge):
+    async def test_run_retries_signing_initialization_before_connecting(self, bridge, monkeypatch):
         async def connect_and_run():
             bridge.shutdown_event.set()
 
@@ -164,20 +156,20 @@ class TestIsFatalConnectionError:
         )
         bridge._load_session_id = AsyncMock()
         bridge._connect_and_run = AsyncMock(side_effect=connect_and_run)
-        bridge.RECONNECT_BACKOFF_BASE = 0
+        sleep = AsyncMock()
+        monkeypatch.setattr("sandbox_runtime.bridge.asyncio.sleep", sleep)
 
         await bridge.run()
 
         assert bridge.git_signing.initialize.await_count == 2
         bridge._connect_and_run.assert_awaited_once()
+        sleep.assert_awaited_once_with(bridge.RECONNECT_BACKOFF_BASE)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("status", [401, 403, 404, 410])
-    async def test_run_fails_deterministically_on_terminal_signing_configuration_status(
-        self, bridge, monkeypatch, tmp_path, status
+    async def test_run_exits_on_terminal_signing_configuration_status(
+        self, bridge, monkeypatch, status
     ):
-        fatal_path = tmp_path / "fatal.txt"
-        monkeypatch.setattr("sandbox_runtime.bridge.BRIDGE_FATAL_ERROR_FILE_PATH", str(fatal_path))
         bridge.log = MagicMock()
         bridge.git_signing.initialize = AsyncMock(
             side_effect=GitSigningError(
@@ -189,12 +181,11 @@ class TestIsFatalConnectionError:
         sleep = AsyncMock()
         monkeypatch.setattr("sandbox_runtime.bridge.asyncio.sleep", sleep)
 
-        with pytest.raises(GitSigningError, match="Commit signing configuration unavailable"):
-            await bridge.run()
+        await bridge.run()
 
         bridge._connect_and_run.assert_not_awaited()
         sleep.assert_not_awaited()
-        assert fatal_path.read_text() == "Commit signing configuration unavailable"
+        assert bridge.shutdown_event.is_set()
         bridge.log.info.assert_any_call(
             "bridge.run_complete",
             outcome="fatal_error",
@@ -205,11 +196,7 @@ class TestIsFatalConnectionError:
         )
 
     @pytest.mark.asyncio
-    async def test_run_fails_deterministically_on_nonretryable_payload_failure(
-        self, bridge, monkeypatch, tmp_path
-    ):
-        fatal_path = tmp_path / "fatal.txt"
-        monkeypatch.setattr("sandbox_runtime.bridge.BRIDGE_FATAL_ERROR_FILE_PATH", str(fatal_path))
+    async def test_run_exits_on_nonretryable_payload_failure(self, bridge, monkeypatch):
         bridge.log = MagicMock()
         bridge.git_signing.initialize = AsyncMock(
             side_effect=GitSigningError("Invalid commit signing configuration")
@@ -219,98 +206,10 @@ class TestIsFatalConnectionError:
         sleep = AsyncMock()
         monkeypatch.setattr("sandbox_runtime.bridge.asyncio.sleep", sleep)
 
-        with pytest.raises(GitSigningError, match="Invalid commit signing configuration"):
-            await bridge.run()
+        await bridge.run()
 
         bridge._connect_and_run.assert_not_awaited()
         sleep.assert_not_awaited()
-        assert fatal_path.read_text() == "Invalid commit signing configuration"
-
-
-class WedgedWs:
-    """A peer that stopped reading.
-
-    Sends park in flow control forever and the socket never closes itself, so
-    only aborting the transport can end the receive loop.
-    """
-
-    def __init__(self):
-        self.state = State.OPEN
-        self.close_code = 1006
-        self.receiving = asyncio.Event()
-        self.transport = SimpleNamespace(abort=self._abort)
-        self._ended = asyncio.Event()
-
-    def _abort(self) -> None:
-        self.state = State.CLOSED
-        self._ended.set()
-
-    async def send(self, data: str) -> None:
-        await asyncio.Event().wait()
-
-    async def close(self, *_args, **_kwargs):
-        self._ended.set()
-
-    def __aiter__(self):
-        self.receiving.set()
-        return self
-
-    async def __anext__(self):
-        await self._ended.wait()
-        raise StopAsyncIteration
-
-
-class TestStalledWriteReconnect:
-    """The boundary the forwarder's retirement exists to cross.
-
-    A wedged connection stays OPEN, so the receive loop that drives reconnects
-    never ends on its own. Retiring the connection has to end it.
-    """
-
-    @pytest.fixture
-    def bridge(self):
-        return AgentBridge(
-            sandbox_id="test-sandbox",
-            session_id="test-session",
-            control_plane_url="https://example.com",
-            auth_token="test-token",
-        )
-
-    @pytest.mark.asyncio
-    async def test_a_stalled_write_ends_the_receive_loop_so_the_run_loop_reconnects(
-        self, bridge, monkeypatch
-    ):
-        class ConnectionContext:
-            def __init__(self, ws):
-                self.ws = ws
-
-            async def __aenter__(self):
-                return self.ws
-
-            async def __aexit__(self, *_args):
-                return False
-
-        ws = WedgedWs()
-        monkeypatch.setattr(
-            "sandbox_runtime.bridge.websockets.connect",
-            lambda *_args, **_kwargs: ConnectionContext(ws),
-        )
-        bridge.log = MagicMock()
-        bridge.boot_attach.on_connect = AsyncMock()
-        bridge.event_forwarder._send_timeout_seconds = 0.05
-
-        connect_task = asyncio.create_task(bridge._connect_and_run())
-        await asyncio.wait_for(ws.receiving.wait(), timeout=1)
-
-        # A heartbeat into a peer that stopped reading.
-        assert await bridge._send_event({"type": "heartbeat"}) is False
-
-        # Without retirement this never returns, and run() never reconnects.
-        await asyncio.wait_for(connect_task, timeout=1)
-
-        assert ws.state is State.CLOSED
-        assert bridge.ws is None
-        assert bridge.event_forwarder._ws is None
 
 
 class TestSessionTerminatedError:

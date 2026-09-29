@@ -34,8 +34,7 @@ import {
   TIMELINE_VIRTUALIZER_DEFAULTS,
   type TimelineVirtualRow,
 } from "@/lib/timeline-virtual-rows";
-import { toUiArtifactMetadata } from "@/lib/session-socket/artifact-metadata";
-import type { SandboxEvent } from "@/types/session";
+import type { Artifact, SandboxEvent } from "@/types/session";
 import type { SessionParticipantProfile } from "@open-inspect/shared/types/sessions";
 import { CheckIcon, CopyIcon, ErrorIcon } from "@/components/ui/icons";
 import { resolveParticipantDisplay } from "@/lib/participant-display";
@@ -60,6 +59,7 @@ export function SessionTimeline({
   participantProfiles,
   isProcessing,
   promptQueue = EMPTY_PROMPT_QUEUE,
+  loadingHistory,
   showSkeleton,
   onLoadOlder,
   onOpenMedia,
@@ -70,6 +70,7 @@ export function SessionTimeline({
   participantProfiles: Record<string, SessionParticipantProfile>;
   isProcessing: boolean;
   promptQueue?: PromptQueueItem[];
+  loadingHistory: boolean;
   showSkeleton: boolean;
   onLoadOlder: () => void;
   onOpenMedia: (artifactId: string) => void;
@@ -93,14 +94,17 @@ export function SessionTimeline({
     Map<string, ReadonlySet<string>>
   >(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+  const hasScrolledRef = useRef(false);
   const isNearBottomRef = useRef(true);
   const virtualRows = useMemo(
     () =>
       buildTimelineVirtualRows({
         items: timelineItems,
+        loadingHistory,
         isProcessing,
       }),
-    [isProcessing, timelineItems]
+    [isProcessing, loadingHistory, timelineItems]
   );
   const getVirtualRowKey = useCallback(
     (index: number) => virtualRows[index]?.id ?? index,
@@ -120,15 +124,35 @@ export function SessionTimeline({
   const totalSize = rowVirtualizer.getTotalSize();
 
   const handleScroll = useCallback(() => {
+    hasScrolledRef.current = true;
     const el = scrollContainerRef.current;
     if (el) {
       isNearBottomRef.current =
         el.scrollHeight - el.scrollTop - el.clientHeight <
         TIMELINE_VIRTUALIZER_DEFAULTS.scrollEndThreshold;
-      if (el.scrollTop <= el.clientHeight && el.scrollHeight > el.clientHeight) {
-        onLoadOlder();
-      }
     }
+  }, []);
+
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (
+          entry.isIntersecting &&
+          hasScrolledRef.current &&
+          container.scrollHeight > container.clientHeight
+        ) {
+          onLoadOlder();
+        }
+      },
+      { root: container, threshold: 0.1 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
   }, [onLoadOlder]);
 
   useLayoutEffect(() => {
@@ -264,6 +288,8 @@ export function SessionTimeline({
 
   const renderVirtualRow = (row: TimelineVirtualRow): ReactNode => {
     switch (row.type) {
+      case "loading":
+        return <div className="text-center text-muted-foreground text-sm py-2">Loading...</div>;
       case "thinking":
         return <ThinkingIndicator />;
       case "item":
@@ -279,9 +305,10 @@ export function SessionTimeline({
       // absolutely-positioned descendants (e.g. sr-only live-status spans in
       // task rows). Without it they anchor to the document, escape every
       // ancestor overflow clip, and grow the page itself.
-      className="relative h-full overflow-y-auto overflow-x-hidden p-3 [overflow-anchor:none] sm:p-4"
+      className="relative h-full overflow-y-auto overflow-x-hidden p-3 sm:p-4"
     >
       <div className="relative w-full min-w-0 max-w-3xl mx-auto">
+        <div ref={topSentinelRef} className="absolute left-0 top-0 h-1 w-full" />
         {showSkeleton ? (
           <TimelineSkeleton />
         ) : (
@@ -593,7 +620,7 @@ function AssistantMessageEvent({ event, copied, onCopyContent }: EventRendererPr
       copyButtonClassName="p-1 text-secondary-foreground hover:text-foreground hover:bg-muted opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-colors"
       onCopyContent={onCopyContent}
     >
-      <SafeMarkdown content={event.content} className="text-sm" linkRepositoryFiles />
+      <SafeMarkdown content={event.content} className="text-sm" />
     </MessageFrame>
   );
 }
@@ -634,7 +661,7 @@ function ArtifactEvent({ event, sessionId, onOpenMedia }: EventRendererProps) {
         sessionId={sessionId}
         artifactId={event.artifactId}
         artifactType={event.artifactType}
-        metadata={toUiArtifactMetadata(event.metadata)}
+        metadata={event.metadata as Artifact["metadata"] | undefined}
         onOpen={onOpenMedia}
       />
     </div>

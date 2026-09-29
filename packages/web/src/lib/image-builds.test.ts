@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ImageBuildRecordView } from "@open-inspect/shared/types/image-builds";
 import {
-  excludeOtherProviderBuilds,
   excludeSupersededBuilds,
   foldEnabledRepoScopeIds,
   foldImageBuildStatusByScope,
@@ -43,21 +42,6 @@ function unit(overrides: Partial<ImageBuildUnitView> = {}): ImageBuildUnitView {
     ...overrides,
   };
 }
-
-describe("excludeOtherProviderBuilds", () => {
-  it("keeps only rows this deployment's provider could actually boot", () => {
-    const rows = [
-      record({ id: "a", provider: "daytona", status: "ready" }),
-      record({ id: "b", provider: "modal", status: "ready" }),
-    ];
-
-    // A retained row from a previous provider is history the reaper still
-    // needs; presenting it as this deployment's prebuild would promise a boot
-    // spawn selection will never perform.
-    expect(excludeOtherProviderBuilds(rows, "daytona").map((row) => row.id)).toEqual(["a"]);
-    expect(excludeOtherProviderBuilds(rows, "vercel")).toEqual([]);
-  });
-});
 
 describe("excludeSupersededBuilds", () => {
   it("drops superseded rows and keeps every other status", () => {

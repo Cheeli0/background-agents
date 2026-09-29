@@ -30,8 +30,8 @@ const CONTAINER_DOC_PATH = resolve(
 /** Variables docker-compose.yml and its sidecars read; the host never sees them. */
 const COMPOSE_VARIABLES = [
   "APP_BIND_ADDRESS",
-  "OBJECT_STORE_ROOT_USER",
-  "OBJECT_STORE_ROOT_PASSWORD",
+  "MINIO_ROOT_USER",
+  "MINIO_ROOT_PASSWORD",
   "LITESTREAM_BUCKET",
   "LITESTREAM_ENDPOINT",
   "LITESTREAM_ACCESS_KEY_ID",

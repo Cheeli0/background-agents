@@ -26,7 +26,6 @@ export async function seedEnvironment(opts?: {
   await store.create(
     {
       id,
-      owner_team_id: null,
       name: opts?.name ?? `Seeded ${id}`,
       description: null,
       prebuild_enabled: opts?.prebuildEnabled ? 1 : 0,

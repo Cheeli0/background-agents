@@ -2,16 +2,21 @@
  * Utility functions for formatting display values
  */
 
-import { getModelDisplayName } from "@open-inspect/shared/models";
+import { MODEL_OPTIONS, normalizeModelId } from "@open-inspect/shared/models";
+
+// Build a lookup map once at module level
+const MODEL_DISPLAY_NAMES = new Map<string, string>(
+  MODEL_OPTIONS.flatMap((g) => g.models.map((m) => [m.id, m.name]))
+);
 
 /**
  * Format model ID to display name.
  * e.g., "anthropic/claude-sonnet-4-5" → "Claude Sonnet 4.5"
- * e.g., "openai/gpt-6-sol" → "GPT-6 Sol"
+ * e.g., "openai/gpt-5.3-codex" → "GPT 5.3 Codex"
  */
 export function formatModelName(modelId: string): string {
   if (!modelId) return "Unknown Model";
-  return getModelDisplayName(modelId);
+  return MODEL_DISPLAY_NAMES.get(normalizeModelId(modelId)) ?? modelId;
 }
 
 /**
@@ -20,7 +25,7 @@ export function formatModelName(modelId: string): string {
  */
 export function formatModelNameLower(modelId: string): string {
   if (!modelId) return "unknown model";
-  return getModelDisplayName(modelId).toLowerCase();
+  return (MODEL_DISPLAY_NAMES.get(normalizeModelId(modelId)) ?? modelId).toLowerCase();
 }
 
 /**
