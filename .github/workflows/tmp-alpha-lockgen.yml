@@ -6,7 +6,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   resolve:
@@ -163,3 +163,14 @@ jobs:
             lockgen-js/pnpm-lock.yaml
             lockgen-py/uv.lock
           if-no-files-found: error
+
+      - name: Persist generic lockfiles on temporary branch
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f lockgen-js/pnpm-lock.yaml lockgen-py/uv.lock
+          git commit -m "chore: persist generated lockfiles [skip ci]"
+          git push origin HEAD:"${GITHUB_HEAD_REF}"
