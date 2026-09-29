@@ -156,15 +156,17 @@ jobs:
         shell: bash
         run: cd "$RUNNER_TEMP/lockgen-py" && uv lock
 
-      - name: Emit lockfiles for connector transfer
+      - name: Stage lockfiles
         shell: bash
         run: |
           set -euo pipefail
-          echo "PNPM_LOCK_B64_BEGIN"
-          base64 -w0 "$RUNNER_TEMP/lockgen-js/pnpm-lock.yaml"
-          echo
-          echo "PNPM_LOCK_B64_END"
-          echo "UV_LOCK_B64_BEGIN"
-          base64 -w0 "$RUNNER_TEMP/lockgen-py/uv.lock"
-          echo
-          echo "UV_LOCK_B64_END"
+          mkdir -p "$RUNNER_TEMP/lockfiles"
+          cp "$RUNNER_TEMP/lockgen-js/pnpm-lock.yaml" "$RUNNER_TEMP/lockfiles/pnpm-lock.yaml"
+          cp "$RUNNER_TEMP/lockgen-py/uv.lock" "$RUNNER_TEMP/lockfiles/uv.lock"
+
+      - name: Upload isolated lockfiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-lockfiles
+          path: ${{ runner.temp }}/lockfiles
+          if-no-files-found: error
