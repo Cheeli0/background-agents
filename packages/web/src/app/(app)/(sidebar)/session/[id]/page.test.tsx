@@ -57,12 +57,10 @@ vi.mock("@/hooks/use-media-query", () => ({ useMediaQuery: () => mocks.mobile })
 vi.mock("@/hooks/use-session-details-sidebar", () => ({
   useSessionDetailsSidebar: () => ({ isOpen: true, toggle: vi.fn() }),
 }));
-vi.mock("@/hooks/use-browser-layout-storage", () => ({ useBrowserLayoutStorage: () => ({}) }));
 vi.mock("react-resizable-panels", () => ({
   Group: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Panel: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Separator: () => null,
-  useDefaultLayout: () => ({}),
 }));
 vi.mock("@/components/action-bar", () => ({ ActionBar: mocks.actionBar }));
 vi.mock("@/components/session-header", () => ({ SessionHeader: mocks.header }));
@@ -73,7 +71,6 @@ vi.mock("@/components/session-timeline", () => ({ SessionTimeline: () => null })
 vi.mock("@/components/media-lightbox", () => ({ MediaLightbox: () => null }));
 vi.mock("@/components/queued-prompt-stack", () => ({ QueuedPromptStack: () => null }));
 vi.mock("@/components/session-desktop-layout", () => ({
-  SESSION_CHANGES_LAYOUT_ID: "session-changes-layout-v2",
   SessionDesktopLayout: ({ workspace, sidebar }: { workspace: ReactNode; sidebar: ReactNode }) => (
     <>
       {workspace}

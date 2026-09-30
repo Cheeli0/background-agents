@@ -99,7 +99,6 @@ describe("SessionHeader", () => {
       connecting: false,
       isDetailsOpen: false,
       isDesktopDetailsOpen: true,
-      showDesktopDetailsToggle: true,
       detailsButtonRef: createRef<HTMLButtonElement>(),
       actionsButtonRef: createRef<HTMLButtonElement>(),
       onToggleDetails: vi.fn(),
@@ -127,7 +126,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -159,7 +157,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -199,7 +196,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -230,7 +226,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen={false}
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -247,29 +242,6 @@ describe("SessionHeader", () => {
     expect(showButton.querySelector('path[fill="currentColor"]')).not.toBeInTheDocument();
   });
 
-  it("hides the desktop details toggle while changes own the right-hand surface", () => {
-    render(
-      <SessionHeader
-        sessionState={null}
-        fallbackSessionInfo={{ repoOwner: "acme", repoName: "web", title: "Review changes" }}
-        connected
-        connecting={false}
-        isDetailsOpen={false}
-        isDesktopDetailsOpen
-        showDesktopDetailsToggle={false}
-        detailsButtonRef={createRef<HTMLButtonElement>()}
-        actionsButtonRef={createRef<HTMLButtonElement>()}
-        onToggleDetails={vi.fn()}
-        onToggleDesktopDetails={vi.fn()}
-        onOpenMobileDetails={vi.fn()}
-        actions={actions}
-        renameSession={vi.fn()}
-      />
-    );
-
-    expect(screen.queryByRole("button", { name: "Hide session details" })).not.toBeInTheDocument();
-  });
-
   it("renders no-repository fallback data as loaded while socket state is absent", () => {
     render(
       <SessionHeader
@@ -279,7 +251,6 @@ describe("SessionHeader", () => {
         connecting={true}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -306,7 +277,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={onToggleDetails}
@@ -340,7 +310,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -372,7 +341,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -401,7 +369,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -435,7 +402,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -472,7 +438,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -507,7 +472,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -540,7 +504,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -571,7 +534,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -600,7 +562,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -629,7 +590,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -655,7 +615,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -676,7 +635,6 @@ describe("SessionHeader", () => {
       fallbackSessionInfo: { repoOwner: "acme", repoName: "web", title: "Status icons" },
       isDetailsOpen: false,
       isDesktopDetailsOpen: true,
-      showDesktopDetailsToggle: true,
       detailsButtonRef: createRef<HTMLButtonElement>(),
       actionsButtonRef: createRef<HTMLButtonElement>(),
       onToggleDetails: vi.fn(),
@@ -703,7 +661,6 @@ describe("SessionHeader", () => {
       fallbackSessionInfo: { repoOwner: "acme", repoName: "web", title: "Status icons" },
       isDetailsOpen: false,
       isDesktopDetailsOpen: true,
-      showDesktopDetailsToggle: true,
       detailsButtonRef: createRef<HTMLButtonElement>(),
       actionsButtonRef: createRef<HTMLButtonElement>(),
       onToggleDetails: vi.fn(),
@@ -731,7 +688,6 @@ describe("SessionHeader", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -777,7 +733,6 @@ describe("SessionHeader mobile presentation", () => {
         {...connection}
         isDetailsOpen={false}
         isDesktopDetailsOpen={false}
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
@@ -907,7 +862,6 @@ describe("SessionHeader mobile presentation", () => {
         connecting={false}
         isDetailsOpen={false}
         isDesktopDetailsOpen={false}
-        showDesktopDetailsToggle
         detailsButtonRef={createRef<HTMLButtonElement>()}
         actionsButtonRef={createRef<HTMLButtonElement>()}
         onToggleDetails={vi.fn()}
