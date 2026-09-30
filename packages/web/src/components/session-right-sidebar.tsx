@@ -39,6 +39,9 @@ import {
 import { browserApiFetch } from "@/lib/browser-api-fetch";
 import { sessionActionErrorMessage } from "@/lib/session-action-error";
 import { toast } from "sonner";
+import type { SessionScopeControls } from "@/lib/session-scope";
+import { SessionVisibilityControl } from "./session-visibility-control";
+import { CollaboratorsSection } from "./sidebar/collaborators-section";
 
 interface SessionRightSidebarProps {
   isOpen?: boolean;
@@ -56,6 +59,7 @@ interface SessionRightSidebarProps {
   selectedDiff?: DiffSelection | null;
   onOpenDiff?: (repository: SessionDiffRepository, file: SessionDiffFile) => void;
   capabilities: SessionCapabilities;
+  scope?: SessionScopeControls;
   canManageBudget?: boolean;
 }
 
@@ -112,6 +116,7 @@ export function SessionRightSidebarContent({
   onOpenDiff,
   canManageBudget = DEFAULT_CAN_MANAGE_BUDGET,
   capabilities,
+  scope,
 }: SessionRightSidebarContentProps) {
   const [downloading, setDownloading] = useState(false);
   const { tab: activeTab, selectTab, showTab } = useSessionInspectorTab();
@@ -318,6 +323,8 @@ export function SessionRightSidebarContent({
               warnings={warnings}
               parentSessionId={sessionState.parentSessionId}
               canManageLifecycle={capabilities.lifecycle}
+              ownerTeamId={scope?.ownerTeamId}
+              visibility={scope?.visibility}
             >
               <BudgetSection
                 sessionId={sessionId}
@@ -326,6 +333,20 @@ export function SessionRightSidebarContent({
                 canManageBudget={canManageBudget}
               />
             </MetadataSection>
+            {scope && capabilities.changeVisibility && (
+              <SessionVisibilityControl
+                {...scope}
+                sessionId={sessionId}
+                canChangeVisibility={capabilities.changeVisibility}
+              />
+            )}
+            {scope?.visibility === "private" && capabilities.manageCollaborators && (
+              <CollaboratorsSection
+                {...scope}
+                sessionId={sessionId}
+                canManageCollaborators={capabilities.manageCollaborators}
+              />
+            )}
             <ManagedSkillsSection sessionId={sessionState.id} />
             {(!presenceSynced || participants.length > 0) && (
               <DetailsSection title="Participants">
