@@ -36,7 +36,12 @@ import { encodeSessionInboxCursor, parseSessionInboxCursor } from "../db/session
 import { parseQuery } from "./query";
 import { TeamMembershipStore } from "../db/team-memberships";
 import { D1QueryParameterLimitError } from "../db/query-limits";
-import { teamsEnforcementMode, viewerFromContext } from "../authorization/session-admission";
+import {
+  effectiveSessionCapabilities,
+  teamsEnforcementMode,
+  viewerFromContext,
+} from "../authorization/session-admission";
+import { SessionCollaboratorStore } from "../db/session-collaborators";
 
 const sessionInboxQuerySchema = z.object({
   category: z
@@ -179,6 +184,23 @@ export async function handleListSessions(
     })
   );
   if (result instanceof Response) return result;
+  const collaborators = await new SessionCollaboratorStore(ctx.db).listForSessions(
+    result.sessions.filter((row) => row.visibility === "private").map((row) => row.id)
+  );
+  const sessions = result.sessions.map((row) => ({
+    ...row,
+    capabilities: effectiveSessionCapabilities(
+      viewer,
+      {
+        id: row.id,
+        ownerUserId: row.userId ?? null,
+        ownerTeamId: row.ownerTeamId,
+        visibility: row.visibility,
+        collaboratorIds: collaborators.get(row.id) ?? [],
+      },
+      teamsEnforcementMode(ctx, env)
+    ),
+  }));
   if (viewerUserId) {
     log.info("session_read_state.decorated", {
       event: "session_read_state.decorated",
@@ -191,7 +213,7 @@ export async function handleListSessions(
 
   const response = json(
     sessionListResponseSchema.parse({
-      sessions: result.sessions,
+      sessions,
       hasMore: result.hasMore,
     })
   );

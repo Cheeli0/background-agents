@@ -1,4 +1,11 @@
-import { checkSessionAccess, type SessionAction, type SessionViewer } from "@open-inspect/shared";
+import {
+  checkSessionAccess,
+  sessionCapabilities,
+  type SessionAccessRow,
+  type SessionAction,
+  type SessionCapabilities,
+  type SessionViewer,
+} from "@open-inspect/shared";
 import type { PermissionId } from "@open-inspect/shared/rbac";
 import type { TeamRole } from "@open-inspect/shared/types/teams";
 import { SessionCollaboratorStore } from "../db/session-collaborators";
@@ -37,6 +44,28 @@ export function viewerFromContext(
   };
 }
 
+/** Existing non-private routes keep legacy permissions while enforcement is off or shadowed. */
+export function effectiveSessionCapabilities(
+  viewer: SessionViewer,
+  row: SessionAccessRow,
+  mode: TeamsEnforcementMode
+): SessionCapabilities {
+  const capabilities = sessionCapabilities(viewer, row);
+  if (viewer.kind !== "user" || row.visibility === "private" || mode === "on") {
+    return capabilities;
+  }
+  const has = (action: SessionAction) =>
+    viewer.permissions.includes(legacyPermissionForAction(action));
+  return {
+    ...capabilities,
+    canRead: has("read"),
+    canCollaborate: has("collaborate"),
+    canManageLifecycle: has("lifecycle"),
+    canDelete: has("delete"),
+    canSandbox: has("sandbox"),
+  };
+}
+
 export type SessionAdmissionOutcome =
   | { kind: "not_found" }
   | { kind: "action_denied"; reason: string }
@@ -48,9 +77,10 @@ export async function evaluateSessionAdmission(
   env: Env,
   sessionId: string,
   action: SessionAction,
-  slot: "session" | "child" | null = "session"
+  slot: "session" | "child" | null = "session",
+  enforceAlways = false
 ): Promise<SessionAdmissionOutcome> {
-  const mode = teamsEnforcementMode(ctx, env);
+  const mode = enforceAlways ? "on" : teamsEnforcementMode(ctx, env);
   const row = await new SessionIndexStore(ctx.db).get(sessionId);
   if (!row) return { kind: "not_found" };
 
