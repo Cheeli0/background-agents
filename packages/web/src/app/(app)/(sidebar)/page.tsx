@@ -10,6 +10,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { CollapsedSidebarControls, useSidebarContext } from "@/components/sidebar-layout";
 import { ErrorBanner } from "@/components/ui/error-banner";
+import { SessionAccessSelector } from "@/components/session-access-selector";
 import { matchesShortcut } from "@/lib/keyboard-shortcuts";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { isUnarchivedSessionListKey } from "@/lib/session-list";
@@ -137,8 +138,9 @@ export default function Home() {
     }
   }, [activeTeamId, loadingTeams, requireTeamOnCreate, setActiveTeam, teamError, teams]);
 
+  // Composer context changes preserve the audience; sidebar changes use team defaults.
   useEffect(() => {
-    setVisibilityDraft(null);
+    setVisibilityDraft((draft) => (draft?.teamId === activeTeamId ? draft : null));
   }, [activeTeamId]);
   const [storedPreference, setStoredPreference] = useState<ModelPreference>({
     model: DEFAULT_MODEL,
@@ -429,6 +431,10 @@ export default function Home() {
       teamContext={teamContext}
       teamCreationReady={teamCreationReady}
       visibility={visibility}
+      onTeamChange={(teamId) => {
+        setVisibilityDraft({ teamId, value: visibility });
+        setActiveTeam(teamId);
+      }}
       onVisibilityChange={(value) => {
         if (activeTeamId !== null || value !== "team")
           setVisibilityDraft({ teamId: activeTeamId, value });
@@ -474,6 +480,7 @@ function HomeContent({
   teamContext,
   teamCreationReady,
   visibility,
+  onTeamChange,
   onVisibilityChange,
   selectedModel,
   setSelectedModel,
@@ -506,6 +513,7 @@ function HomeContent({
   teamContext: ReturnType<typeof useActiveTeam>;
   teamCreationReady: boolean;
   visibility: SessionVisibility;
+  onTeamChange: (teamId: string | null) => void;
   onVisibilityChange: (value: SessionVisibility) => void;
   selectedModel: ValidModel;
   setSelectedModel: (value: ValidModel) => void;
@@ -554,9 +562,8 @@ function HomeContent({
     handleDragOver,
     handleDragLeave,
   } = useAttachmentDropZone({ locked: attachmentsLocked, onAdd: attachments.onAdd });
-  const { sessionTarget, selectedRepo, repos, loadingRepos, isLaunchable } = picker;
+  const { sessionTarget, repos, loadingRepos, isLaunchable } = picker;
   const selectedProvider = getSubscriptionProviderForModel(selectedModel);
-  const selectedTeam = teamContext.teams.find((team) => team.id === teamContext.activeTeamId);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
@@ -693,44 +700,9 @@ function HomeContent({
                   </div>
                 </div>
 
-                {/* Footer row with session controls */}
+                {/* Agent configuration stays inside the composer. */}
                 <div className="flex flex-col gap-2 px-4 py-2 border-t border-border-muted sm:flex-row sm:items-center sm:gap-0">
                   <div className="flex flex-wrap items-center gap-2 sm:gap-4 min-w-0">
-                    {teamContext.teams.length === 1 && !teamContext.requireTeamOnCreate ? (
-                      <select
-                        aria-label="Session team"
-                        value={teamContext.activeTeamId ?? ""}
-                        onChange={(event) => teamContext.setActiveTeam(event.target.value || null)}
-                        disabled={creating || teamContext.loading || !!teamContext.error}
-                        className="max-w-[12rem] bg-transparent text-sm text-muted-foreground disabled:opacity-50"
-                      >
-                        <option value="">Workspace</option>
-                        <option value={teamContext.teams[0].id}>{teamContext.teams[0].name}</option>
-                      </select>
-                    ) : (
-                      <span className="max-w-[12rem] truncate text-sm text-muted-foreground">
-                        {selectedTeam?.name ?? "Workspace"}
-                      </span>
-                    )}
-                    <select
-                      aria-label="Session visibility"
-                      value={visibility}
-                      onChange={(event) =>
-                        onVisibilityChange(
-                          event.target.value === "team"
-                            ? "team"
-                            : event.target.value === "private"
-                              ? "private"
-                              : "workspace"
-                        )
-                      }
-                      disabled={creating || !teamCreationReady}
-                      className="bg-transparent text-sm text-muted-foreground disabled:opacity-50"
-                    >
-                      <option value="workspace">Workspace</option>
-                      {selectedTeam && <option value="team">Team</option>}
-                      <option value="private">Private</option>
-                    </select>
                     <ModelReasoningSelector
                       selectedModel={selectedModel}
                       reasoningEffort={reasoningEffort}
@@ -771,6 +743,17 @@ function HomeContent({
                 </div>
               </div>
 
+              <SessionAccessSelector
+                teamId={teamContext.activeTeamId}
+                teams={teamContext.teams}
+                visibility={visibility}
+                onTeamChange={onTeamChange}
+                onVisibilityChange={onVisibilityChange}
+                requireTeamOnCreate={teamContext.requireTeamOnCreate}
+                disabled={creating || teamContext.loading || !!teamContext.error}
+                visibilityDisabled={!teamCreationReady}
+              />
+
               {/* Secrets disclosure per session target (design §7.4) */}
               {sessionTarget?.kind === "environment" && (
                 <p className="mt-3 text-xs text-muted-foreground text-center">
@@ -787,17 +770,6 @@ function HomeContent({
                   </Link>
                   .
                 </p>
-              )}
-
-              {selectedRepo && (
-                <div className="mt-3 text-center">
-                  <Link
-                    href="/settings"
-                    className="text-xs text-muted-foreground hover:text-foreground transition"
-                  >
-                    Manage secrets and settings
-                  </Link>
-                </div>
               )}
 
               {repos.length === 0 && !loadingRepos && (
