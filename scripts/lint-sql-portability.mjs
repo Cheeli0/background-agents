@@ -14,7 +14,7 @@
  *   - any file naming `SqlStorage`, the session Durable Object's synchronous
  *     engine, which src/db/sql-database.ts states is "a different engine with
  *     a load-bearing sync contract, and is intentionally not covered by this
- *     port". Holding it to Postgres policy would be a category error â€” its
+ *     port". Holding it to Postgres policy would be a category error — its
  *     PRAGMA introspection is adapter surface, not portability debt.
  *   - every terraform/d1/migrations/*.sql except the ones named in the
  *     baseline's `grandfatheredMigrations`. Naming them rather than taking
@@ -90,7 +90,7 @@ export const RULES = [
  * A pragma is the whole statement, so it is recognised only as a literal of
  * the shape `PRAGMA name`, `PRAGMA name = value` or `PRAGMA name(argument)`.
  * Prose that opens with the word does not qualify. Every other rule matches a
- * token that means nothing outside SQL, so those run over every literal â€”
+ * token that means nothing outside SQL, so those run over every literal —
  * including a fragment that carries no statement of its own, which is how
  * this codebase composes a `WHERE` clause.
  */
@@ -291,7 +291,7 @@ export function withoutComments(source) {
 
 /**
  * Whether the file's SQL belongs to the session engine rather than the port.
- * Read from an import of the engine's own module in the code â€” not from the
+ * Read from an import of the engine's own module in the code — not from the
  * type's name appearing anywhere in the text, which a comment could supply
  * and so turn the check off for a whole file.
  */
@@ -446,7 +446,7 @@ function main() {
   }
   if (stale.length > 0) {
     console.error(
-      `\nSQL portability: ${stale.length} stale baseline entr(ies) â€” lower the ` +
+      `\nSQL portability: ${stale.length} stale baseline entr(ies) — lower the ` +
         `count in scripts/sql-portability-baseline.json.\n`
     );
     for (const entry of stale) console.error(`  ${entry}`);
