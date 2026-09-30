@@ -16,11 +16,26 @@ function routeFor(method: string, path: string) {
 
 describe("route policy table", () => {
   it("publishes the complete canonical route catalog", () => {
-    expect(routes).toHaveLength(180);
+    expect(routes).toHaveLength(193);
 
     const paths = routes.map((route) => route.path);
-    expect(new Set(paths).size).toBe(137);
-    expect(new Set(routes.map((route) => `${route.method}:${route.path}`)).size).toBe(180);
+    expect(new Set(paths).size).toBe(147);
+    expect(new Set(routes.map((route) => `${route.method}:${route.path}`)).size).toBe(193);
+  });
+
+  it("gates run analytics with analytics.read", () => {
+    const route = routeFor("GET", "/analytics/runs");
+    expect(route?.authorization).toMatchObject({
+      kind: "active-user",
+      allOf: [{ permission: "analytics.read" }],
+    });
+  });
+
+  it("gates a single-session export with session read and sessions.export", () => {
+    expect(routeFor("GET", "/sessions/session-1/export")?.authorization).toMatchObject({
+      kind: "active-user",
+      allOf: [{ kind: "session", action: "read" }, { permission: "sessions.export" }],
+    });
   });
 
   it("declares every path in the literal-or-parameter grammar", () => {
@@ -100,6 +115,30 @@ describe("route policy table", () => {
         }
       }
     }
+  });
+
+  it("requires session admission on every active-user session item route", () => {
+    const exceptions: string[] = [];
+    for (const route of routes) {
+      if (!route.path.startsWith("/sessions/:id") || route.authorization.kind !== "active-user")
+        continue;
+      const identity = `${route.method} ${route.path}`;
+      if (exceptions.includes(identity)) continue;
+      expect(
+        route.authorization.allOf.some((requirement) => requirement.kind === "session"),
+        identity
+      ).toBe(true);
+      if (route.path.includes(":childId")) {
+        expect(
+          route.authorization.allOf.some(
+            (requirement) =>
+              requirement.kind === "session" && requirement.sessionIdParam === "childId"
+          ),
+          identity
+        ).toBe(true);
+      }
+    }
+    expect(exceptions).toEqual([]);
   });
 
   it.each([
@@ -218,7 +257,7 @@ describe("route policy table", () => {
     });
     expect(routeFor("POST", "/sessions/session-1/ws-token")?.authorization).toMatchObject({
       kind: "active-user",
-      allOf: [{ kind: "permission", permission: "sessions.read" }],
+      allOf: [{ kind: "session", action: "read" }],
     });
     expect(routeFor("POST", "/sessions/session-1/stop")?.authorization).toMatchObject({
       service: { kind: "actor", actorlessGrants: [{ service: "linear-bot" }] },
@@ -230,14 +269,26 @@ describe("route policy table", () => {
     expect(routeFor("POST", "/sessions/parent/children")?.authorization).toMatchObject({
       kind: "active-user",
       allOf: [
+        { kind: "session", action: "collaborate" },
         { kind: "permission", permission: "sessions.create" },
-        { kind: "permission", permission: "sessions.collaborate" },
       ],
     });
     expect(routeFor("GET", "/sessions/parent/children/child")?.authorization).toMatchObject({
       kind: "active-user",
-      allOf: [{ kind: "permission", permission: "sessions.read" }],
+      allOf: [
+        { kind: "session", action: "read", sessionIdParam: "id" },
+        { kind: "session", action: "read", sessionIdParam: "childId" },
+      ],
     });
+    expect(routeFor("POST", "/sessions/parent/children/child/cancel")?.authorization).toMatchObject(
+      {
+        kind: "active-user",
+        allOf: [
+          { kind: "session", action: "read", sessionIdParam: "id" },
+          { kind: "session", action: "lifecycle", sessionIdParam: "childId" },
+        ],
+      }
+    );
     expect(routeFor("POST", "/internal/github-event")?.authorization).toMatchObject({
       kind: "service",
       services: ["github-bot"],

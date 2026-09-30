@@ -32,6 +32,7 @@ module "modal_app" {
   deploy_path                  = "${var.project_root}/packages/modal-infra"
   deploy_module                = "deploy"
   source_hash                  = local.modal_source_hash
+  build_vm_image               = var.sandbox_provider == "modal-vm"
 
   secrets = [
     {

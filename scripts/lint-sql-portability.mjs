@@ -424,11 +424,11 @@ export function compareToBaseline(findings, allowed) {
 function main() {
   const findings = [];
   for (const file of controlPlaneSources()) {
-    const rel = relative(repoRoot, file);
+    const rel = relative(repoRoot, file).split(sep).join("/");
     findings.push(...scanTypeScript(rel, readFileSync(file, "utf8")));
   }
   for (const file of newMigrations()) {
-    const rel = relative(repoRoot, file);
+    const rel = relative(repoRoot, file).split(sep).join("/");
     const source = readFileSync(file, "utf8");
     findings.push(...findingsIn(maskSqlComments(source), 0, source, rel));
   }

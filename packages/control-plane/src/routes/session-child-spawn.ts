@@ -37,6 +37,7 @@ import {
   GITHUB_SANDBOX_FALLBACK_ROUTE,
   json,
   permissionRequirement,
+  sessionRequirement,
   requireAll,
 } from "./shared";
 import { type SessionRouteContext, dispatchSession } from "./session-route";
@@ -122,11 +123,17 @@ export async function handleSpawnChild(
     return error("Failed to get parent session context", 500);
   }
   const spawnContext = parsedSpawnContext.data;
-  const { sandboxTimeoutMs: _currentTimeoutMs, ...resolvedChildSettingsWithoutTimeout } =
-    resolvedChildSandboxSettings;
+  const {
+    sandboxTimeoutMs: _currentTimeoutMs,
+    finalSnapshotBufferMs: _currentBufferMs,
+    ...resolvedChildSettingsWithoutTimeout
+  } = resolvedChildSandboxSettings;
   const childSandboxSettings: SandboxSettings = resolvedChildSettingsWithoutTimeout;
   if (spawnContext.sandboxTimeoutMs !== undefined) {
     childSandboxSettings.sandboxTimeoutMs = spawnContext.sandboxTimeoutMs;
+  }
+  if (spawnContext.finalSnapshotBufferMs !== undefined) {
+    childSandboxSettings.finalSnapshotBufferMs = spawnContext.finalSnapshotBufferMs;
   }
 
   const requestedRepoOwner = body.repoOwner?.trim().toLowerCase() || null;
@@ -244,6 +251,8 @@ export async function handleSpawnChild(
   );
 
   const input: SessionInitInput = {
+    ownerTeamId: parentSession?.ownerTeamId ?? null,
+    visibility: parentSession?.visibility ?? "workspace",
     sessionId: childId,
     repoOwner: spawnContext.repoOwner,
     repoName: spawnContext.repoName,
@@ -372,8 +381,8 @@ sessionChildSpawnRoutes.post(
   admit({
     ...GITHUB_SANDBOX_FALLBACK_ROUTE,
     authorization: requireAll(
-      permissionRequirement("sessions.create"),
-      permissionRequirement("sessions.collaborate")
+      sessionRequirement("collaborate"),
+      permissionRequirement("sessions.create")
     ),
   }),
   (c) => dispatchSession(c, handleSpawnChild)

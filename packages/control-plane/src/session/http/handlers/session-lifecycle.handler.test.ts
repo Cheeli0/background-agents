@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { SandboxRow, SessionRow } from "../../types";
 import { SessionLifecycleHandler } from "./session-lifecycle.handler";
 import type { SessionTitleService } from "../../title-service";
-import type { WebSocketManager } from "../../../sandbox/lifecycle/manager";
 import type { SessionStatusService } from "../../session-status-service";
 import type { MessageRepository } from "../../message-repository";
 import type { SandboxRepository } from "../../sandbox-repository";
@@ -67,6 +66,10 @@ function createSandbox(overrides: Partial<SandboxRow> = {}): SandboxRow {
     ttyd_url: null,
     ttyd_token: null,
     active_socket_id: null,
+    boot_phase: null,
+    boot_seq: null,
+    fenced: 0,
+    startup_rejected: 0,
     created_at: 1,
     ...overrides,
   };
@@ -80,10 +83,8 @@ function createHandler() {
     getSession,
   };
   const getSandbox = vi.fn<() => SandboxRow | null>();
-  const updateSandboxStatus = vi.fn();
   const sandboxRepository = {
     getSandbox,
-    updateSandboxStatus,
   } as unknown as SandboxRepository;
   const transition = vi.fn<(status: SessionRow["status"]) => Promise<boolean>>();
   const confirmIndexStatus = vi.fn<() => Promise<void>>();
@@ -97,8 +98,8 @@ function createHandler() {
   } as unknown as SessionStatusService;
   const applySessionTitleUpdate = vi.fn((title: string) => ({ ok: true as const, title }));
   const cancelSession = vi.fn();
-  const getSandboxSocket = vi.fn<() => WebSocket | null>();
-  const sendToSandbox = vi.fn();
+  const cancelSandbox = vi.fn();
+  const preserveForArchive = vi.fn(async () => undefined);
 
   const lifecycleHandler = new SessionLifecycleHandler(
     repository as unknown as SessionCoreRepository,
@@ -106,12 +107,7 @@ function createHandler() {
     repository as unknown as MessageRepository,
     statusService,
     { applySessionTitleUpdate } as unknown as SessionTitleService,
-    {
-      getSandboxWebSocket: getSandboxSocket,
-      detachSandboxWebSocket: vi.fn(),
-      sendToSandbox,
-      getConnectedClientCount: vi.fn(() => 0),
-    } as unknown as WebSocketManager,
+    { cancelSandbox, preserveForArchive },
     "session-do-id",
     cancelSession
   );
@@ -137,9 +133,8 @@ function createHandler() {
     settleFromMessageState,
     applySessionTitleUpdate,
     cancelSession,
-    getSandboxSocket,
-    sendToSandbox,
-    updateSandboxStatus,
+    cancelSandbox,
+    preserveForArchive,
   };
 }
 
@@ -285,7 +280,7 @@ describe("SessionLifecycleHandler", () => {
   });
 
   it("archives successfully without participant authorization", async () => {
-    const { handler, getSession, transition } = createHandler();
+    const { handler, getSession, transition, preserveForArchive } = createHandler();
     getSession.mockReturnValue(createSession());
     transition.mockResolvedValue(true);
 
@@ -300,6 +295,11 @@ describe("SessionLifecycleHandler", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "archived", outcome: "archived" });
     expect(transition).toHaveBeenCalledWith("archived");
+    // An archived session's reconnects are refused, so its sandbox is saved now.
+    expect(preserveForArchive).toHaveBeenCalledOnce();
+    expect(transition.mock.invocationCallOrder[0]).toBeLessThan(
+      preserveForArchive.mock.invocationCallOrder[0]
+    );
   });
 
   it("archives a draft that was never prompted", async () => {
@@ -405,7 +405,7 @@ describe("SessionLifecycleHandler", () => {
   });
 
   it("returns 409 when archiving a session with queued work", async () => {
-    const { handler, getSession, repository, transition } = createHandler();
+    const { handler, getSession, repository, transition, preserveForArchive } = createHandler();
     getSession.mockReturnValue(createSession());
     repository.getPendingOrProcessingCount.mockReturnValue(1);
 
@@ -418,6 +418,7 @@ describe("SessionLifecycleHandler", () => {
 
     expect(response.status).toBe(409);
     expect(transition).not.toHaveBeenCalled();
+    expect(preserveForArchive).not.toHaveBeenCalled();
   });
 
   it("returns 409 when archiving a cancelled session", async () => {
@@ -490,28 +491,20 @@ describe("SessionLifecycleHandler", () => {
   });
 
   it("cancels and shuts down running sandbox", async () => {
-    const {
-      handler,
-      getSession,
-      getSandbox,
-      cancelSession,
-      getSandboxSocket,
-      sendToSandbox,
-      updateSandboxStatus,
-    } = createHandler();
-    const ws = {} as WebSocket;
+    const { handler, getSession, getSandbox, cancelSession, cancelSandbox } = createHandler();
     getSession.mockReturnValue(createSession({ status: "active" }));
     getSandbox.mockReturnValue(createSandbox({ status: "ready" }));
     cancelSession.mockResolvedValue(undefined);
-    getSandboxSocket.mockReturnValue(ws);
 
     const response = await handler.cancel();
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "cancelled" });
     expect(cancelSession).toHaveBeenCalledOnce();
-    expect(sendToSandbox).toHaveBeenCalledWith({ type: "shutdown" });
-    expect(updateSandboxStatus).toHaveBeenCalledWith("stopped");
+    expect(cancelSandbox).toHaveBeenCalledOnce();
+    expect(cancelSession.mock.invocationCallOrder[0]).toBeLessThan(
+      cancelSandbox.mock.invocationCallOrder[0]
+    );
   });
 });
 
