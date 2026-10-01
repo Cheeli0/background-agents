@@ -1,5 +1,6 @@
 import { resolveBuildTimeoutSeconds } from "@open-inspect/shared/types/integrations";
 import { createLogger, type CorrelationContext } from "../logger";
+import { readCachedInstallationRepositories } from "../repos/cache";
 import { createSourceControlProviderFromEnv } from "../source-control";
 import { prepareLegacyManagedProviderEnv } from "../sandbox/managed-provider-env";
 import type { Env } from "../types";
@@ -9,6 +10,7 @@ import {
   hashImageBuildCallbackToken,
   IMAGE_BUILD_CALLBACK_TOKEN_TTL_MS,
 } from "./callback-auth";
+import { resolveImageBuildTokenScope } from "./credential-scope";
 import type { ImageBuildScope } from "./model";
 import {
   loadScopeBuildSecrets,
@@ -52,7 +54,7 @@ export interface ImageBuildPlannerPort {
  * Resolves a trigger request into a concrete provider build plan.
  *
  * The planner is the only image-build layer that loads secrets, and it leans
- * on scope.ts for everything kind-specific. Split deliberately: resolveTarget
+ * on scope.ts for targets, settings and secrets. Split deliberately: resolveTarget
  * and createCallbackAuth run BEFORE the build row is registered (cheap D1
  * read + pure crypto), while planBuild — which decrypts secrets — runs AFTER,
  * so a concurrent secret change always sees a row to supersede and the
@@ -87,7 +89,7 @@ export class ImageBuildPlanner implements ImageBuildPlannerPort {
     const [sandboxSettings, userEnvVars, cloneAuth] = await Promise.all([
       resolveScopeSandboxSettings(this.db, params.scope, primary),
       loadScopeBuildSecrets(this.env, this.db, params.scope, params.target),
-      this.resolveCloneAuth(params.scope),
+      this.resolveCloneAuth(params.scope, params.target),
     ]);
 
     const basePlan = {
@@ -118,10 +120,16 @@ export class ImageBuildPlanner implements ImageBuildPlannerPort {
     };
   }
 
-  private async resolveCloneAuth(scope: ImageBuildScope): Promise<ImageBuildCloneAuth> {
+  private async resolveCloneAuth(
+    scope: ImageBuildScope,
+    target: ResolvedImageBuildTarget
+  ): Promise<ImageBuildCloneAuth> {
     try {
+      const tokenScope = await resolveImageBuildTokenScope(this.db, scope, target, () =>
+        readCachedInstallationRepositories(this.env)
+      );
       const provider = createSourceControlProviderFromEnv(this.env);
-      const auth = await provider.generateCredentialHelperAuth();
+      const auth = await provider.generateCredentialHelperAuth(tokenScope);
       return { type: "credential_helper", token: auth.password };
     } catch (e) {
       logger.warn("image_build.clone_token_failed", {

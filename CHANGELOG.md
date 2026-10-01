@@ -17,6 +17,24 @@ remain readable.
 
 ### Changed
 
+GitHub App sandbox credentials now reach only the session's repositories, including workspace-owned
+sessions and members snapshotted from an environment. Team-owned sessions also intersect that set
+with their team's current repository grants; an installation grant does not widen the credential
+beyond the session's members. Sessions with no repositories or no remaining granted repositories
+receive no token. Unresolved repository IDs and scopes exceeding GitHub's repository limit are
+refused rather than falling back to installation-wide access.
+
+This breaks private submodule, repository-backed dependency, and sibling-clone setups unless those
+repositories are included in the session's environment and, for team sessions, granted to its team.
+Repository image builds receive a token for that repository alone; environment builds use only their
+member repositories, intersected with the environment team's grants. Metadata and workspace-catalog
+operations retain installation-wide access. GitLab still uses a deployment-wide PAT and does not
+enforce repository-scoped credentials.
+
+Token cache keys cover the sorted, de-duplicated repository set, the process cache is bounded, and
+overlapping refreshes share one mint per scope. Grant removal changes the next credential scope but
+does not revoke already-issued tokens; sandbox helpers cache them until shortly before expiry.
+
 **Modal snapshot restores use brokered git credentials.** Restored sandboxes now fetch git
 credentials from the control plane like fresh sessions, instead of receiving a token minted by
 Modal. The control plane now sends the VCS host and clone username with every Modal create, restore,

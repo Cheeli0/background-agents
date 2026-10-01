@@ -102,6 +102,17 @@ const SKILL_MD = [
 ].join("\n");
 
 describe("fetchSkillImport", () => {
+  it("imports the workspace catalog with installation-wide content access", async () => {
+    const provider = fakeProvider({ "SKILL.md": { content: SKILL_MD } });
+    const resolveCommit = vi.spyOn(provider, "resolveCommit");
+    const listTree = vi.spyOn(provider, "listTree");
+    const readBlob = vi.spyOn(provider, "readBlob");
+    await fetchSkillImport(provider, source());
+    for (const method of [resolveCommit, listTree, readBlob]) {
+      expect(method).toHaveBeenCalledWith(expect.any(Object), { kind: "all" });
+    }
+  });
+
   it("reuses the repository resolution already authorized by the route", async () => {
     const provider = fakeProvider({ "SKILL.md": { content: SKILL_MD } });
     const check = vi.spyOn(provider, "checkRepositoryAccess");
@@ -113,11 +124,14 @@ describe("fetchSkillImport", () => {
       defaultBranch: "develop",
     });
     expect(check).not.toHaveBeenCalled();
-    expect(resolveCommit).toHaveBeenCalledWith({
-      owner: "canonical-owner",
-      name: "canonical-name",
-      ref: "develop",
-    });
+    expect(resolveCommit).toHaveBeenCalledWith(
+      {
+        owner: "canonical-owner",
+        name: "canonical-name",
+        ref: "develop",
+      },
+      { kind: "all" }
+    );
     expect(result.source).toMatchObject({
       repoOwner: "canonical-owner",
       repoName: "canonical-name",
@@ -254,7 +268,8 @@ describe("fetchSkillImport", () => {
     });
     for (const read of [resolveCommit, listTree, readBlob]) {
       expect(read).toHaveBeenCalledWith(
-        expect.objectContaining({ owner: "canonical-owner", name: "renamed-skills" })
+        expect.objectContaining({ owner: "canonical-owner", name: "renamed-skills" }),
+        { kind: "all" }
       );
     }
   });

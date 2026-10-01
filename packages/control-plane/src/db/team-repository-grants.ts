@@ -15,6 +15,18 @@ const grantSchema = z.object({
   repo_external_id: z.number().nullable(),
 });
 
+type TeamRepositoryGrantRow = z.infer<typeof grantSchema>;
+
+/** The subset of `repoIds` a team's grants cover; an installation grant covers every id. */
+export function coveredRepositoryIds<T extends number | null>(
+  grants: readonly TeamRepositoryGrantRow[],
+  repoIds: readonly T[]
+): T[] {
+  if (grants.some((grant) => grant.grant_kind === "installation")) return [...repoIds];
+  const allowed = new Set(grants.map((grant) => grant.repo_external_id));
+  return repoIds.filter((id) => id !== null && allowed.has(id));
+}
+
 export class TeamRepositoryGrantConflictError extends Error {
   constructor(readonly code: "grant_kind_conflict" | "repository_grant_limit" | "team_not_active") {
     super(
@@ -177,8 +189,6 @@ export class TeamRepositoryGrantStore {
   async covers(teamId: string, repoIds: readonly (number | null)[]): Promise<boolean> {
     if (repoIds.length === 0) return true;
     const grants = await this.listForTeam(teamId);
-    if (grants.some((grant) => grant.grant_kind === "installation")) return true;
-    const allowed = new Set(grants.map((grant) => grant.repo_external_id));
-    return repoIds.every((id) => id !== null && allowed.has(id));
+    return coveredRepositoryIds(grants, repoIds).length === repoIds.length;
   }
 }
