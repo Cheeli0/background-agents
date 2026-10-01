@@ -30,7 +30,7 @@ import {
   type SessionReadStateReconciledDetail,
 } from "@/lib/session-read-state";
 
-const VISIBLE_INBOX_POLL_MS = 30_000;
+const VISIBLE_INBOX_POLL_MS = 60_000;
 const SESSION_CREATOR_FILTER_STORAGE_KEY = "open-inspect-sidebar-session-creator-filter";
 
 export type SessionItem = SessionInboxSession;
