@@ -43,7 +43,7 @@ import {
 } from "./shared";
 import { type SessionRouteContext, dispatchSession } from "./session-route";
 import { DEFAULT_BASE_BRANCH } from "../repos/default-branch";
-import { authorizeSessionTarget } from "./session-target-authorization";
+import { authorizeEnvironmentTarget, authorizeSessionTarget } from "./session-target-authorization";
 
 const logger = createLogger("router:session-child-spawn");
 const MAX_SPAWN_DEPTH = 2;
@@ -75,6 +75,21 @@ export async function handleSpawnChild(
 
   const parentSession = await sessionStore.get(parentId);
   const parentEnvironmentId = parentSession?.environmentId ?? null;
+  // Reject an incompatible inherited environment before settings resolution or child admission.
+  // The permission preflight runs first so a missing grant keeps its permission_required shape.
+  if (parentEnvironmentId) {
+    const permissionError = await authorizeSessionTarget(ctx, {
+      teamId: null,
+      environmentId: parentEnvironmentId,
+    });
+    if (permissionError) return permissionError;
+    const environmentError = await authorizeEnvironmentTarget(ctx, {
+      environmentId: parentEnvironmentId,
+      ownerTeamId: parentSession?.ownerTeamId ?? null,
+    });
+    if (environmentError) return environmentError;
+  }
+
   // Children inherit the parent's settings scope: its primary repo plus, for
   // environment-launched parents, that environment's overrides (design §13.5).
   const resolvedChildSandboxSettings = parentSession

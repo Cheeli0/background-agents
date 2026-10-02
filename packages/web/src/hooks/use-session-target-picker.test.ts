@@ -130,13 +130,18 @@ describe("useSessionTargetPicker", () => {
     localStorage.clear();
   });
 
+  it("limits workspace session creation to workspace-owned environments", () => {
+    renderHook(() => useSessionTargetPicker({ teamId: null }));
+    expect(mocks.environments).toHaveBeenLastCalledWith({ ownerTeamId: null });
+  });
+
   it("passes teamId to the catalog hooks and prioritizes the team default over stored targets", () => {
     localStorage.setItem("open-inspect-last-selected-repo", "acme/web");
     const { result } = renderHook(() =>
       useSessionTargetPicker({ teamId: "team-1", defaultEnvironmentId: "env-1" })
     );
     expect(mocks.repos).toHaveBeenCalledWith(true, "team-1");
-    expect(mocks.environments).toHaveBeenCalledWith("team-1");
+    expect(mocks.environments).toHaveBeenCalledWith({ teamId: "team-1" });
     expect(result.current.buildRequestFields()).toEqual({ environmentId: "env-1" });
   });
 
