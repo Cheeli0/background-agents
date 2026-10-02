@@ -1,5 +1,6 @@
 "use client";
 
+import { isWorkspaceAdmin } from "@open-inspect/shared/rbac";
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -18,18 +19,25 @@ import { ErrorBanner } from "@/components/ui/error-banner";
 import { TeamOverview } from "./team-overview";
 import { TeamRepositories } from "./team-repositories";
 import { TeamEnvironments } from "./team-environments";
+import { TeamAutomations } from "./team-automations";
 import { TeamSecrets } from "./team-secrets";
 
-type TeamTab = "Overview" | "Members" | "Repositories" | "Environments" | "Secrets" | "Settings";
+type TeamTab =
+  | "Overview"
+  | "Members"
+  | "Repositories"
+  | "Environments"
+  | "Automations"
+  | "Secrets"
+  | "Settings";
 
 export function TeamPage({ slug }: { slug: string }) {
   const { teams, loading, error } = useTeams();
   const mine = useMeTeams();
-  const { authorization } = useCurrentUserAuthorization();
+  const { authorization, hasPermission } = useCurrentUserAuthorization();
   const team = teams.find((candidate) => candidate.slug === slug && candidate.archivedAt === null);
   const role = authorization?.role.key;
-  const admin =
-    authorization?.suspendedAt === null && (role === "owner" || role === "administrator");
+  const admin = authorization?.suspendedAt === null && isWorkspaceAdmin(role);
   const member =
     authorization?.suspendedAt === null &&
     !mine.loading &&
@@ -44,15 +52,24 @@ export function TeamPage({ slug }: { slug: string }) {
     );
   if (error) return <ErrorBanner role="alert">Unable to load team.</ErrorBanner>;
   if (!team) return <p className="text-sm text-muted-foreground">Team not found.</p>;
-  return <TeamContent key={team.id} initialTeam={team} canViewWork={admin || member} />;
+  return (
+    <TeamContent
+      key={team.id}
+      initialTeam={team}
+      canViewWork={admin || member}
+      canReadAutomations={hasPermission("automations.read")}
+    />
+  );
 }
 
 function TeamContent({
   initialTeam,
   canViewWork,
+  canReadAutomations,
 }: {
   initialTeam: TeamResponse;
   canViewWork: boolean;
+  canReadAutomations: boolean;
 }) {
   const { team: currentTeam, error } = useTeam(initialTeam.id);
   const team = currentTeam ?? initialTeam;
@@ -61,6 +78,7 @@ function TeamContent({
   const tabs: TeamTab[] = canViewWork
     ? ["Overview", "Members", "Repositories", "Environments"]
     : ["Members"];
+  if (canViewWork && canReadAutomations) tabs.push("Automations");
   if (canViewWork && capabilities.canManageSecrets) tabs.push("Secrets");
   if (canViewWork && (capabilities.canEditMetadata || capabilities.canArchive))
     tabs.push("Settings");
@@ -108,6 +126,7 @@ function TeamContent({
       {activeTab === "Members" && <TeamMembers team={team} />}
       {activeTab === "Repositories" && <TeamRepositories team={team} />}
       {activeTab === "Environments" && <TeamEnvironments teamId={team.id} />}
+      {activeTab === "Automations" && <TeamAutomations teamId={team.id} />}
       {activeTab === "Secrets" && canViewWork && capabilities.canManageSecrets && (
         <TeamSecrets teamId={team.id} capabilities={team.capabilities} />
       )}
