@@ -200,6 +200,87 @@ describe("HTTP session access by enforcement mode", () => {
     ).toBe(200);
   });
 
+  it.each(["off", "shadow", "on"] as const)(
+    "retains Linear channel-scoped event semantics in %s mode without Slack publication authority",
+    async (mode) => {
+      const { sessionName, team } = await session("team");
+      const other = await otherTeam();
+      const bindings = new TeamChannelBindingStore(env.DB);
+      const bindingActor = { actorUserId: OWNER, requestId: "linear-read-binding" };
+      await bindings.put(
+        { provider: "linear", externalId: "L1", teamId: other.id, kind: "source" },
+        bindingActor
+      );
+      const path = `/sessions/${sessionName}/events?channel=linear:L1`;
+      const runtime = vi.spyOn(env.SESSION, "get");
+      expect((await fetchMode(path, mode, { service: "linear-bot" })).status).toBe(
+        mode === "on" ? 404 : 200
+      );
+      if (mode === "on") expect(runtime).not.toHaveBeenCalled();
+      runtime.mockRestore();
+      await bindings.remove(other.id, "linear", "L1", bindingActor);
+      await bindings.put(
+        { provider: "linear", externalId: "L1", teamId: team.id, kind: "source" },
+        bindingActor
+      );
+      expect((await fetchMode(path, mode, { service: "linear-bot" })).status).toBe(200);
+      expect(
+        (await fetchMode(`${path}&purpose=slack-post`, mode, { service: "linear-bot" })).status
+      ).toBe(404);
+      await env.DB.prepare("UPDATE sessions SET visibility = 'private' WHERE id = ?")
+        .bind(sessionName)
+        .run();
+      expect((await fetchMode(path, mode, { service: "linear-bot" })).status).toBe(404);
+    }
+  );
+
+  it("revokes an unbound Linear coordinate's reads of team-owned sessions", async () => {
+    const { sessionName, team } = await session("team");
+    const bindings = new TeamChannelBindingStore(env.DB);
+    const bindingActor = { actorUserId: OWNER, requestId: "linear-unbind" };
+    await bindings.put(
+      { provider: "linear", externalId: "L1", teamId: team.id, kind: "source" },
+      bindingActor
+    );
+    const read = async (resource: "events" | "artifacts") =>
+      (
+        await fetchMode(`/sessions/${sessionName}/${resource}?channel=linear:L1`, "on", {
+          service: "linear-bot",
+        })
+      ).status;
+    expect(await read("events")).toBe(200);
+
+    await bindings.remove(team.id, "linear", "L1", bindingActor);
+    const runtime = vi.spyOn(env.SESSION, "get");
+    expect(await read("events")).toBe(404);
+    expect(await read("artifacts")).toBe(404);
+    expect(runtime).not.toHaveBeenCalled();
+    runtime.mockRestore();
+
+    await env.DB.prepare(
+      "UPDATE sessions SET owner_team_id = NULL, visibility = 'workspace' WHERE id = ?"
+    )
+      .bind(sessionName)
+      .run();
+    expect(await read("events")).toBe(200);
+  });
+
+  it.each(["linear:", "unknown:L1", "slack:L1", "linear:L1&channel=linear:L2"])(
+    "fails closed for invalid Linear event scope %s",
+    async (channel) => {
+      const { sessionName } = await session("team");
+      const runtime = vi.spyOn(env.SESSION, "get");
+      expect(
+        (
+          await fetchMode(`/sessions/${sessionName}/events?channel=${channel}`, "on", {
+            service: "linear-bot",
+          })
+        ).status
+      ).toBe(404);
+      expect(runtime).not.toHaveBeenCalled();
+    }
+  );
+
   it("keeps a participant's concealed prompt separate from trusted channel publication access", async () => {
     const { sessionName, team } = await session("team");
     await bindSlackChannel(team.id);
@@ -379,7 +460,9 @@ describe("HTTP session access by enforcement mode", () => {
 
     it("denies bound channels writing to workspace-owned sessions", async () => {
       const { sessionName, team } = await session("workspace");
-      await env.DB.prepare("UPDATE sessions SET owner_team_id = NULL WHERE id = ?")
+      await env.DB.prepare(
+        "UPDATE sessions SET owner_team_id = NULL, visibility = 'workspace' WHERE id = ?"
+      )
         .bind(sessionName)
         .run();
       await bindSlackChannel(team.id);
