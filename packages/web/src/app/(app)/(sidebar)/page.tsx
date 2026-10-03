@@ -69,6 +69,8 @@ import { useProviderAccounts } from "@/hooks/use-provider-accounts";
 import { useWarmDraftSession, type WarmDraftSessionRequest } from "@/hooks/use-warm-draft-session";
 import { useCurrentUserAuthorization } from "@/hooks/use-current-user-authorization";
 import { useActiveTeam } from "@/hooks/use-active-team";
+import { usePromptDraft } from "@/hooks/use-prompt-draft";
+import { NEW_SESSION_PROMPT_DRAFT_ID } from "@/lib/prompt-drafts";
 import type { SessionVisibility } from "@open-inspect/shared/types/teams";
 import { resolveComposerAccess, type ComposerAccessDraft } from "@/lib/composer-access";
 import {
@@ -131,7 +133,7 @@ export default function Home() {
   });
   const [modelPreferenceDraft, setModelPreferenceDraft] = useState<ModelPreference | null>(null);
   const [harness, setHarness] = useState<HarnessId>(DEFAULT_HARNESS);
-  const [prompt, setPrompt] = useState("");
+  const { prompt, setPrompt, clearSubmittedPrompt } = usePromptDraft(NEW_SESSION_PROMPT_DRAFT_ID);
   const [warmRequested, setWarmRequested] = useState(false);
   const [skillSelection, setSkillSelection] = useState<SessionSkillSelection>({ mode: "all" });
   const [providerSelections, setProviderSelections] = useState<ModelProviderSelections>({});
@@ -386,6 +388,7 @@ export default function Home() {
 
       if (res.ok) {
         consumeWarmSession(sessionId);
+        clearSubmittedPrompt(prompt);
         sessionAttachments.clearAttachments();
         mutate(isUnarchivedSessionListKey);
         mutate(isSessionInboxKey);
