@@ -72,7 +72,11 @@ import { useActiveTeam } from "@/hooks/use-active-team";
 import { usePromptDraft } from "@/hooks/use-prompt-draft";
 import { NEW_SESSION_PROMPT_DRAFT_ID } from "@/lib/prompt-drafts";
 import type { SessionVisibility } from "@open-inspect/shared/types/teams";
-import { resolveComposerAccess, type ComposerAccessDraft } from "@/lib/composer-access";
+import {
+  parseStoredComposerAccess,
+  resolveComposerAccess,
+  type ComposerAccessDraft,
+} from "@/lib/composer-access";
 import {
   buildInteractiveProviderRoutingIdentity,
   parseStoredProviderSelections,
@@ -85,6 +89,7 @@ const LAST_SELECTED_HARNESS_STORAGE_KEY = "open-inspect-last-selected-harness";
 const LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY = "open-inspect-last-selected-reasoning-effort";
 const LEGACY_PROVIDER_SELECTIONS_STORAGE_KEY = "open-inspect-last-provider-selections";
 const LAST_PROVIDER_SELECTIONS_STORAGE_KEY = "open-inspect-last-provider-selections:v1";
+const LAST_SESSION_ACCESS_STORAGE_KEY = "open-inspect-last-session-access";
 
 function skillPreviewTarget(
   fields: SessionTargetRequestFields | null
@@ -122,11 +127,51 @@ export default function Home() {
   });
   const { sessionTarget, buildRequestFields, isLaunchable } = picker;
 
+  const accessStorageKey = session ? `${LAST_SESSION_ACCESS_STORAGE_KEY}:${session.user.id}` : null;
+  const accessContextReady = !teamContext.loading && !teamContext.error;
+
+  // Restore the user's last composer team/audience; it only applies while its sidebar context matches.
+  useEffect(() => {
+    let stored: ComposerAccessDraft | null = null;
+    try {
+      stored = accessStorageKey
+        ? parseStoredComposerAccess(localStorage.getItem(accessStorageKey))
+        : null;
+    } catch {
+      // Storage is optional; the composer falls back to the sidebar team defaults.
+    }
+    setAccessDraft(stored);
+  }, [accessStorageKey]);
+
+  const saveAccessDraft = useCallback(
+    (draft: ComposerAccessDraft) => {
+      setAccessDraft(draft);
+      if (!accessStorageKey) return;
+      try {
+        localStorage.setItem(accessStorageKey, JSON.stringify(draft));
+      } catch {
+        // Continue with the in-memory selection when storage is unavailable.
+      }
+    },
+    [accessStorageKey]
+  );
+
   // Composer context changes preserve the audience; sidebar changes use team defaults.
   useEffect(() => {
     if (teamContext.loading || teamContext.error) return;
     setAccessDraft((draft) => (draft ? resolveComposerAccess(teamContext, draft) : null));
   }, [teamContext]);
+
+  // Sidebar changes discard the draft, so drop the saved one too rather than reviving it on reload.
+  useEffect(() => {
+    if (!accessContextReady || !accessStorageKey) return;
+    try {
+      const stored = parseStoredComposerAccess(localStorage.getItem(accessStorageKey));
+      if (stored && stored.contextKey !== contextKey) localStorage.removeItem(accessStorageKey);
+    } catch {
+      // Storage is optional.
+    }
+  }, [accessContextReady, accessStorageKey, contextKey]);
   const [storedPreference, setStoredPreference] = useState<ModelPreference>({
     model: DEFAULT_MODEL,
     reasoningEffort: getDefaultReasoningEffort(DEFAULT_MODEL),
@@ -422,11 +467,11 @@ export default function Home() {
       teamCreationReady={teamCreationReady}
       visibility={visibility}
       onTeamChange={(teamId) => {
-        setAccessDraft({ contextKey, teamId, visibility });
+        saveAccessDraft({ contextKey, teamId, visibility });
       }}
       onVisibilityChange={(value) => {
         if (teamId !== null || value !== "team")
-          setAccessDraft({
+          saveAccessDraft({
             contextKey,
             teamId,
             visibility: value,
