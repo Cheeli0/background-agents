@@ -766,6 +766,14 @@ describe("AutofixService", () => {
 
     expect(result).toMatchObject({ decision: "queued", messageId: "message-1" });
     expect(h.sessions.fetch).toHaveBeenCalledOnce();
+    // Reply comments are not valid REST reply targets, so the prompt routes by review thread.
+    const dispatch = h.sessions.fetch.mock.calls[0] as unknown as [string, string, RequestInit];
+    const { prompt } = JSON.parse(dispatch[2].body as string) as { prompt: string };
+    expect(prompt).toContain("#discussion_r9002");
+    expect(prompt).toContain("`reviewThreads`");
+    expect(prompt).toContain("`addPullRequestReviewThreadReply`");
+    expect(prompt).toContain("`resolveReviewThread`");
+    expect(prompt).not.toContain("/replies");
   });
 
   it("does not dispatch an approved Open Inspect App review", async () => {
