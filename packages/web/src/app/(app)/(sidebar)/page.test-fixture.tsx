@@ -78,6 +78,9 @@ const mocks = vi.hoisted(() => {
       archivedAt: null;
     }>,
     providerAccountsLoadingValue: false,
+    memoryPreferencesLoading: false,
+    memoryPreferencesError: undefined as Error | undefined,
+    includePersonalMemories: true,
     skillPreview: {
       skills: [
         {
@@ -247,6 +250,19 @@ vi.mock("@/hooks/use-provider-accounts", () => ({
   }),
 }));
 
+vi.mock("@/hooks/use-memories", () => ({
+  useMemoryPreferences: () => ({
+    preferences:
+      mocks.memoryPreferencesLoading || mocks.memoryPreferencesError
+        ? undefined
+        : { includePersonalMemories: mocks.includePersonalMemories },
+    loading: mocks.memoryPreferencesLoading,
+    error: mocks.memoryPreferencesError,
+    mutate: vi.fn(),
+  }),
+  useMemoryPreview: () => ({ preview: undefined, loading: false, mutate: vi.fn() }),
+}));
+
 vi.mock("@/hooks/use-managed-skills", () => ({
   useSkillProfiles: () => ({ profiles: [], loading: false }),
   useSkillResolutionPreview: () => ({
@@ -262,6 +278,9 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  mocks.memoryPreferencesLoading = false;
+  mocks.memoryPreferencesError = undefined;
+  mocks.includePersonalMemories = true;
   mocks.reposValue = [repo];
   mocks.loadingReposValue = false;
   mocks.environmentsLoadingValue = false;
@@ -289,6 +308,15 @@ beforeEach(() => {
   mocks.routerPush.mockReset();
   mocks.toastError.mockReset();
   mocks.mutateMock.mockReset();
+  // Radix Checkbox measures itself via ResizeObserver, which jsdom lacks.
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  );
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {

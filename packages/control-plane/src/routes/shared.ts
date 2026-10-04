@@ -139,6 +139,7 @@ const AUDITED_ALLOWED_PERMISSIONS = new Set<PermissionId>([
   "sessions.lifecycle",
   "sessions.sandbox_access",
   "skill_profiles.manage_own",
+  "memories.manage_own",
   "skills.manage",
   "workspace.members.manage",
   "workspace.transfer_ownership",
@@ -462,4 +463,18 @@ export async function resolveRepoOrError(
     throw new HttpError("Repository is not installed for the GitHub App", 404);
   }
   return resolved;
+}
+
+/** Installed-repository resolution bound to one request, for policies that receive it as a dependency. */
+export class InstalledRepositoryResolver {
+  constructor(
+    private readonly env: Env,
+    private readonly ctx: RequestContext,
+    private readonly logger: Logger
+  ) {}
+
+  /** The repository's stable identity; throws an HttpError when it is not installed. */
+  resolve(owner: string, name: string): Promise<RepositoryAccessResult> {
+    return resolveRepoOrError(this.env, owner, name, this.ctx, this.logger);
+  }
 }
