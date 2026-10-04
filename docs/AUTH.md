@@ -144,7 +144,8 @@ preserves the selected audience when valid; it does not apply the new team's def
 
 ### Session Visibility
 
-Each session stores a visibility independently of its team:
+Each session stores a visibility independently of its owning team. Ownership and audience are
+different: a team-owned session can be team-visible, workspace-visible, or explicitly private.
 
 | Visibility  | Who can read the session when team enforcement is on                                                                                                                                                                                                             |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -201,13 +202,38 @@ visibility is reserved for the session owner or a workspace Owner. These role an
 never bypass the current-membership requirement for team-owned actions. Private-session action rules
 apply even while team enforcement is off or in shadow mode.
 
+### Team Defaults and Migration
+
+A team's `defaultVisibility` (stored as `teams.default_visibility`) accepts only `team` or
+`workspace`. It sets the audience of new sessions, not their ownership. `private` remains an
+explicit per-session choice, including for team-owned sessions with a workspace user owner. The
+owner and owning-team membership requirements for private sessions are unchanged.
+
+Migration `terraform/d1/migrations/0085_team_default_visibility.sql` changes existing private team
+defaults with `UPDATE teams SET default_visibility = 'team' WHERE default_visibility = 'private'`,
+including archived teams. It does not change existing sessions, their visibility, or collaborator
+records. The same atomic migration installs insert and update triggers that reject private team
+defaults, including writes from the previous Worker between migration commit and deployment. These
+triggers fence the rollout without rebuilding the referenced teams table; the SQL portability
+baseline documents this exception. Shared schemas and runtime `TeamStore` validators also enforce
+the allowed defaults. D1 and Node SQLite use the same global migration series in
+`terraform/d1/migrations/`.
+
+**Rollout prerequisite:** apply migration `0085` to the global database before deploying application
+code with the narrowed team-default schema. Otherwise, existing private defaults can fail team row
+and response validation. The database rejects private-default edits through older application
+versions during rollout; the new APIs return the normal validation response. Explicit Private
+options in session creation and visibility controls remain available.
+
 ### Creating Sessions
 
 Session creation checks the selected repository or environment as well as the creator's workspace
 permission. Supplying a team requires active membership in that team and a grant covering **every**
-repository used by the session; archived teams cannot be selected. Without an explicit visibility,
-team sessions use the team's default and teamless sessions default to `workspace`. `team` visibility
-requires a team; `private` requires a workspace user owner. A teamless session may still be private.
+repository used by the session; archived teams cannot be selected. Without an explicit session
+visibility, normal creation, Slack and Linear launchers, and automation runs inherit the owning
+team's current default; teamless sessions default to `workspace`. The launch source does not
+override that default. `team` visibility requires a team; explicit `private` visibility requires a
+workspace user owner. A teamless session may still be private.
 
 For an agent-spawned child of a team-owned session, the active prompt author's canonical identity
 must resolve and still belong to the owning team. The child cannot borrow its parent owner's
@@ -469,6 +495,9 @@ specific integration route explicitly permits that operation.
 Some integrations also apply their own ingress rules. For example, the GitHub integration may
 require an allowed trigger user or sufficient repository collaborator access before it sends a
 request to Open-Inspect.
+
+Private sessions cannot be published to Slack, even when the acting user can read the session.
+Changing a team's default does not relax this restriction.
 
 ### Slack and Linear Bindings
 
