@@ -5,3 +5,8 @@
 !package-lock.json
 # Don't ignore this directory
 !packages
+
+# Web typechecking follows the shared coverage policy imported by Vitest.
+!scripts
+scripts/*
+!scripts/coverage-policy.ts

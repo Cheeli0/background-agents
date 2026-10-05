@@ -242,6 +242,7 @@ export async function initSession(overrides?: {
   reasoningEffort?: string;
   sandboxSettings?: SandboxSettings;
   userId?: string;
+  canonicalUserId?: string;
   scmLogin?: string;
   providerAuth?: SessionModelProviderAuthInput[];
 }) {
@@ -267,10 +268,17 @@ export async function initSession(overrides?: {
     model: defaults.model ?? "anthropic/claude-haiku-4-5",
     reasoningEffort: defaults.reasoningEffort ?? null,
     baseBranch: defaults.defaultBranch ?? "main",
-    repositories: defaults.repositories,
+    repositories: defaults.repositories ?? [
+      {
+        repoOwner: defaults.repoOwner,
+        repoName: defaults.repoName,
+        repoId: defaults.repoId,
+        baseBranch: defaults.defaultBranch ?? "main",
+      },
+    ],
     environmentId: defaults.environmentId ?? null,
     status: "created",
-    userId: defaults.userId,
+    userId: defaults.canonicalUserId ?? defaults.userId,
     providerAuth,
     createdAt: now,
     updatedAt: now,
@@ -383,9 +391,9 @@ export async function seedMessage(
 export async function initNamedSession(
   sessionName: string,
   overrides?: {
-    repoOwner?: string;
-    repoName?: string;
-    repoId?: number;
+    repoOwner?: string | null;
+    repoName?: string | null;
+    repoId?: number | null;
     defaultBranch?: string;
     repositories?: Array<{
       repoOwner: string;
@@ -424,6 +432,18 @@ export async function initNamedSession(
     model: defaults.model ?? "anthropic/claude-haiku-4-5",
     reasoningEffort: defaults.reasoningEffort ?? null,
     baseBranch: defaults.defaultBranch ?? "main",
+    repositories:
+      defaults.repositories ??
+      (defaults.repoOwner && defaults.repoName && defaults.repoId !== null
+        ? [
+            {
+              repoOwner: defaults.repoOwner,
+              repoName: defaults.repoName,
+              repoId: defaults.repoId,
+              baseBranch: defaults.defaultBranch ?? "main",
+            },
+          ]
+        : []),
     status: "created",
     parentSessionId: defaults.parentSessionId ?? null,
     spawnSource: defaults.spawnSource ?? "user",

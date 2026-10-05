@@ -1,5 +1,5 @@
 const PROCESSING_TTL_MS = 5 * 60_000;
-const PROCESSED_TTL_MS = 7 * 24 * 60 * 60_000;
+export const PROCESSED_TTL_MS = 7 * 24 * 60 * 60_000;
 
 export type DeliveryClaimResult = "claimed" | "duplicate";
 

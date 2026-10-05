@@ -197,7 +197,9 @@ class TestSetupScriptFailure:
         child_pid = None
 
         try:
-            with patch("sandbox_runtime.repository_hooks.os.killpg", wraps=os.killpg) as kill_group:
+            with patch(
+                "sandbox_runtime.repository_hooks.KILL_PROCESS_GROUP", wraps=os.killpg
+            ) as kill_group:
                 async with asyncio.timeout(2):
                     result = await sup.hooks.run_setup(sup.repositories[0], BootMode.FRESH)
             child_pid = int((sup.repo_path / "child.pid").read_text())
