@@ -35,6 +35,28 @@ function patchPreferences(changes: Array<{ modelId: string; enabled: boolean }>)
 
 describe("Model preferences API", () => {
   beforeEach(cleanD1Tables);
+  it.each(["anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5"])(
+    "enables and disables %s without rejecting its canonical ID",
+    async (modelId) => {
+      await seedPreferences(["anthropic/claude-opus-5"]);
+
+      const enabled = await patchPreferences([{ modelId, enabled: true }]);
+      expect(await enabled.json()).toEqual({
+        enabledModels: ["anthropic/claude-opus-5", modelId],
+        revision: 2,
+      });
+      expect(enabled.status).toBe(200);
+      expect(await getStoredModels()).toEqual(["anthropic/claude-opus-5", modelId]);
+
+      const disabled = await patchPreferences([{ modelId, enabled: false }]);
+      expect(disabled.status).toBe(200);
+      expect(await disabled.json()).toEqual({
+        enabledModels: ["anthropic/claude-opus-5"],
+        revision: 3,
+      });
+      expect(await getStoredModels()).toEqual(["anthropic/claude-opus-5"]);
+    }
+  );
 
   it("rejects legacy PUT writes without replacing preferences", async () => {
     const stored = ["anthropic/claude-sonnet-4-6"];
