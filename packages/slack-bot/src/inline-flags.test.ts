@@ -1,10 +1,7 @@
+import { parseInlinePromptFlags } from "@open-inspect/shared/inline-prompt-flags";
 import { describe, expect, it } from "vitest";
 import type { ValidModel } from "@open-inspect/shared/models";
-import {
-  parseInlinePromptFlags,
-  resolveInlinePromptOptions,
-  resolvedTurnPlanSchema,
-} from "./inline-flags";
+import { resolveInlinePromptOptions, resolvedTurnPlanSchema } from "./inline-flags";
 
 describe("parseInlinePromptFlags", () => {
   it("parses model and reasoning flags in either supported form", () => {
