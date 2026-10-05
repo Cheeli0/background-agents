@@ -267,7 +267,7 @@ provider. It verifies actual OpenCode prompt/tool serialization, not a real mode
 
 ## Rollout and failure behavior
 
-1. Apply migration 0084 with the existing D1/Node migration mechanism.
+1. Apply migration 0085 with the existing D1/Node migration mechanism.
 2. Deploy the control plane. Existing sessions without a manifest receive empty memory context; they
    are not retroactively resolved. No new Durable Object binding is needed.
 3. Rebuild/deploy the sandbox runtime image, then deploy the web app. Both harnesses must use the
