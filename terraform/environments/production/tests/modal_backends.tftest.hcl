@@ -47,7 +47,7 @@ variables {
 run "gvisor_uses_shared_modal_infrastructure" {
   command = plan
   assert {
-    condition     = local.use_modal_backend && length(module.modal_app) == 1 && length(data.external.modal_source_hash) == 1
+    condition     = local.use_modal_backend && length(module.modal_app) == 1 && length(data.external.modal_image_hash) == 1
     error_message = "Standard Modal must provision its shared infrastructure."
   }
   assert {
@@ -59,7 +59,7 @@ run "vm_uses_shared_modal_infrastructure" {
   command = plan
   variables { sandbox_provider = "modal-vm" }
   assert {
-    condition     = local.use_modal_backend && length(module.modal_app) == 1 && length(data.external.modal_source_hash) == 1
+    condition     = local.use_modal_backend && length(module.modal_app) == 1 && length(data.external.modal_image_hash) == 1
     error_message = "Modal VM must provision the same Modal module and credentials."
   }
   assert {
