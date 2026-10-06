@@ -12,6 +12,7 @@ import type { SessionTitleService } from "../../title-service";
 import { resolvePublicSessionId } from "../../public-session-id";
 import { normalizeSessionTitle, type SessionTitleUpdateResult } from "../../title";
 import { z } from "zod";
+import { isOldAutoArchiveSession } from "../../auto-archive-policy";
 import { isSessionInactive } from "@open-inspect/shared/types/session-activity";
 
 /**
@@ -68,7 +69,8 @@ export class SessionLifecycleHandler {
     private readonly titleService: SessionTitleService,
     private readonly sandboxLifecycle: SandboxCancellation,
     private readonly durableObjectId: string,
-    private readonly cancelSession: () => Promise<void>
+    private readonly cancelSession: () => Promise<void>,
+    private readonly autoArchiveEligible: (sessionId: string, nowMs: number) => Promise<boolean>
   ) {}
 
   getState(): Response {
@@ -143,6 +145,32 @@ export class SessionLifecycleHandler {
     return Response.json({ title: result.title });
   }
 
+  /** Scheduled retention rechecks both the index and authoritative runtime state. */
+  async autoArchive(): Promise<Response> {
+    const nowMs = Date.now();
+    const session = this.sessionCoreRepository.getSession();
+    if (!session) return Response.json({ error: "Session not found" }, { status: 404 });
+    if (!isOldAutoArchiveSession(session.status, session.updated_at, nowMs)) {
+      await this.statusService.repairIndexStatus();
+      return Response.json({ outcome: "ineligible" });
+    }
+    const sessionId = resolvePublicSessionId(session, this.durableObjectId);
+    if (!(await this.autoArchiveEligible(sessionId, nowMs))) {
+      return Response.json({ outcome: "ineligible" });
+    }
+    // The global read yields. Work may have arrived while it was in flight.
+    const current = this.sessionCoreRepository.getSession();
+    if (
+      !current ||
+      !isOldAutoArchiveSession(current.status, current.updated_at, nowMs) ||
+      this.messageRepository.getPendingOrProcessingCount() > 0
+    ) {
+      await this.statusService.repairIndexStatus();
+      return Response.json({ outcome: "ineligible" });
+    }
+    return await this.commitArchive(current.status);
+  }
+
   /** Archive the session after route-level lifecycle authorization has succeeded. */
   async archive(): Promise<Response> {
     const session = this.sessionCoreRepository.getSession();
@@ -162,6 +190,10 @@ export class SessionLifecycleHandler {
       });
     }
 
+    return await this.commitArchive(session.status);
+  }
+
+  private async commitArchive(previousStatus: SessionStatus): Promise<Response> {
     // Commit archived before starting preservation, but do not await its index
     // projection: reconnects must see draining in the same turn.
     await Promise.all([
@@ -174,7 +206,7 @@ export class SessionLifecycleHandler {
       return Response.json({ error: "Session archive projection unavailable" }, { status: 503 });
     }
 
-    return archiveResponse(session.status === "archived" ? "already_archived" : "archived", {
+    return archiveResponse(previousStatus === "archived" ? "already_archived" : "archived", {
       status: "archived",
     });
   }

@@ -21,6 +21,7 @@
  * Deployment-time validation is the gate for configuration, not the runtime.
  */
 
+import { SessionAutoArchiveStore } from "../db/session-auto-archive-store";
 import { resolveAppName } from "@open-inspect/shared/app-name";
 import { DEFAULT_MODEL } from "@open-inspect/shared/models";
 import { sandboxPromptBlockReason } from "@open-inspect/shared/types/sandbox-shutdown";
@@ -788,7 +789,12 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
     durableObjectId,
     async () => {
       await statusService.cancel(() => messageQueue.cancelExecution());
-    }
+    },
+    (sessionId, nowMs) =>
+      new SessionAutoArchiveStore(db, parseTeamsEnforcementMode(env.TEAMS_ENFORCEMENT)).isEligible(
+        sessionId,
+        nowMs
+      )
   );
   const sessionBudgetHandler = new SessionBudgetHandler(sessionCoreRepository, budgetService, () =>
     Date.now()
@@ -950,6 +956,7 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
     archive: () => sessionLifecycleHandler.archive(),
     unarchive: () => sessionLifecycleHandler.unarchive(),
     expireDraft: () => sessionLifecycleHandler.expireDraft(),
+    autoArchive: () => sessionLifecycleHandler.autoArchive(),
     verifySandboxToken: (request, _url, requestLog) =>
       sandboxHandler.verifySandboxToken(request, requestLog),
     openaiTokenRefresh: (_request, _url, requestLog) =>
