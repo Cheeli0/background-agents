@@ -168,7 +168,7 @@ export class SessionLifecycleHandler {
       await this.statusService.repairIndexStatus();
       return Response.json({ outcome: "ineligible" });
     }
-    return this.commitArchive(current.status);
+    return await this.commitArchive(current.status);
   }
 
   /** Archive the session after route-level lifecycle authorization has succeeded. */
@@ -190,7 +190,7 @@ export class SessionLifecycleHandler {
       });
     }
 
-    return this.commitArchive(session.status);
+    return await this.commitArchive(session.status);
   }
 
   private async commitArchive(previousStatus: SessionStatus): Promise<Response> {
