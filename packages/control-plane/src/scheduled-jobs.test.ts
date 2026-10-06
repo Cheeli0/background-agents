@@ -1,3 +1,7 @@
+import { SessionAutoArchiveStore } from "./db/session-auto-archive-store";
+import { SessionAutoArchiveSweep } from "./session/auto-archive-sweep";
+import type * as AutoArchiveSweepModule from "./session/auto-archive-sweep";
+import { SESSION_AUTO_ARCHIVE_CRON } from "./session/auto-archive-policy";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,9 +49,17 @@ vi.mock("./session/abandoned-draft-sweep", async (importOriginal) => ({
   SessionDraftExpiryClient: vi.fn(),
 }));
 
-const { schedulerTick, sweepRun } = vi.hoisted(() => ({
+vi.mock("./session/auto-archive-sweep", async (importOriginal) => ({
+  ...(await importOriginal<typeof AutoArchiveSweepModule>()),
+  SessionAutoArchiveSweep: vi.fn(function () {
+    return { run: autoArchiveRun };
+  }),
+}));
+
+const { schedulerTick, sweepRun, autoArchiveRun } = vi.hoisted(() => ({
   schedulerTick: vi.fn(async () => ({})),
   sweepRun: vi.fn(async () => ({})),
+  autoArchiveRun: vi.fn(async () => ({})),
 }));
 
 const TERRAFORM_WORKER = resolve(
@@ -83,6 +95,11 @@ function fakeDeps(): ScheduledJobDeps & {
 }
 
 describe("SCHEDULED_JOBS", () => {
+  it("registers hourly completed-session retention", () => {
+    expect(SCHEDULED_JOBS.find((job) => job.name === "session_auto_archive")?.cron).toBe(
+      SESSION_AUTO_ARCHIVE_CRON
+    );
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -92,11 +109,26 @@ describe("SCHEDULED_JOBS", () => {
     expect(new Set(crons).size).toBe(crons.length);
     expect(new Set(SCHEDULED_JOBS.map((job) => job.name)).size).toBe(crons.length);
     expect([...crons].sort()).toEqual(
-      [SCHEDULER_TICK_CRON, IMAGE_BUILD_SCHEDULER_CRON, ABANDONED_DRAFT_SWEEP_CRON].sort()
+      [
+        SCHEDULER_TICK_CRON,
+        IMAGE_BUILD_SCHEDULER_CRON,
+        ABANDONED_DRAFT_SWEEP_CRON,
+        SESSION_AUTO_ARCHIVE_CRON,
+      ].sort()
     );
     expect([...terraformCronTriggers()].sort()).toEqual([...crons].sort());
     for (const job of SCHEDULED_JOBS) expect(findScheduledJob(job.cron)).toBe(job);
     expect(findScheduledJob("0 0 * * *")).toBeUndefined();
+  });
+
+  it("runs retention with the database, session client, and scheduled time", async () => {
+    const deps = fakeDeps();
+    await findScheduledJob(SESSION_AUTO_ARCHIVE_CRON)!.run(deps, 123);
+    const [store, sessions, log] = vi.mocked(SessionAutoArchiveSweep).mock.calls[0]!;
+    expect(store).toBeInstanceOf(SessionAutoArchiveStore);
+    expect(sessions).toBe(deps.sessions);
+    expect(log).toBe(deps.log);
+    expect(autoArchiveRun).toHaveBeenCalledWith(123);
   });
 
   it("runs the every-minute tick: queue health in the background, the scheduler tick awaited", async () => {

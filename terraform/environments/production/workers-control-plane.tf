@@ -237,8 +237,9 @@ module "control_plane_worker" {
   deleted_classes     = var.control_plane_deleted_classes
 
   # The image-build schedule must match IMAGE_BUILD_SCHEDULER_CRON in scheduler.ts,
-  # and the draft sweep ABANDONED_DRAFT_SWEEP_CRON in abandoned-draft-sweep.ts.
-  cron_triggers = ["* * * * *", "7,37 * * * *", "23 * * * *"]
+  # the draft sweep ABANDONED_DRAFT_SWEEP_CRON in abandoned-draft-sweep.ts,
+  # and session retention SESSION_AUTO_ARCHIVE_CRON in auto-archive-policy.ts.
+  cron_triggers = ["* * * * *", "7,37 * * * *", "23 * * * *", "43 * * * *"]
 
   # Base artifacts are verified before the Worker switches its provider references.
   depends_on = [

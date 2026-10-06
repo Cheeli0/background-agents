@@ -14,6 +14,10 @@
  * it needs no leader election.
  */
 
+import { parseTeamsEnforcementMode } from "./authorization/teams-enforcement";
+import { SessionAutoArchiveStore } from "./db/session-auto-archive-store";
+import { SESSION_AUTO_ARCHIVE_CRON } from "./session/auto-archive-policy";
+import { SessionAutoArchiveSweep } from "./session/auto-archive-sweep";
 import { checkAutofixQueueHealth } from "./autofix/queue-health";
 import { SessionIndexStore } from "./db/session-index";
 import type { SqlDatabase } from "./db/sql-database";
@@ -52,6 +56,17 @@ export interface ScheduledJob {
 }
 
 export const SCHEDULED_JOBS: readonly ScheduledJob[] = [
+  {
+    name: "session_auto_archive",
+    cron: SESSION_AUTO_ARCHIVE_CRON,
+    async run({ db, env, sessions, log }, nowMs) {
+      await new SessionAutoArchiveSweep(
+        new SessionAutoArchiveStore(db, parseTeamsEnforcementMode(env.TEAMS_ENFORCEMENT)),
+        sessions,
+        log
+      ).run(nowMs);
+    },
+  },
   {
     name: "scheduler_tick",
     cron: SCHEDULER_TICK_CRON,
