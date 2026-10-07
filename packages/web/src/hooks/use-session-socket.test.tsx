@@ -10,6 +10,7 @@ import type {
   SessionState,
 } from "@open-inspect/shared/types/server-messages";
 import type * as SwrModule from "swr";
+import { isSessionInboxKey } from "@/lib/session-inbox-api";
 import { isUnarchivedSessionListKey } from "@/lib/session-list";
 import { useSessionSocket } from "./use-session-socket";
 import type { SessionCapabilities } from "@open-inspect/shared";
@@ -26,13 +27,18 @@ const FULL_CAPABILITIES = {
 
 type SubscribedMessage = Extract<ServerMessage, { type: "subscribed" }>;
 
-const { mutateMock, authorizationMock } = vi.hoisted(() => ({
+const { mutateMock, authorizationMock, requestInboxRevalidationMock } = vi.hoisted(() => ({
   mutateMock: vi.fn(),
+  requestInboxRevalidationMock: vi.fn(),
   authorizationMock: { canExportTrace: false, hasPermission: vi.fn() },
 }));
 
 vi.mock("@/hooks/use-current-user-authorization", () => ({
   useCurrentUserAuthorization: () => ({ hasPermission: authorizationMock.hasPermission }),
+}));
+
+vi.mock("@/lib/session-inbox-revalidation", () => ({
+  requestSessionInboxRevalidation: requestInboxRevalidationMock,
 }));
 
 vi.mock("swr", async () => {
@@ -147,6 +153,7 @@ describe("useSessionSocket", () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
     mutateMock.mockReset();
+    requestInboxRevalidationMock.mockReset();
     authorizationMock.canExportTrace = false;
     authorizationMock.hasPermission.mockReset();
     authorizationMock.hasPermission.mockImplementation(
@@ -1429,6 +1436,33 @@ describe("useSessionSocket", () => {
       expect(result.current.sessionState?.branchName).toBe("feature/live-update");
     });
     expect(mutateMock).not.toHaveBeenCalled();
+  });
+
+  it("routes inbox revalidation through the throttle and other keys straight to mutate", async () => {
+    const { result } = renderSessionSocket();
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
+
+    const socket = FakeWebSocket.instances[0];
+    act(() => {
+      socket.open();
+      socket.receive(createSubscribedMessage());
+    });
+    mutateMock.mockClear();
+    requestInboxRevalidationMock.mockClear();
+
+    act(() => {
+      socket.receive({ type: "session_title", title: "Renamed" });
+    });
+
+    await waitFor(() => {
+      expect(result.current.sessionState?.title).toBe("Renamed");
+    });
+    expect(requestInboxRevalidationMock).toHaveBeenCalledTimes(1);
+    expect(mutateMock).toHaveBeenCalledWith(isUnarchivedSessionListKey);
+    expect(mutateMock).not.toHaveBeenCalledWith(isSessionInboxKey);
   });
 
   it("routes a repo-scoped session_branch to the matching member, mirroring the scalar only for the primary", async () => {

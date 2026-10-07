@@ -19,6 +19,8 @@ import {
   type SessionSocketState,
 } from "@/lib/session-socket/reducer";
 import { swrKeysToRevalidate } from "@/lib/session-socket/swr-revalidation";
+import { isSessionInboxKey } from "@/lib/session-inbox-api";
+import { requestSessionInboxRevalidation } from "@/lib/session-inbox-revalidation";
 import type { Artifact, SandboxEvent } from "@/types/session";
 import type { SessionAttachmentReference } from "@open-inspect/shared/types/session-attachments";
 import type { ShutdownRecoveryAction } from "@open-inspect/shared/types/sandbox-shutdown";
@@ -251,7 +253,8 @@ export function useSessionSocket(
 
       dispatch({ type: "server_message", message });
       for (const key of swrKeysToRevalidate(message, sessionId)) {
-        mutate(key);
+        if (key === isSessionInboxKey) requestSessionInboxRevalidation();
+        else mutate(key);
       }
     },
     [clearSandboxAccess, refreshSandboxAccess, sessionId]
