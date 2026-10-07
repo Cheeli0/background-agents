@@ -184,14 +184,14 @@ describe("useSidebarSessions", () => {
     expect(result.current.finished.map(({ id }) => id)).toEqual(["finished"]);
   });
 
-  it("polls only the canonical endpoint every 30 seconds while visible", async () => {
+  it("polls only the canonical endpoint every 60 seconds while visible", async () => {
     vi.useFakeTimers();
     const fetcher = vi.fn(async (_key: string) => snapshot());
     renderHook(() => useSidebarSessions(), { wrapper: wrapper(fetcher) });
 
     await act(async () => vi.advanceTimersByTimeAsync(0));
     expect(fetcher).toHaveBeenCalledTimes(1);
-    await act(async () => vi.advanceTimersByTimeAsync(29_999));
+    await act(async () => vi.advanceTimersByTimeAsync(59_999));
     expect(fetcher).toHaveBeenCalledTimes(1);
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(fetcher).toHaveBeenCalledTimes(2);

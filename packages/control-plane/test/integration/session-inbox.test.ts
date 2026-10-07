@@ -5,6 +5,7 @@ import { cleanD1Tables } from "./cleanup";
 import { serviceFetch } from "./helpers";
 import type { SessionInboxCategory } from "@open-inspect/shared/types/session-inbox";
 import { SessionInboxStore } from "../../src/db/session-inbox-store";
+import type { SqlDatabase } from "../../src/db/sql-database";
 
 import { VIEWER_ID, viewer, seedTeams, session } from "./session-inbox-test-helpers";
 
@@ -819,5 +820,43 @@ describe("inbox category conformance", () => {
       items: Array<{ rootSession: { id: string } }>;
     };
     expect(body.items.map(({ rootSession }) => rootSession.id)).toEqual([rootId]);
+  });
+  it("reads live sessions through the status index instead of scanning archived history", async () => {
+    await seedTeams();
+    const store = new SessionIndexStore(env.DB);
+    await store.create(session("live-root", { updatedAt: 5000 }));
+    await store.create(session("archived-root", { status: "archived", updatedAt: 6000 }));
+
+    let snapshotQuery: { sql: string; params: unknown[] } | undefined;
+    const capturingDb = {
+      prepare(sql: string) {
+        const statement = env.DB.prepare(sql);
+        return {
+          bind(...params: unknown[]) {
+            if (sql.includes("WITH RECURSIVE eligible_sessions")) snapshotQuery = { sql, params };
+            return statement.bind(...params);
+          },
+        };
+      },
+      batch(statements: D1PreparedStatement[]) {
+        return env.DB.batch(statements);
+      },
+    } as unknown as SqlDatabase;
+    const snapshot = await new SessionInboxStore(capturingDb).snapshot({
+      readScope: viewer,
+      mode: "on",
+      viewerUserId: VIEWER_ID,
+      limit: 10,
+    });
+
+    expect(snapshot.finished.items.map(({ rootSession }) => rootSession.id)).toEqual(["live-root"]);
+    expect(snapshotQuery).toBeDefined();
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${snapshotQuery!.sql}`)
+      .bind(...snapshotQuery!.params)
+      .all<{ detail: string }>();
+    const details = plan.results.map(({ detail }) => detail);
+    expect(details).toContain("MATERIALIZE eligible_sessions");
+    expect(details.join("\n")).toMatch(/SEARCH sessions USING INDEX idx_sessions_status_updated/);
+    expect(details).not.toContain("SCAN sessions");
   });
 });

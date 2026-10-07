@@ -33,7 +33,9 @@ import {
 } from "@/lib/session-read-state";
 import { subscribeSessionScopeChanges } from "@/lib/session-scope";
 
-const VISIBLE_INBOX_POLL_MS = 30_000;
+// A fallback for sessions with no open socket: socket events, focus, and read
+// state changes already revalidate the inbox, and every poll is a D1 query.
+const VISIBLE_INBOX_POLL_MS = 60_000;
 const SESSION_CREATOR_FILTER_STORAGE_KEY = "open-inspect-sidebar-session-creator-filter";
 
 export type SessionItem = SessionInboxSession;
