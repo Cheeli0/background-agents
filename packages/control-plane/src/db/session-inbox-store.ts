@@ -4,7 +4,11 @@ import {
   type SessionInboxSession,
 } from "@open-inspect/shared/types/session-inbox";
 import type { SessionVisibility } from "@open-inspect/shared/types/teams";
-import type { SessionStatus, SpawnSource } from "@open-inspect/shared/types/sessions";
+import {
+  sessionStatusSchema,
+  type SessionStatus,
+  type SpawnSource,
+} from "@open-inspect/shared/types/sessions";
 import { buildSessionListPredicates, type SessionListFilters } from "./session-list-predicates";
 import { attachSessionListMetadata } from "./session-list-metadata";
 import type { SessionInboxCursor } from "./session-inbox-cursor";
@@ -41,6 +45,16 @@ export type ScopedInboxSession = SessionInboxSession & {
 };
 
 export type ListSessionInboxSnapshotResult = Record<SessionInboxCategory, ListSessionInboxResult>;
+
+/**
+ * Every status except `archived`, as a SQL list. Archived history dominates
+ * the table, and `status != 'archived'` can only be checked by scanning it;
+ * an IN list lets SQLite probe `idx_sessions_status_updated` per live status.
+ */
+const UNARCHIVED_STATUSES_SQL = sessionStatusSchema.options
+  .filter((status) => status !== "archived")
+  .map((status) => `'${status}'`)
+  .join(", ");
 
 interface InboxSessionRow extends ViewerReadStateRow {
   id: string;
@@ -229,7 +243,9 @@ export class SessionInboxStore {
   ): { sql: string; params: unknown[] } {
     const { where, params } = buildSessionListPredicates(options);
     return {
-      sql: `WITH RECURSIVE eligible_sessions AS (
+      // MATERIALIZED reads `sessions` once; inlined, each of the three
+      // references below re-walks the table and repeats the visibility checks.
+      sql: `WITH RECURSIVE eligible_sessions AS MATERIALIZED (
               SELECT sessions.*, ${unreadSql("sessions")} AS unread
               -- Filter before viewer joins to keep shared predicates' columns unambiguous.
               FROM (
@@ -240,7 +256,7 @@ export class SessionInboxStore {
               LEFT JOIN session_read_states read_state
                 ON read_state.session_id = sessions.id
                AND read_state.user_id = viewer.id
-              WHERE sessions.status != 'archived'
+              WHERE sessions.status IN (${UNARCHIVED_STATUSES_SQL})
                 AND sessions.root_session_id IS NOT NULL
                 ${options.excludeAutomatedSessions ? "AND sessions.spawn_source NOT IN ('automation', 'github-bot')" : ""}
             ),
