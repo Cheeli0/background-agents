@@ -32,6 +32,10 @@ import {
   type SessionReadStateReconciledDetail,
 } from "@/lib/session-read-state";
 import { subscribeSessionScopeChanges } from "@/lib/session-scope";
+import {
+  recordSessionInboxFetch,
+  SESSION_INBOX_REVALIDATION_INTERVAL_MS,
+} from "@/lib/session-inbox-revalidation";
 
 // A fallback for sessions with no open socket: socket events, focus, and read
 // state changes already revalidate the inbox, and every poll is a D1 query.
@@ -236,8 +240,14 @@ export function useSidebarSessions() {
     mutate: refreshSnapshot,
   } = useSWR<SessionInboxSnapshot>(
     snapshotKey,
-    fetcher ? (key) => Promise.resolve(fetcher(key)).then(parseSessionInboxSnapshot) : null,
+    fetcher
+      ? (key) => {
+          recordSessionInboxFetch();
+          return Promise.resolve(fetcher(key)).then(parseSessionInboxSnapshot);
+        }
+      : null,
     {
+      focusThrottleInterval: SESSION_INBOX_REVALIDATION_INTERVAL_MS,
       refreshInterval: () =>
         typeof document !== "undefined" && document.visibilityState === "visible"
           ? VISIBLE_INBOX_POLL_MS
