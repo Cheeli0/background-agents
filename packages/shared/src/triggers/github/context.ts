@@ -226,6 +226,7 @@ export function buildWorkflowRunContextBlock(payload: WorkflowRunPayload): strin
     `Conclusion: ${run.conclusion ?? "unknown"}`,
   ];
 
+  if (run.event) lines.push(`Workflow event: ${run.event}`);
   if (run.path) lines.push(`Workflow file: ${run.path}`);
   if (run.head_branch) lines.push(`Branch: ${run.head_branch}`);
   if (run.head_sha) lines.push(`Commit: ${run.head_sha.slice(0, 7)}`);

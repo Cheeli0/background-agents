@@ -113,6 +113,35 @@ describe("ConditionBuilder — slack editors", () => {
 });
 
 describe("ConditionBuilder — GitHub workflow editors", () => {
+  it("adds a workflow source filter without restricting PR branch names", () => {
+    const onChange = renderBuilder([], "github", "workflow_run.completed");
+    fireEvent.click(screen.getByText("Add condition..."));
+    fireEvent.click(screen.getByText("Workflow Event"));
+    expect(onChange).toHaveBeenLastCalledWith([
+      { type: "workflow_event", operator: "eq", value: "pull_request" },
+    ]);
+  });
+
+  it("does not offer workflow source filters for PR webhook events", () => {
+    renderBuilder([], "github", "pull_request.opened");
+    fireEvent.click(screen.getByText("Add condition..."));
+    expect(screen.queryByText("Workflow Event")).not.toBeInTheDocument();
+  });
+
+  it("edits the workflow source event", () => {
+    const onChange = renderBuilder(
+      [{ type: "workflow_event", operator: "eq", value: "pull_request" }],
+      "github",
+      "workflow_run.completed"
+    );
+    fireEvent.change(screen.getByPlaceholderText(/Event that started the workflow/), {
+      target: { value: "workflow_dispatch" },
+    });
+    expect(onChange).toHaveBeenLastCalledWith([
+      { type: "workflow_event", operator: "eq", value: "workflow_dispatch" },
+    ]);
+  });
+
   it("stores the exact workflow name", () => {
     const onChange = renderBuilder(
       [{ type: "workflow_name", operator: "eq", value: "" }],

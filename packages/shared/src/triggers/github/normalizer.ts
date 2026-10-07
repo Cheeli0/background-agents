@@ -300,6 +300,7 @@ function normalizeWorkflowRun(
     actor: getActor(payload),
     conclusion,
     workflowName: run.name,
+    workflowEvent: run.event,
     contextBlock: buildWorkflowRunContextBlock(payload),
     meta: {
       workflowRunId: run.id,

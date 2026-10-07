@@ -97,7 +97,7 @@ export const GITHUB_WEBHOOK_EVENT_CATALOG = [
     displayName: "Workflow Run Completed",
     description: "A GitHub Actions workflow run finished",
     shortLabel: "workflow completed",
-    supportedConditions: ["branch", "actor", "conclusion", "workflow_name"],
+    supportedConditions: ["branch", "actor", "conclusion", "workflow_name", "workflow_event"],
   },
   {
     event: "issues",
@@ -226,6 +226,7 @@ const workflowRunObjectSchema = z.object({
   id: z.number(),
   run_attempt: z.number().int().positive(),
   name: z.string(),
+  event: z.string().optional(),
   conclusion: z.enum(WORKFLOW_RUN_CONCLUSIONS).nullable().optional(),
   head_branch: z.string().nullable().optional(),
   head_sha: z.string().optional(),
