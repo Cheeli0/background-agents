@@ -104,6 +104,39 @@ describe("GitHub event admission", () => {
     },
   };
 
+  it.each(["pull_request", "push", "schedule", "workflow_dispatch", undefined])(
+    "admits only PR workflow executions before launching a session (%s)",
+    async (workflowEvent) => {
+      mocks.current.mockResolvedValue({
+        ...automation,
+        event_type: "workflow_run.completed",
+        trigger_config: JSON.stringify({
+          conditions: [
+            { type: "workflow_name", operator: "eq", value: "CI" },
+            { type: "conclusion", operator: "eq", value: "success" },
+            { type: "workflow_event", operator: "eq", value: "pull_request" },
+          ],
+        }),
+      });
+      const fire = vi.fn<() => Promise<StartInvocationResult>>().mockResolvedValue(started);
+      const result = await admitGitHubEvent(
+        db,
+        {
+          ...event,
+          eventType: "workflow_run.completed",
+          workflowName: "CI",
+          conclusion: "success",
+          workflowEvent,
+        },
+        fire,
+        log
+      );
+      expect(result.triggered).toBe(workflowEvent === "pull_request" ? 1 : 0);
+      expect(fire).toHaveBeenCalledTimes(workflowEvent === "pull_request" ? 1 : 0);
+      if (workflowEvent !== "pull_request") expect(mocks.repositories).not.toHaveBeenCalled();
+    }
+  );
+
   it("retries a grants-version race through fresh authority and target reads", async () => {
     const fire = vi
       .fn<() => Promise<StartInvocationResult>>()

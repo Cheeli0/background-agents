@@ -95,6 +95,9 @@ export function ConditionBuilder({
           value: DEFAULT_GITHUB_CONCLUSION,
         };
         break;
+      case "workflow_event":
+        newCondition = { type: "workflow_event", operator: "eq", value: "pull_request" };
+        break;
       case "workflow_name":
         newCondition = { type: "workflow_name", operator: "eq", value: DEFAULT_WORKFLOW_NAME };
         break;
@@ -274,6 +277,16 @@ function ConditionEditor({
             ))}
           </SelectContent>
         </Select>
+      );
+    case "workflow_event":
+      return (
+        <Input
+          type="text"
+          value={condition.value}
+          onChange={(event) => onChange({ ...condition, value: event.target.value })}
+          placeholder="Event that started the workflow, e.g. pull_request"
+          className="text-xs"
+        />
       );
     case "workflow_name":
       return (

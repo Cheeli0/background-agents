@@ -74,6 +74,11 @@ const triggerConditionSchema = z.discriminatedUnion("type", [
     value: z.string(),
   }),
   z.object({
+    type: z.literal("workflow_event"),
+    operator: z.literal("eq"),
+    value: z.string(),
+  }),
+  z.object({
     type: z.literal("workflow_name"),
     operator: z.literal("eq"),
     value: z.string(),
@@ -163,6 +168,8 @@ export const githubAutomationEventSchema = z.object({
   /** Compatibility field for independently deployed pre-conclusion producers and consumers. */
   checkConclusion: z.string().optional(),
   workflowName: z.string().optional(),
+  /** Event that started the workflow, such as pull_request or push. */
+  workflowEvent: z.string().optional(),
   /** Present only on pull_request events. */
   pullRequest: z
     .object({

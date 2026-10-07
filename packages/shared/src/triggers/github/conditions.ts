@@ -73,6 +73,16 @@ export const githubConditions = {
     validate: validateGitHubConclusion,
     evaluate: evaluateGitHubConclusion,
   },
+  workflow_event: {
+    appliesTo: ["github"] as const,
+    validate(condition) {
+      return condition.value.trim().length === 0 ? "Workflow event is required" : null;
+    },
+    evaluate(condition, event) {
+      if (event.source !== "github") return true;
+      return event.workflowEvent === condition.value;
+    },
+  },
   workflow_name: {
     appliesTo: ["github"] as const,
     validate(condition) {

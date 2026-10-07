@@ -109,6 +109,7 @@ const workflowRunCompletedPayload = {
   workflow_run: {
     id: 123456789,
     run_attempt: 1,
+    event: "pull_request",
     name: "CI",
     conclusion: "failure",
     head_branch: "main",
@@ -793,6 +794,7 @@ const CONDITION_SOURCE_FIELD = {
   actor: "actor",
   conclusion: "conclusion",
   workflow_name: "workflowName",
+  workflow_event: "workflowEvent",
 } as const satisfies Record<string, keyof GitHubAutomationEvent>;
 
 /** A payload per catalog event type. */
