@@ -294,6 +294,7 @@ export const MODEL_CATALOG = [
         id: "opencode-go/deepseek-v4.1-flash",
         name: "DeepSeek V4.1 Flash",
         description: "DeepSeek",
+        reasoning: { efforts: ["low", "high", "max"], default: "high" },
       },
       { id: "opencode-go/deepseek-v4-pro", name: "DeepSeek V4 Pro", description: "DeepSeek" },
       {

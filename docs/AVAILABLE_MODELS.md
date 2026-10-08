@@ -126,7 +126,7 @@ that fails. That model is reachable as `opencode/minimax-m2.5` on Zen.
 | `opencode-go/kimi-k2.7-code`               | Kimi K2.7 Code               | Moonshot AI                   | Not supported                     | N/A            |
 | `opencode-go/kimi-k2.6`                    | Kimi K2.6                    | Moonshot AI                   | Not supported                     | N/A            |
 | `opencode-go/longcat-2.0`                  | LongCat 2.0                  | Meituan                       | Not supported                     | N/A            |
-| `opencode-go/deepseek-v4.1-flash`          | DeepSeek V4.1 Flash          | DeepSeek                      | Not supported                     | N/A            |
+| `opencode-go/deepseek-v4.1-flash`          | DeepSeek V4.1 Flash          | DeepSeek                      | low, high, max                    | high           |
 | `opencode-go/deepseek-v4-pro`              | DeepSeek V4 Pro              | DeepSeek                      | Not supported                     | N/A            |
 | `opencode-go/deepseek-v4-flash`            | DeepSeek V4 Flash            | DeepSeek                      | low, high, max                    | high           |
 | `opencode-go/deepseek-v4-flash-vision-exp` | DeepSeek V4 Flash Vision Exp | DeepSeek, experimental vision | low, high, max                    | high           |
