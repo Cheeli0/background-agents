@@ -177,7 +177,8 @@ On any Linear issue:
 - Add a `model:<name>` label to override the model (e.g., `model:opus`, `model:sonnet`,
   `model:opus-5`, `model:opus-5.5`, `model:sonnet-5`, `model:fable-5-1`, `model:haiku`,
   `model:gpt-5.4`, `model:gpt-6-sol`, `model:gpt-6.1-sol`, `model:glm-5.3-flash`,
-  `model:deepseek-v4.1-flash`)
+  `model:deepseek-v4.1-flash`). A full `provider/model` ID picks the gateway: `model:glm-5.3-flash`
+  runs OpenCode Go, `model:zai-coding-plan/glm-5.3-flash` runs the Z.AI Coding Plan route.
 
 ## Repo Resolution
 

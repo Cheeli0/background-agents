@@ -120,6 +120,13 @@ describe("extractModelFromLabels", () => {
     }
   );
 
+  it.each(["opencode-go/glm-5.3-flash", "zai-coding-plan/glm-5.3-flash"])(
+    "reaches each GLM 5.3 Flash gateway via the full route in model:%s",
+    (model) => {
+      expect(extractModelFromLabels([{ name: `model:${model}` }])).toBe(model);
+    }
+  );
+
   it.each(["gpt-5.2", "gpt-5.2-codex", "opus-6"])(
     "returns null for unsupported model:%s label",
     (model) => {
