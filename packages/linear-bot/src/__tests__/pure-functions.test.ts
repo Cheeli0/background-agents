@@ -86,7 +86,6 @@ describe("extractModelFromLabels", () => {
     ["sonnet", "anthropic/claude-sonnet-4-5"],
     ["opus", "anthropic/claude-opus-4-5"],
     ["fable", "anthropic/claude-fable-5-1"],
-    ["opus-5.5", "anthropic/claude-opus-5-5"],
     ["glm-5.3-flash", "opencode-go/glm-5.3-flash"],
     ["deepseek-v4.1-flash", "opencode-go/deepseek-v4.1-flash"],
   ])("returns the configured model for the model:%s alias", (alias, expected) => {
@@ -110,6 +109,18 @@ describe("extractModelFromLabels", () => {
   it.each(versionedModelLabels)("derives model:%s from the shared catalog", (label, expected) => {
     expect(extractModelFromLabels([{ name: `model:${label}` }])).toBe(expected);
   });
+
+  it.each([
+    ["opus-5.5", "anthropic/claude-opus-5-5"],
+    ["sonnet-5.5", "anthropic/claude-sonnet-5-5"],
+    ["haiku-4.5", "anthropic/claude-haiku-4-5"],
+    ["fable-5.1", "anthropic/claude-fable-5-1"],
+  ])(
+    "maps the dotted version spelling model:%s to the hyphenated catalog ID",
+    (label, expected) => {
+      expect(extractModelFromLabels([{ name: `model:${label}` }])).toBe(expected);
+    }
+  );
 
   it.each(["claude-fable-5-1", "anthropic/claude-fable-5-1"])(
     "preserves the canonical model ID in model:%s",
