@@ -39,6 +39,11 @@ const MODEL_LABEL_ALIASES = {
   sonnet: "anthropic/claude-sonnet-4-5",
   opus: "anthropic/claude-opus-4-5",
   fable: "anthropic/claude-fable-5-1",
+  // Dotted version spellings and provider IDs the generic claude-/gpt- prefix
+  // derivation cannot reach.
+  "opus-5.5": "anthropic/claude-opus-5-5",
+  "glm-5.3-flash": "opencode-go/glm-5.3-flash",
+  "deepseek-v4.1-flash": "opencode-go/deepseek-v4.1-flash",
 } satisfies Record<string, ValidModel>;
 
 /**

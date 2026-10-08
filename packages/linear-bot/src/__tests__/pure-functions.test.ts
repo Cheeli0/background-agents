@@ -86,6 +86,9 @@ describe("extractModelFromLabels", () => {
     ["sonnet", "anthropic/claude-sonnet-4-5"],
     ["opus", "anthropic/claude-opus-4-5"],
     ["fable", "anthropic/claude-fable-5-1"],
+    ["opus-5.5", "anthropic/claude-opus-5-5"],
+    ["glm-5.3-flash", "opencode-go/glm-5.3-flash"],
+    ["deepseek-v4.1-flash", "opencode-go/deepseek-v4.1-flash"],
   ])("returns the configured model for the model:%s alias", (alias, expected) => {
     expect(extractModelFromLabels([{ name: `model:${alias}` }])).toBe(expected);
   });

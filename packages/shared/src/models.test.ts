@@ -400,6 +400,7 @@ describe("model utilities", () => {
     expect(supportsReasoning("openai/gpt-5.4")).toBe(true);
     expect(supportsReasoning("openai/gpt-5.6-terra")).toBe(true);
     expect(supportsReasoning("zai-coding-plan/glm-5.3")).toBe(true);
+    expect(supportsReasoning("opencode-go/deepseek-v4.1-flash")).toBe(true);
     expect(supportsReasoning("xai/grok-build-0.1")).toBe(false);
     expect(supportsReasoning("deepseek/deepseek-v4-flash")).toBe(false);
     expect(supportsReasoning("invalid")).toBe(false);
@@ -419,6 +420,7 @@ describe("model utilities", () => {
     expect(getDefaultReasoningEffort("openai/gpt-5.6-terra")).toBe("medium");
     expect(getDefaultReasoningEffort("openai/gpt-5.6-luna")).toBe("medium");
     expect(getDefaultReasoningEffort("zai-coding-plan/glm-5.3")).toBe("high");
+    expect(getDefaultReasoningEffort("opencode-go/deepseek-v4.1-flash")).toBe("high");
     expect(getDefaultReasoningEffort("xai/grok-build-0.1")).toBeUndefined();
     expect(getDefaultReasoningEffort("deepseek/deepseek-v4-pro")).toBeUndefined();
   });
@@ -528,6 +530,7 @@ describe("model utilities", () => {
     }
 
     for (const model of [
+      "opencode-go/deepseek-v4.1-flash",
       "opencode-go/deepseek-v4-flash",
       "opencode-go/deepseek-v4-flash-vision-exp",
     ]) {
@@ -581,6 +584,8 @@ describe("model utilities", () => {
     expect(isValidReasoningEffort("opencode/muse-spark-1.3-contributor-free", "minimal")).toBe(
       true
     );
+    expect(isValidReasoningEffort("opencode-go/deepseek-v4.1-flash", "max")).toBe(true);
+    expect(isValidReasoningEffort("opencode-go/deepseek-v4.1-flash", "medium")).toBe(false);
     expect(isValidReasoningEffort("opencode-go/deepseek-v4-flash", "max")).toBe(true);
     expect(isValidReasoningEffort("opencode-go/deepseek-v4-flash", "xhigh")).toBe(false);
     expect(isValidReasoningEffort("zai-coding-plan/glm-5.3", "max")).toBe(true);
