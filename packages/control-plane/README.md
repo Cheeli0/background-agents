@@ -603,9 +603,11 @@ An hourly server-side sweep archives completed sessions after
 bounded by `SESSION_AUTO_ARCHIVE_BATCH_LIMIT`.
 
 A hierarchy stays unarchived while any non-archived member has unfinished work or a terminal result
-unread by a user who can see it. Read protection uses the same latest-terminal-message
-acknowledgement and account-creation rules as the inbox, including team visibility and private
-collaborator access. Reading an older result does not acknowledge a newer one.
+unread by a user who can see it and is involved in it: the owner, a collaborator, or someone who has
+read an earlier result. Visible sessions a user never opened do not hold retention open for them.
+Read protection uses the same latest-terminal-message acknowledgement and account-creation rules as
+the inbox, including team visibility and private collaborator access. Reading an older result does
+not acknowledge a newer one.
 
 The session runtime rechecks eligibility and queued work before archiving, uses normal sandbox
 preservation, and confirms the lifecycle index projection. Failed attempts remain available for

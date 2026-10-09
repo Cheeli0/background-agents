@@ -81,13 +81,28 @@ describe("SessionAutoArchiveStore", () => {
     expect(await store.isEligible("root", NOW_MS)).toBe(false);
   });
 
-  it("protects unread results for other readers but not inaccessible private sessions", async () => {
+  it("ignores unread results for viewers who never opened or joined the session", async () => {
     await session("shared");
     await read("shared");
     await db.prepare("INSERT INTO users VALUES ('other', 0)").run();
+    expect(await store.isEligible("shared", NOW_MS)).toBe(true);
+    await read("shared", "other", "previous-result");
     expect(await store.isEligible("shared", NOW_MS)).toBe(false);
+  });
+
+  it("protects unread results for their owner even before the first read", async () => {
+    await session("owned");
+    expect(await store.isEligible("owned", NOW_MS)).toBe(false);
+  });
+
+  it("protects unread results for collaborators but not inaccessible private sessions", async () => {
+    await session("shared");
+    await read("shared");
+    await db.prepare("INSERT INTO users VALUES ('other', 0)").run();
+    await read("shared", "other", "previous-result");
     await db.prepare("UPDATE sessions SET visibility = 'private' WHERE id = 'shared'").run();
     expect(await store.isEligible("shared", NOW_MS)).toBe(true);
+    await db.prepare("DELETE FROM session_read_states WHERE user_id = 'other'").run();
     await db.prepare("INSERT INTO session_collaborators VALUES ('shared', 'other')").run();
     expect(await store.isEligible("shared", NOW_MS)).toBe(false);
   });
@@ -96,6 +111,7 @@ describe("SessionAutoArchiveStore", () => {
     await session("team");
     await read("team");
     await db.prepare("INSERT INTO users VALUES ('other', 0)").run();
+    await read("team", "other", "previous-result");
     await db
       .prepare(
         "UPDATE sessions SET visibility = 'team', owner_team_id = 'team-1' WHERE id = 'team'"
