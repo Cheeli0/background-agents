@@ -73,7 +73,24 @@ export class SessionAutoArchiveStore {
         SELECT 1 FROM users viewer
         LEFT JOIN session_read_states read_state
           ON read_state.user_id = viewer.id AND read_state.session_id = member.id
-        WHERE ${unreadSql("member")} = 1 AND ${this.viewerVisibilitySql()}
+        WHERE ${unreadSql("member")} = 1 AND ${this.viewerInvolvementSql()}
+          AND ${this.viewerVisibilitySql()}
+      )
+    )`;
+  }
+
+  /**
+   * Only viewers tied to the session can hold it open. A visible session that a
+   * viewer never opened would otherwise stay unread for them forever, blocking
+   * retention workspace-wide for every account that never reads.
+   */
+  private viewerInvolvementSql(): string {
+    return `(
+      member.user_id = viewer.id
+      OR read_state.user_id IS NOT NULL
+      OR EXISTS (
+        SELECT 1 FROM session_collaborators involved
+        WHERE involved.session_id = member.id AND involved.user_id = viewer.id
       )
     )`;
   }
