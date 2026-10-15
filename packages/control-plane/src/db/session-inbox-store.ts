@@ -28,6 +28,9 @@ export interface ListSessionInboxOptions extends Pick<
   cursor: SessionInboxCursor | null;
 }
 
+/** The viewer and filters that decide which sessions an inbox query covers. */
+export type InboxFilterOptions = Omit<ListSessionInboxOptions, "category" | "limit" | "cursor">;
+
 export interface ListSessionInboxResult {
   items: Array<{
     rootSession: ScopedInboxSession;
@@ -226,26 +229,42 @@ export class SessionInboxStore {
       .bind(...params, options.limit + 1);
   }
 
-  /** Build the shared visibility, effective-root, and category aggregation CTEs. */
-  private inboxCtes(
-    options: Pick<
-      ListSessionInboxOptions,
-      | "createdByUserIds"
-      | "excludeAutomatedSessions"
-      | "teamIds"
-      | "ownerFilter"
-      | "visibility"
-      | "scope"
-      | "readScope"
-      | "mode"
-      | "viewerUserId"
-    >
-  ): { sql: string; params: unknown[] } {
+  /**
+   * Mark every unread session the inbox lists under these filters as read for
+   * the viewer. Any unread session puts its hierarchy in needs attention, so
+   * this empties that category, including pages the client has not loaded.
+   * Returns the number of sessions whose read state changed.
+   */
+  async markAllRead(options: InboxFilterOptions): Promise<number> {
+    const { sql, params } = this.eligibleSessionsCte(options);
+    const binds = [...params, options.viewerUserId, Date.now()];
+    assertD1QueryParameterLimit(binds.length);
+    const result = await this.db
+      .prepare(
+        `WITH ${sql}
+         INSERT INTO session_read_states
+           (user_id, session_id, last_read_message_id, updated_at)
+         SELECT ?, id, latest_terminal_message_id, ?
+         FROM eligible_sessions
+         WHERE unread = 1
+         ON CONFLICT(user_id, session_id) DO UPDATE SET
+           last_read_message_id = excluded.last_read_message_id,
+           updated_at = excluded.updated_at
+         WHERE session_read_states.last_read_message_id
+           != excluded.last_read_message_id`
+      )
+      .bind(...binds)
+      .run();
+    return result.meta.changes ?? 0;
+  }
+
+  /** The filtered, viewer-visible, unarchived sessions with viewer-specific unread state. */
+  private eligibleSessionsCte(options: InboxFilterOptions): { sql: string; params: unknown[] } {
     const { where, params } = buildSessionListPredicates(options);
     return {
-      // MATERIALIZED reads `sessions` once; inlined, each of the three
-      // references below re-walks the table and repeats the visibility checks.
-      sql: `WITH RECURSIVE eligible_sessions AS MATERIALIZED (
+      // MATERIALIZED reads `sessions` once; inlined, each reference to the CTE
+      // re-walks the table and repeats the visibility checks.
+      sql: `eligible_sessions AS MATERIALIZED (
               SELECT sessions.*, ${unreadSql("sessions")} AS unread
               -- Filter before viewer joins to keep shared predicates' columns unambiguous.
               FROM (
@@ -259,7 +278,16 @@ export class SessionInboxStore {
               WHERE sessions.status IN (${UNARCHIVED_STATUSES_SQL})
                 AND sessions.root_session_id IS NOT NULL
                 ${options.excludeAutomatedSessions ? "AND sessions.spawn_source NOT IN ('automation', 'github-bot')" : ""}
-            ),
+            )`,
+      params: [...params, options.viewerUserId],
+    };
+  }
+
+  /** Build the shared visibility, effective-root, and category aggregation CTEs. */
+  private inboxCtes(options: InboxFilterOptions): { sql: string; params: unknown[] } {
+    const eligible = this.eligibleSessionsCte(options);
+    return {
+      sql: `WITH RECURSIVE ${eligible.sql},
             -- Filtering can hide an ancestor. Re-root each resulting visible subtree
             -- while retaining the persisted root for uninterrupted lineages.
             rerooted_sessions(id, effective_root_session_id) AS (
@@ -298,7 +326,7 @@ export class SessionInboxStore {
               FROM effective_sessions
               GROUP BY effective_root_session_id
             )`,
-      params: [...params, options.viewerUserId],
+      params: eligible.params,
     };
   }
 

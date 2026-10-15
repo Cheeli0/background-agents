@@ -69,7 +69,8 @@ function getIssueLabels(issue: IssuesPayload["issue"]): string[] | undefined {
 
 export function normalizeGitHubEvent(
   githubEventHeader: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  deliveryId?: string
 ): GitHubAutomationEvent | null {
   const action = payload.action;
 
@@ -85,7 +86,7 @@ export function normalizeGitHubEvent(
     case "pull_request": {
       const parsed = pullRequestEventSchema.safeParse(payload);
       if (!parsed.success) return null;
-      return normalizePullRequest(eventType, action, parsed.data);
+      return normalizePullRequest(eventType, action, parsed.data, deliveryId);
     }
 
     case "issue_comment": {
@@ -172,17 +173,21 @@ function getPullRequestFacts(
 function normalizePullRequest(
   eventType: string,
   action: string,
-  payload: PullRequestPayload
+  payload: PullRequestPayload,
+  deliveryId: string | undefined
 ): GitHubAutomationEvent {
   const pr = payload.pull_request;
   const headSha = pr.head?.sha;
   const branch = pr.head?.ref;
   const targetBranch = pr.base?.ref;
+  // A PR can go ready -> draft -> ready without a new commit. The delivery id
+  // tells those transitions apart; GitHub keeps it on redelivery, so retries still dedupe.
+  const occurrence = action === "ready_for_review" ? `:${deliveryId ?? "unknown"}` : "";
 
   return {
     source: "github",
     eventType,
-    triggerKey: `pr:${pr.number}:${action}:${headSha ?? "unknown"}`,
+    triggerKey: `pr:${pr.number}:${action}:${headSha ?? "unknown"}${occurrence}`,
     concurrencyKey: `pr:${pr.number}`,
     repositoryId: payload.repository.id,
     repoOwner: getRepoOwner(payload),

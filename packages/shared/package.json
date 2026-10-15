@@ -229,6 +229,14 @@
     "./memory-tools": {
       "import": "./dist/memory-tools.js",
       "types": "./dist/memory-tools.d.ts"
+    },
+    "./generated-files": {
+      "import": "./dist/generated-files.js",
+      "types": "./dist/generated-files.d.ts"
+    },
+    "./child-status-tool": {
+      "import": "./dist/child-status-tool.js",
+      "types": "./dist/child-status-tool.d.ts"
     }
   },
   "scripts": {

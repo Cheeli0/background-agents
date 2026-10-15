@@ -153,6 +153,7 @@ const COMMENTED_SKIP_REASONS: ReadonlySet<string> = new Set([
   "team_archived",
   "invalid_inline_flags",
   "model_preferences_unavailable",
+  "harness_model_incompatible",
 ]);
 
 async function handleWebhook(
@@ -199,7 +200,7 @@ async function handleWebhook(
       ) {
         // Checkpoint completed external effects; preflight skips must be reevaluated.
         await cacheStore.put(dispatchKey, DELIVERY_STATUS_PROCESSED, {
-          expirationTtl: Math.ceil(PROCESSED_TTL_MS / 1_000),
+          ttlMs: PROCESSED_TTL_MS,
         });
       }
     }
@@ -235,7 +236,7 @@ async function handleWebhook(
   let forwardingFailure: { error: unknown } | undefined;
   if (event) {
     const normalizationPayload = actionResult.success ? actionResult.data : {};
-    const normalizedEvent = normalizeGitHubEvent(event, normalizationPayload);
+    const normalizedEvent = normalizeGitHubEvent(event, normalizationPayload, deliveryId);
     if (normalizedEvent !== null) {
       try {
         const url = "https://internal/internal/github-event";
