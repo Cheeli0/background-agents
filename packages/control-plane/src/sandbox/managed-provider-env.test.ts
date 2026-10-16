@@ -51,72 +51,6 @@ describe("prepareLegacyManagedProviderEnv", () => {
       })
     ).toEqual({ USER_VALUE: "visible", OPENAI_OAUTH_MANAGED: "1" });
   });
-
-  it("makes provider-account mode override legacy OAuth and canonical API keys", () => {
-    expect(
-      prepareManagedProviderEnv({
-        exposedSecrets: {
-          OPENAI_API_KEY: "sk-openai",
-          OPENAI_OAUTH_REFRESH_TOKEN: "legacy-openai",
-          OPENAI_OAUTH_MANAGED: "user-controlled",
-          XAI_API_KEY: "xai-key",
-          XAI_OAUTH_REFRESH_TOKEN: "legacy-xai",
-          USER_VALUE: "visible",
-        },
-        brokerSecrets: {
-          OPENAI_OAUTH_REFRESH_TOKEN: "legacy-openai",
-          XAI_OAUTH_REFRESH_TOKEN: "legacy-xai",
-        },
-        providerAuthModes: {
-          openai: "provider_account",
-          xai: "api_key",
-          anthropic: "api_key",
-        },
-      })
-    ).toEqual({
-      OPENAI_OAUTH_MANAGED: "1",
-      XAI_API_KEY: "xai-key",
-      USER_VALUE: "visible",
-    });
-  });
-
-  it("retains canonical API keys and removes managed state in explicit API-key mode", () => {
-    expect(
-      prepareManagedProviderEnv({
-        exposedSecrets: {
-          OPENAI_API_KEY: "sk-openai",
-          OPENAI_OAUTH_ACCESS_TOKEN: "legacy-access",
-          OPENAI_OAUTH_MANAGED: "1",
-          XAI_API_KEY: "xai-key",
-          XAI_OAUTH_ACCESS_TOKEN: "legacy-access",
-          XAI_OAUTH_MANAGED: "1",
-        },
-        brokerSecrets: {
-          OPENAI_OAUTH_REFRESH_TOKEN: "legacy-openai",
-          XAI_OAUTH_REFRESH_TOKEN: "legacy-xai",
-        },
-        providerAuthModes: {
-          openai: "api_key",
-          xai: "api_key",
-          anthropic: "api_key",
-        },
-      })
-    ).toEqual({ OPENAI_API_KEY: "sk-openai", XAI_API_KEY: "xai-key" });
-  });
-
-  it("uses scoped OAuth only when a legacy-bound provider has a compatible refresh token", () => {
-    expect(
-      prepareManagedProviderEnv({
-        exposedSecrets: { OPENAI_API_KEY: "sk-openai", XAI_API_KEY: "xai-key" },
-        brokerSecrets: { OPENAI_OAUTH_REFRESH_TOKEN: "legacy-openai" },
-        providerAuthModes: {
-          openai: "legacy_scoped_oauth",
-          xai: "legacy_scoped_oauth",
-          anthropic: "api_key",
-        },
-      })
-    ).toEqual({ OPENAI_OAUTH_MANAGED: "1", XAI_API_KEY: "xai-key" });
-  });
 });
 
 describe("prepareManagedProviderEnv", () => {
@@ -184,6 +118,52 @@ describe("prepareManagedProviderEnv", () => {
         },
       })
     ).toEqual({ OPENAI_OAUTH_MANAGED: "1", XAI_API_KEY: "xai-key" });
+  });
+
+  it.each(["api_key", "provider_account"] as const)(
+    "removes competing native Codex authority in %s mode",
+    (mode) => {
+      const result = prepareManagedProviderEnv({
+        harness: "codex",
+        brokerSecrets: {},
+        exposedSecrets: {
+          OPENAI_API_KEY: "selected",
+          OPENAI_BASE_URL: "https://other",
+          OPENAI_ORG_ID: "other-org",
+          CODEX_API_KEY: "unselected",
+          CODEX_ACCESS_TOKEN: "unselected",
+          CODEX_HOME: "/other",
+          CODEX_SQLITE_HOME: "/other",
+          OTEL_EXPORTER_OTLP_ENDPOINT: "https://other",
+          USER_BUILD_VAR: "keep",
+        },
+        providerAuthModes: { openai: mode, xai: "api_key", anthropic: "api_key" },
+      });
+      expect(result).toEqual(
+        mode === "api_key"
+          ? { OPENAI_API_KEY: "selected", USER_BUILD_VAR: "keep" }
+          : { OPENAI_OAUTH_MANAGED: "1", USER_BUILD_VAR: "keep" }
+      );
+    }
+  );
+
+  it("does not change OpenCode native environment compatibility", () => {
+    expect(
+      prepareManagedProviderEnv({
+        harness: "opencode",
+        exposedSecrets: {
+          CODEX_HOME: "/custom",
+          OPENAI_API_KEY: "selected",
+          OPENAI_BASE_URL: "https://custom",
+        },
+        brokerSecrets: {},
+        providerAuthModes: { openai: "api_key", xai: "api_key", anthropic: "api_key" },
+      })
+    ).toEqual({
+      CODEX_HOME: "/custom",
+      OPENAI_API_KEY: "selected",
+      OPENAI_BASE_URL: "https://custom",
+    });
   });
 });
 

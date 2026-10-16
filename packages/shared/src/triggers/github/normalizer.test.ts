@@ -195,6 +195,23 @@ describe("normalizeGitHubEvent", () => {
     });
   });
 
+  describe("pull_request.ready_for_review", () => {
+    it("gives each ready transition at the same head SHA its own trigger key", () => {
+      const ready = (deliveryId: string) =>
+        normalizeGitHubEvent(
+          "pull_request",
+          { ...pullRequestOpenedPayload, action: "ready_for_review" },
+          deliveryId
+        );
+
+      const first = ready("delivery-1");
+
+      expect(first!.triggerKey).toBe("pr:42:ready_for_review:abc1234def5678:delivery-1");
+      expect(ready("delivery-2")!.triggerKey).not.toBe(first!.triggerKey);
+      expect(ready("delivery-1")!.triggerKey).toBe(first!.triggerKey);
+    });
+  });
+
   describe("pull_request.closed", () => {
     it("returns event type pull_request.closed", () => {
       const event = normalizeGitHubEvent("pull_request", pullRequestClosedPayload);
@@ -795,12 +812,17 @@ const CONDITION_SOURCE_FIELD = {
   conclusion: "conclusion",
   workflow_name: "workflowName",
   workflow_event: "workflowEvent",
+  draft: "pullRequest",
 } as const satisfies Record<string, keyof GitHubAutomationEvent>;
 
 /** A payload per catalog event type. */
 const CATALOG_PAYLOADS: Record<string, [event: string, payload: Record<string, unknown>]> = {
   "pull_request.opened": ["pull_request", pullRequestOpenedPayload],
   "pull_request.synchronize": ["pull_request", pullRequestSynchronizePayload],
+  "pull_request.ready_for_review": [
+    "pull_request",
+    { ...pullRequestOpenedPayload, action: "ready_for_review" },
+  ],
   "pull_request.closed": ["pull_request", pullRequestClosedPayload],
   "issue_comment.created": ["issue_comment", issueCommentPayload],
   "pull_request_review_comment.created": ["pull_request_review_comment", reviewCommentPayload],

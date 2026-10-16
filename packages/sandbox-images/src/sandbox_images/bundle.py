@@ -86,6 +86,7 @@ def validate_toolchain(tools: dict[str, Any]) -> None:
         tools[name]
         for name in (
             "uv",
+            "codex",
             "codeServer",
             "ttyd",
             "chrome",
@@ -224,6 +225,7 @@ def pack_bundle(root: Path, provider: str, output_root: Path) -> PackedBundle:
             ("NODE", "node"),
             ("UV", "uv"),
             ("CODE_SERVER", "codeServer"),
+            ("CODEX", "codex"),
             ("TTYD", "ttyd"),
             ("FLUXBOX", "fluxbox"),
             ("LIBVNCSERVER", "libvncserver"),

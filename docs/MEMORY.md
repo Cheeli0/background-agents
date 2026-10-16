@@ -129,7 +129,7 @@ owner-only, including when the caller is another administrator.
 | `PATCH /memories/:id`                                     | Revise content; `If-Match: <currentRevisionId>` is required (428 when missing, 409 when stale).                                                                                                                                                         |
 | `GET /memories/:id/revisions`                             | Immutable revision history.                                                                                                                                                                                                                             |
 | `POST /memories/:id/{action}`                             | `approve`, `reject`, `archive`, or `restore` with `If-Match`; only `archive` and `reject` accept an optional `archiveNote`. Transitions follow `MEMORY_TRANSITIONS`.                                                                                    |
-| `POST /memories/preview`                                  | Summarize the selection a new session would pin (items, sizes, omissions), without creating it.                                                                                                                                                         |
+| `POST /memories/preview`                                  | Summarize the selection a new session would pin (items, sizes, omissions), without creating it. Pass `teamId` to preview a team session; the caller must be a member of the active team.                                                                |
 | `GET, PUT /memory-preferences`                            | Read/save the current user's personal inclusion default.                                                                                                                                                                                                |
 | `GET /sessions/:id/memories`                              | The pinned selection summary with per-item drift, readable with the session.                                                                                                                                                                            |
 | `GET /sessions/:id/sandbox-memory`                        | The session's rendered memory (boot context), sandbox-bound.                                                                                                                                                                                            |
@@ -220,10 +220,11 @@ does not remove the search tool, and searching does not alter the session's pinn
 Search sits behind the `FactSearchIndex` port (`memory/fact-search.ts`): the session service builds
 an engine-independent `FactQuery` from authorized partitions and shapes the bounded response, and
 `LexicalFactIndex` answers it with one escaped-`LIKE` statement ranked in SQL by
-`FACT_SEARCH_FIELDS`. A different engine (Postgres full-text search, embeddings) is another adapter;
-no migration or new service is needed today. Body matching still scans text; bounded results do not
-guarantee constant query cost. The opt-in Node SQLite benchmark records query plans and
-rare/broad-query timings at 1,000 and 10,000 facts with representative and maximum-size bodies:
+`FACT_SEARCH_WEIGHTS` over `MEMORY_SEARCH_FIELDS` (`memory/search-fields.ts`). A different engine
+(Postgres full-text search, embeddings) is another adapter; no migration or new service is needed
+today. Body matching still scans text; bounded results do not guarantee constant query cost. The
+opt-in Node SQLite benchmark records query plans and rare/broad-query timings at 1,000 and 10,000
+facts with representative and maximum-size bodies:
 
 ```bash
 MEMORY_SEARCH_BENCHMARK=1 MEMORY_SEARCH_BENCHMARK_OUTPUT=/tmp/memory-search-benchmark.json \
