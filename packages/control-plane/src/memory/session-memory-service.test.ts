@@ -292,6 +292,19 @@ describe("SessionMemoryService.renderedContext", () => {
     const rendered = await service.renderedContext("session");
     expect(rendered).toMatchObject({ schemaVersion: 1, manifestSha256: "hash" });
     expect(rendered.rendered).toContain("mcp__oi__memory_read");
+    expect(rendered.rendered).toContain("## Saving memories");
+  });
+
+  it("gives an empty selection the write policy instead of nothing", async () => {
+    const empty = {
+      selection: { ...manifest, items: [], catalogChars: 0, estimatedTokens: 0 },
+      drift: [],
+      entries: [],
+    };
+    const { service } = setup({ loaded: empty, session: memorySession({ harness: "claude" }) });
+    const rendered = await service.renderedContext("session");
+    expect(rendered.rendered).toContain("No memories are stored for this session yet.");
+    expect(rendered.rendered).toContain("mcp__oi__memory_write");
   });
 
   it("refuses to install when the principal lost access to a pinned partition", async () => {
