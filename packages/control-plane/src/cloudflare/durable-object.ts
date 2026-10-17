@@ -11,6 +11,7 @@ import { DurableObject } from "cloudflare:workers";
 import { initSchema } from "../session/schema";
 import type { Env } from "../types";
 import { createDurableObjectSessionPlatform } from "./session-platform";
+import { createSqlUsageMeter, type SqlUsageMeter } from "./sql-usage-meter";
 import { createCloudflareEnv, type WorkerBindings } from "./platform";
 import { upgradeWebSocket } from "./websocket-upgrade";
 import type { SessionPlatform } from "../session/platform";
@@ -26,6 +27,8 @@ export class SessionDO extends DurableObject<WorkerBindings> {
   private readonly platform: SessionPlatform;
   /** The application environment over this object's bindings. */
   private readonly appEnv: Env;
+  /** Fork-only: per-statement SQLite usage, logged as `do.sql_usage`. */
+  private readonly sqlUsage: SqlUsageMeter;
   // The per-activation runtime; null until ensureInitialized() builds it.
   private _runtime: SessionRuntime | null = null;
 
@@ -38,7 +41,8 @@ export class SessionDO extends DurableObject<WorkerBindings> {
         "SessionDO requires the DB binding; sessions cannot run without the global store"
       );
     }
-    this.platform = createDurableObjectSessionPlatform(ctx, db);
+    this.sqlUsage = createSqlUsageMeter(ctx.storage.sql);
+    this.platform = createDurableObjectSessionPlatform(ctx, db, this.sqlUsage.sql);
     this.appEnv = createCloudflareEnv(env);
   }
 
@@ -61,6 +65,7 @@ export class SessionDO extends DurableObject<WorkerBindings> {
     // activation uninitialized, so the next event retries initialization
     // instead of dereferencing an undefined runtime.
     this._runtime = runtime;
+    this.sqlUsage.attach(runtime.log);
     runtime.log.info("do.init", {
       event: "do.init",
       duration_ms: Math.round((performance.now() - initStart) * 100) / 100,
@@ -100,6 +105,7 @@ export class SessionDO extends DurableObject<WorkerBindings> {
     wasClean: boolean
   ): Promise<void> {
     await this.runtime.server.onClose(ws, code, reason, wasClean);
+    this.sqlUsage.flush();
   }
 
   /**
@@ -116,5 +122,6 @@ export class SessionDO extends DurableObject<WorkerBindings> {
   async alarm(): Promise<void> {
     this.ensureInitialized(false);
     await this._runtime!.server.onScheduledDeadline();
+    this.sqlUsage.flush();
   }
 }
