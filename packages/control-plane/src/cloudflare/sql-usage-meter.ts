@@ -17,7 +17,10 @@
 import type { Logger } from "../logger";
 import type { SqlResult, SqlStorage } from "../session/sql-storage";
 
-/** Minimum time between `do.sql_usage` events from one activation. */
+/**
+ * Minimum time between exec-driven `do.sql_usage` events. Explicit `flush()` calls (alarm and
+ * socket close) emit any pending usage regardless, so the tail is logged before hibernation.
+ */
 export const SQL_USAGE_FLUSH_INTERVAL_MS = 60_000;
 /** Distinct statements tracked per window; the rest are pooled as `other`. */
 export const SQL_USAGE_MAX_STATEMENTS = 200;
