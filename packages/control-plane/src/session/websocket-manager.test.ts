@@ -5,7 +5,7 @@
  * all WebSocket mechanics in isolation from the host.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { SessionWebSocketManagerImpl } from "./websocket-manager";
 import type { WebSocketManagerConfig } from "./websocket-manager";
 import type { Logger } from "../logger";
@@ -1360,6 +1360,61 @@ describe("SessionWebSocketManagerImpl", () => {
       await manager.enforceAuthTimeout(ws, "ws-1");
 
       expect(ws.close).not.toHaveBeenCalled();
+    });
+
+    describe("releases the pending timer early", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("when the client activates", async () => {
+        const { manager, sockets } = createManager();
+        const ws = createFakeWebSocket();
+        sockets.set(ws, ["wsid:ws-1"]);
+
+        const timeout = manager.enforceAuthTimeout(ws, "ws-1");
+        expect(vi.getTimerCount()).toBe(1);
+
+        await manager.activateClient(
+          ws,
+          createClientInfo({ authorizationExpiresAt: Date.now() + 300_000 }),
+          () => true
+        );
+
+        expect(vi.getTimerCount()).toBe(0);
+        await timeout;
+        expect(ws.close).not.toHaveBeenCalled();
+      });
+
+      it("when the client is removed", async () => {
+        const { manager, sockets } = createManager();
+        const ws = createFakeWebSocket();
+        sockets.set(ws, ["wsid:ws-1"]);
+
+        const timeout = manager.enforceAuthTimeout(ws, "ws-1");
+        manager.removeClient(ws);
+
+        expect(vi.getTimerCount()).toBe(0);
+        await timeout;
+        expect(ws.close).not.toHaveBeenCalled();
+      });
+
+      it("but still closes an unauthenticated socket at the deadline", async () => {
+        const { manager, sockets } = createManager();
+        const ws = createFakeWebSocket();
+        sockets.set(ws, ["wsid:ws-1"]);
+
+        const timeout = manager.enforceAuthTimeout(ws, "ws-1");
+        await vi.advanceTimersByTimeAsync(TEST_CONFIG.authTimeoutMs);
+        await timeout;
+
+        expect(ws.close).toHaveBeenCalledWith(4008, "Authentication timeout");
+        expect(vi.getTimerCount()).toBe(0);
+      });
     });
   });
 
