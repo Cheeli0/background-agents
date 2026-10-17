@@ -16,6 +16,7 @@
 
 import { parseTeamsEnforcementMode } from "./authorization/teams-enforcement";
 import { SessionAutoArchiveStore } from "./db/session-auto-archive-store";
+import { deleteExpiredGithubWebhookDeliveries } from "./db/github-webhook-delivery-cleanup";
 import { SESSION_AUTO_ARCHIVE_CRON } from "./session/auto-archive-policy";
 import { SessionAutoArchiveSweep } from "./session/auto-archive-sweep";
 import { checkAutofixQueueHealth } from "./autofix/queue-health";
@@ -65,6 +66,17 @@ export const SCHEDULED_JOBS: readonly ScheduledJob[] = [
         sessions,
         log
       ).run(nowMs);
+      // Fork-only: shares this hourly slot rather than claiming another of
+      // the account's cron triggers.
+      try {
+        await deleteExpiredGithubWebhookDeliveries(db, nowMs, log);
+      } catch (error) {
+        log.warn("github_webhook_delivery_cleanup", {
+          event: "github_webhook_delivery_cleanup",
+          outcome: "error",
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
+      }
     },
   },
   {

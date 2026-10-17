@@ -1,6 +1,7 @@
 import type { SqlDatabase } from "../db/sql-database";
 import type { SessionWebSocket } from "../platform-ports";
 import type { SessionPlatform } from "../session/platform";
+import type { SqlStorage } from "../session/sql-storage";
 import { createCloudflareBackgroundTasks } from "./background-tasks";
 
 /**
@@ -21,11 +22,12 @@ function requireCloudflareWebSocket(ws: SessionWebSocket): WebSocket {
  */
 export function createDurableObjectSessionPlatform(
   ctx: DurableObjectState,
-  db: SqlDatabase
+  db: SqlDatabase,
+  sql: SqlStorage = ctx.storage.sql
 ): SessionPlatform {
   return {
     id: ctx.id.toString(),
-    storage: ctx.storage,
+    storage: { sql, transactionSync: (closure) => ctx.storage.transactionSync(closure) },
     db,
     alarmStore: ctx.storage,
     sockets: {
