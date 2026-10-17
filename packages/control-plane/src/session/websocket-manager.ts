@@ -154,6 +154,8 @@ export type ClientLookup =
 export class SessionWebSocketManagerImpl implements SessionWebSocketManager {
   private clients = new Map<SessionWebSocket, ClientInfo>();
   private synchronizingClients = new Set<SessionWebSocket>();
+  /** Pending auth deadlines; settled early once the socket authenticates or leaves. */
+  private authTimeouts = new Map<SessionWebSocket, () => void>();
   private sandboxWs: SessionWebSocket | null = null;
 
   /** Create a WebSocket manager over the host's sockets and persisted client mappings. */
@@ -342,6 +344,7 @@ export class SessionWebSocketManagerImpl implements SessionWebSocketManager {
 
   setClient(ws: SessionWebSocket, info: ClientInfo): void {
     this.clients.set(ws, info);
+    this.settleAuthTimeout(ws);
   }
 
   removeClient(ws: SessionWebSocket): ClientInfo | null {
@@ -400,6 +403,7 @@ export class SessionWebSocketManagerImpl implements SessionWebSocketManager {
       authorizationExpiresAt: info.authorizationExpiresAt,
     });
     this.clients.set(ws, info);
+    this.settleAuthTimeout(ws);
     this.log.debug("Stored ws_client_mapping", {
       ws_id: parsed.wsId,
       participant_id: info.participantId,
@@ -524,6 +528,7 @@ export class SessionWebSocketManagerImpl implements SessionWebSocketManager {
     const client = this.clients.get(ws) ?? null;
     this.clients.delete(ws);
     this.synchronizingClients.delete(ws);
+    this.settleAuthTimeout(ws);
     if (parsed.kind === "client" && parsed.wsId) {
       this.wsClientMappingRepository.deleteWsClientMapping(parsed.wsId);
     }
@@ -535,7 +540,22 @@ export class SessionWebSocketManagerImpl implements SessionWebSocketManager {
   // -------------------------------------------------------------------------
 
   async enforceAuthTimeout(ws: SessionWebSocket, wsId: string): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, this.config.authTimeoutMs));
+    // A pending timer keeps the Durable Object from hibernating, so release it
+    // as soon as the socket authenticates or is torn down instead of sleeping
+    // out the full deadline on every connection.
+    const settledEarly = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.authTimeouts.delete(ws);
+        resolve(false);
+      }, this.config.authTimeoutMs);
+      this.authTimeouts.get(ws)?.();
+      this.authTimeouts.set(ws, () => {
+        clearTimeout(timer);
+        this.authTimeouts.delete(ws);
+        resolve(true);
+      });
+    });
+    if (settledEarly) return;
 
     if (!isSocketOpen(ws)) return;
     if (this.clients.has(ws)) return;
@@ -550,6 +570,10 @@ export class SessionWebSocketManagerImpl implements SessionWebSocketManager {
       timeout_ms: this.config.authTimeoutMs,
     });
     this.close(ws, 4008, "Authentication timeout");
+  }
+
+  private settleAuthTimeout(ws: SessionWebSocket): void {
+    this.authTimeouts.get(ws)?.();
   }
 
   *getAuthenticatedClients(): IterableIterator<ClientInfo> {

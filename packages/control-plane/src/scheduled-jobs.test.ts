@@ -7,6 +7,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAutofixQueueHealth } from "./autofix/queue-health";
+import { deleteExpiredGithubWebhookDeliveries } from "./db/github-webhook-delivery-cleanup";
 import { SessionIndexStore } from "./db/session-index";
 import type { SqlDatabase } from "./db/sql-database";
 import type * as ImageBuildScheduler from "./image-builds/scheduler";
@@ -31,6 +32,9 @@ import type { Env } from "./types";
 
 // The job bodies are mocked; the cron constants stay the production values so
 // the Terraform parity check below reads what the Worker really registers.
+vi.mock("./db/github-webhook-delivery-cleanup", () => ({
+  deleteExpiredGithubWebhookDeliveries: vi.fn(async () => 0),
+}));
 vi.mock("./autofix/queue-health", () => ({ checkAutofixQueueHealth: vi.fn(async () => {}) }));
 vi.mock("./image-builds/scheduler", async (importOriginal) => ({
   ...(await importOriginal<typeof ImageBuildScheduler>()),
@@ -129,6 +133,21 @@ describe("SCHEDULED_JOBS", () => {
     expect(sessions).toBe(deps.sessions);
     expect(log).toBe(deps.log);
     expect(autoArchiveRun).toHaveBeenCalledWith(123);
+    expect(deleteExpiredGithubWebhookDeliveries).toHaveBeenCalledWith(deps.db, 123, deps.log);
+  });
+
+  it("keeps retention's outcome when webhook cleanup fails", async () => {
+    const deps = fakeDeps();
+    vi.mocked(deleteExpiredGithubWebhookDeliveries).mockRejectedValueOnce(new Error("d1 down"));
+
+    await expect(
+      findScheduledJob(SESSION_AUTO_ARCHIVE_CRON)!.run(deps, 123)
+    ).resolves.toBeUndefined();
+    expect(autoArchiveRun).toHaveBeenCalledWith(123);
+    expect(deps.log.warn).toHaveBeenCalledWith(
+      "github_webhook_delivery_cleanup",
+      expect.objectContaining({ outcome: "error" })
+    );
   });
 
   it("runs the every-minute tick: queue health in the background, the scheduler tick awaited", async () => {
