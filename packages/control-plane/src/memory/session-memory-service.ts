@@ -16,6 +16,7 @@ import { MemoryAccessError, MemoryNotFoundError, MemoryValidationError, unhandle
 import { factSearchResponse, type FactSearchIndex, type FactSearchPartition } from "./fact-search";
 import { samePartition, type MemoryPartition } from "./partition";
 import { renderMemorySection } from "./render";
+import { withMemoryWriteGuidance } from "./write-guidance";
 import { canWritePersonal, personalReadAccess } from "./session-rules";
 import { repositoryPartition, sourcePartitions } from "./sources";
 import type { MemorySession } from "./types";
@@ -69,7 +70,10 @@ export class SessionMemoryService {
     return {
       schemaVersion: SANDBOX_MEMORY_SCHEMA_VERSION,
       manifestSha256: loaded.selection.manifestSha256,
-      rendered: renderMemorySection(loaded.selection, loaded.entries, session.harness),
+      rendered: withMemoryWriteGuidance(
+        renderMemorySection(loaded.selection, loaded.entries, session.harness),
+        session.harness
+      ),
     };
   }
 
