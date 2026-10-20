@@ -82,13 +82,14 @@ export const SCHEDULED_JOBS: readonly ScheduledJob[] = [
   {
     name: "scheduler_tick",
     cron: SCHEDULER_TICK_CRON,
-    async run({ env, db, backgroundTasks, log }) {
+    async run({ env, db, backgroundTasks, log }, nowMs) {
       backgroundTasks.submit(() => checkAutofixQueueHealth(env, log), {
         name: "autofix_queue_health",
       });
       // The tick runs both the recovery sweep (orphaned/timed-out runs) and
-      // processes overdue automations.
-      await new Scheduler(db, env, backgroundTasks).tick();
+      // processes overdue automations. The slot time decides whether this
+      // tick also runs the finalization sweep.
+      await new Scheduler(db, env, backgroundTasks).tick(nowMs);
     },
   },
   {

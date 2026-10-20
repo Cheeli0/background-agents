@@ -106,7 +106,7 @@ export class CronLoop {
       });
       return;
     }
-    const run = this.run(job, this.now())
+    const run = this.run(job, slotMs)
       .catch((error: unknown) => {
         this.log.error("scheduled_job.failed", {
           event: "scheduled_job.failed",

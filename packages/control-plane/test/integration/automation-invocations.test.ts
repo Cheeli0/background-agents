@@ -9,6 +9,7 @@ import {
 } from "../../src/db/automation-store";
 import { isAutomationExecutionAuthorized } from "../../src/automation/authorization-guard";
 import { cleanD1Tables } from "./cleanup";
+import type { SqlDatabase } from "../../src/db/sql-database";
 import { makeAutomation, makeChild, makeInvocation } from "./invocation-fixtures";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -520,8 +521,45 @@ describe("automation invocations (D1 integration)", () => {
         overlapScope: { kind: "automation" },
       });
 
-      expect(await store.tryMarkInvocationFailureCounted(invocation.id)).toBe(true);
-      expect(await store.tryMarkInvocationFailureCounted(invocation.id)).toBe(false);
+      expect(await store.countInvocationFailure(invocation.id, "auto-cas")).toBe(1);
+      expect(await store.countInvocationFailure(invocation.id, "auto-cas")).toBeNull();
+      expect((await store.getById("auto-cas"))!.consecutive_failures).toBe(1);
+      expect((await store.getInvocationById(invocation.id))!.failure_counted_at).not.toBeNull();
+    });
+
+    it("failure counting commits the mark and the strike together or not at all", async () => {
+      const store = new AutomationStore(env.DB);
+      await store.create(makeAutomation({ id: "auto-atomic", consecutive_failures: 1 }));
+      const invocation = makeInvocation("auto-atomic");
+      await store.insertInvocationGuarded({
+        invocation,
+        children: [
+          makeChild("auto-atomic", {
+            status: "failed",
+            completed_at: 100,
+            repo_owner: "acme",
+            repo_name: "api",
+          }),
+        ],
+        overlapScope: { kind: "automation" },
+      });
+      // Fail the batch's last statement, after both writes have run.
+      const failingDb: SqlDatabase = {
+        prepare: (query) =>
+          env.DB.prepare(
+            query.startsWith("SELECT consecutive_failures")
+              ? "SELECT missing_column FROM automations WHERE id = ?"
+              : query
+          ),
+        batch: (statements) => env.DB.batch(statements as D1PreparedStatement[]),
+      };
+
+      await expect(
+        new AutomationStore(failingDb).countInvocationFailure(invocation.id, "auto-atomic")
+      ).rejects.toThrow();
+
+      expect((await store.getById("auto-atomic"))!.consecutive_failures).toBe(1);
+      expect((await store.getInvocationById(invocation.id))!.failure_counted_at).toBeNull();
     });
 
     it("updateRun refuses to resurrect a terminal run", async () => {
@@ -646,7 +684,7 @@ describe("automation invocations (D1 integration)", () => {
         ],
         overlapScope: { kind: "automation" },
       });
-      await store.tryMarkInvocationFailureCounted("inv-counted");
+      await store.countInvocationFailure("inv-counted", "auto-sweep");
 
       // (3) still active → not matched.
       // (Overlap guard: use per-key scope so seeding succeeds despite actives.)

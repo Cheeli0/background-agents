@@ -905,20 +905,6 @@ describe("AutomationStore (D1 integration)", () => {
   // ─── Failure tracking ──────────────────────────────────────────────────────
 
   describe("failure tracking", () => {
-    it("increments consecutive failures", async () => {
-      const store = new AutomationStore(env.DB);
-      await store.create(makeAutomation({ id: "auto-f1", consecutive_failures: 0 }));
-
-      const count1 = await store.incrementConsecutiveFailures("auto-f1");
-      expect(count1).toBe(1);
-
-      const count2 = await store.incrementConsecutiveFailures("auto-f1");
-      expect(count2).toBe(2);
-
-      const count3 = await store.incrementConsecutiveFailures("auto-f1");
-      expect(count3).toBe(3);
-    });
-
     it("resets consecutive failures to zero", async () => {
       const store = new AutomationStore(env.DB);
       await store.create(makeAutomation({ id: "auto-f2", consecutive_failures: 5 }));

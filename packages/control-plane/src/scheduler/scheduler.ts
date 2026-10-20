@@ -190,6 +190,19 @@ const RECOVERY_SWEEP_LIMIT = 50;
 const INVOCATION_SWEEP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * Fork-only: the finalization sweep runs on ticks whose minute is a multiple
+ * of this, not on every tick. It only repairs accounting a crash skipped
+ * (callbacks account inline), and its query was ~13% of D1 rows read. 15
+ * minutes matches the minimum automation schedule interval.
+ */
+const FINALIZATION_SWEEP_INTERVAL_MINUTES = 15;
+
+/** Whether the tick for the cron slot at `slotMs` runs the finalization sweep. */
+export function isFinalizationSweepSlot(slotMs: number): boolean {
+  return Math.floor(slotMs / 60_000) % FINALIZATION_SWEEP_INTERVAL_MINUTES === 0;
+}
+
+/**
  * Bound on the thread-context request. It sits between admission and launch, so
  * a slow Slack read would hold every child in `starting` until the orphan sweep
  * repairs them. Matches the callback-delivery attempt timeout; on expiry the run
@@ -411,14 +424,17 @@ export class Scheduler {
   }
 
   /**
-   * Increment the automation's failure streak and auto-pause at the threshold.
-   * Callers gate this per-invocation via the failure_counted_at CAS.
+   * Count the invocation's failure toward the automation's streak and
+   * auto-pause at the threshold. The store's failure_counted_at CAS admits one
+   * strike per invocation and commits it together with the mark.
    */
   private async trackAutomationFailure(
     store: AutomationStore,
-    automationId: string
+    automationId: string,
+    invocationId: string
   ): Promise<void> {
-    const count = await store.incrementConsecutiveFailures(automationId);
+    const count = await store.countInvocationFailure(invocationId, automationId);
+    if (count === null) return;
     if (count >= AUTO_PAUSE_THRESHOLD) {
       await store.autoPause(automationId);
       this.log.warn("Automation auto-paused due to consecutive failures", {
@@ -446,9 +462,7 @@ export class Scheduler {
     if (aggregate.total === 0) return; // childless skip — never counts
 
     if (aggregate.failed > 0) {
-      const won = await store.tryMarkInvocationFailureCounted(invocationId);
-      if (!won) return;
-      await this.trackAutomationFailure(store, automationId);
+      await this.trackAutomationFailure(store, automationId, invocationId);
     } else if (aggregate.active === 0 && aggregate.completed === aggregate.total) {
       await store.resetConsecutiveFailures(automationId);
     }
@@ -909,7 +923,8 @@ export class Scheduler {
 
   // ─── Tick handler ────────────────────────────────────────────────────────
 
-  async tick(): Promise<SchedulerTickResult> {
+  /** Run one scheduler tick for the cron slot at `slotMs`. */
+  async tick(slotMs: number = Date.now()): Promise<SchedulerTickResult> {
     const store = new AutomationStore(this.db);
     const now = Date.now();
     let processed = 0;
@@ -919,6 +934,7 @@ export class Scheduler {
 
     // 1. Recovery sweeps
     await this.recoverySweep(store);
+    if (isFinalizationSweepSlot(slotMs)) await this.finalizationSweep(store);
     await sweepHeldPrompts(this.continuityDeps(store), now);
 
     // 2. Process overdue automations, bounded by the per-tick child budget.
@@ -1070,10 +1086,7 @@ export class Scheduler {
       });
     }
 
-    if (orphaned.length === 0 && timedOut.length === 0) {
-      await this.finalizationSweep(store);
-      return;
-    }
+    if (orphaned.length === 0 && timedOut.length === 0) return;
 
     for (const run of orphaned) {
       this.log.warn("Recovering orphaned starting run", {
@@ -1130,10 +1143,7 @@ export class Scheduler {
       }
     }
 
-    if (recoveredRuns.length === 0) {
-      await this.finalizationSweep(store);
-      return;
-    }
+    if (recoveredRuns.length === 0) return;
 
     // Failure accounting: strikes are per INVOCATION (CAS-deduped), so two
     // stuck children of one fan-out cost one strike, not two.
@@ -1154,8 +1164,6 @@ export class Scheduler {
         });
       }
     }
-
-    await this.finalizationSweep(store);
   }
 
   /**

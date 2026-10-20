@@ -124,9 +124,13 @@ const { resolveManagedSkills } = await import("../session/skill-resolution");
 const {
   AutomationExecutionUnauthorizedError,
   EXECUTION_DEADLINE_GRACE_MS,
+  isFinalizationSweepSlot,
   Scheduler,
   SessionFollowUpRefusedError,
 } = await import("./scheduler");
+
+/** A cron slot on a 15-minute boundary, where the finalization sweep runs. */
+const SWEEP_SLOT_MS = Date.UTC(2026, 9, 20, 12, 15);
 
 // ─── Mock factories ──────────────────────────────────────────────────────────
 
@@ -183,7 +187,7 @@ function createMockStore() {
     acceptFollowUpReceipt: vi.fn().mockResolvedValue(undefined),
     releaseFollowUpReceipt: vi.fn().mockResolvedValue(undefined),
     getInvocationRunAggregate: vi.fn().mockResolvedValue(aggregate()),
-    tryMarkInvocationFailureCounted: vi.fn().mockResolvedValue(true),
+    countInvocationFailure: vi.fn().mockResolvedValue(1),
     getUncountedFailedInvocations: vi.fn().mockResolvedValue([]),
     getStaleFailureResetCandidates: vi.fn().mockResolvedValue([]),
     updateRun: vi.fn().mockResolvedValue(true),
@@ -195,7 +199,6 @@ function createMockStore() {
     countOverdue: vi.fn().mockResolvedValue(0),
     getOrphanedStartingRuns: vi.fn().mockResolvedValue([]),
     getRunsPastExecutionDeadline: vi.fn().mockResolvedValue([]),
-    incrementConsecutiveFailures: vi.fn().mockResolvedValue(1),
     resetConsecutiveFailures: vi.fn().mockResolvedValue(undefined),
     autoPause: vi.fn().mockResolvedValue(undefined),
     update: vi.fn().mockResolvedValue(undefined),
@@ -727,7 +730,7 @@ describe("Scheduler", () => {
       });
       const body = await getInitBody(vi.mocked(stub.fetch));
       expect(body.scmUserId).toBeUndefined();
-      expect(mockStore.incrementConsecutiveFailures).not.toHaveBeenCalled();
+      expect(mockStore.countInvocationFailure).not.toHaveBeenCalled();
     });
 
     it("still fails launch when the attribution store is unavailable", async () => {
@@ -1343,8 +1346,8 @@ describe("Scheduler", () => {
       });
 
       // Born-terminal: finalized immediately with one CAS-guarded strike.
-      expect(mockStore.tryMarkInvocationFailureCounted).toHaveBeenCalledTimes(1);
-      expect(mockStore.incrementConsecutiveFailures).toHaveBeenCalledWith("auto-1");
+      expect(mockStore.countInvocationFailure).toHaveBeenCalledTimes(1);
+      expect(mockStore.countInvocationFailure).toHaveBeenCalledWith(expect.any(String), "auto-1");
     });
 
     it("one inaccessible repository never blocks its siblings", async () => {
@@ -1379,7 +1382,7 @@ describe("Scheduler", () => {
         expect.any(Number)
       );
       // One strike for the invocation, not per failed child.
-      expect(mockStore.tryMarkInvocationFailureCounted).toHaveBeenCalledTimes(1);
+      expect(mockStore.countInvocationFailure).toHaveBeenCalledTimes(1);
     });
 
     it("passes resolved code-server and sandbox settings into automation sessions", async () => {
@@ -1571,7 +1574,7 @@ describe("Scheduler", () => {
         expect.any(String),
         expect.objectContaining({ status: "failed" })
       );
-      expect(mockStore.incrementConsecutiveFailures).toHaveBeenCalledWith("auto-1");
+      expect(mockStore.countInvocationFailure).toHaveBeenCalledWith(expect.any(String), "auto-1");
     });
 
     it("claims the run session before initializing it", async () => {
@@ -1612,7 +1615,7 @@ describe("Scheduler", () => {
       mockStore.getInvocationRunAggregate.mockResolvedValue(
         aggregate({ active: 0, failed: 1, completed: 0 })
       );
-      mockStore.incrementConsecutiveFailures.mockResolvedValue(3);
+      mockStore.countInvocationFailure.mockResolvedValue(3);
 
       const failingStub = {
         fetch: vi.fn().mockRejectedValue(new Error("Session init failed")),
@@ -1632,7 +1635,7 @@ describe("Scheduler", () => {
       mockStore.getInvocationRunAggregate.mockResolvedValue(
         aggregate({ active: 0, failed: 1, completed: 0 })
       );
-      mockStore.incrementConsecutiveFailures.mockResolvedValue(2);
+      mockStore.countInvocationFailure.mockResolvedValue(2);
 
       const failingStub = {
         fetch: vi.fn().mockRejectedValue(new Error("fail")),
@@ -1652,7 +1655,7 @@ describe("Scheduler", () => {
       mockStore.getInvocationRunAggregate.mockResolvedValue(
         aggregate({ active: 0, failed: 1, completed: 0 })
       );
-      mockStore.tryMarkInvocationFailureCounted.mockResolvedValue(false);
+      mockStore.countInvocationFailure.mockResolvedValue(null);
 
       const failingStub = {
         fetch: vi.fn().mockRejectedValue(new Error("fail")),
@@ -1662,7 +1665,7 @@ describe("Scheduler", () => {
       const scheduler = createScheduler(env);
       await scheduler.tick();
 
-      expect(mockStore.incrementConsecutiveFailures).not.toHaveBeenCalled();
+      expect(mockStore.autoPause).not.toHaveBeenCalled();
     });
 
     it("passes automation user_id to session index", async () => {
@@ -1790,8 +1793,7 @@ describe("Scheduler", () => {
         expect.any(Number)
       );
       expect(mockStore.getInvocationRunAggregate).toHaveBeenCalledTimes(1);
-      expect(mockStore.tryMarkInvocationFailureCounted).toHaveBeenCalledExactlyOnceWith("inv-9");
-      expect(mockStore.incrementConsecutiveFailures).toHaveBeenCalledExactlyOnceWith("auto-1");
+      expect(mockStore.countInvocationFailure).toHaveBeenCalledExactlyOnceWith("inv-9", "auto-1");
     });
 
     it("recovers timed-out running runs", async () => {
@@ -1842,7 +1844,10 @@ describe("Scheduler", () => {
         "execution_timeout",
         expect.any(Number)
       );
-      expect(mockStore.tryMarkInvocationFailureCounted).toHaveBeenCalledWith("inv-timeout");
+      expect(mockStore.countInvocationFailure).toHaveBeenCalledWith(
+        "inv-timeout",
+        expect.any(String)
+      );
 
       const queryErrorCall = errorSpy.mock.calls.find(
         ([, data]) =>
@@ -1909,7 +1914,7 @@ describe("Scheduler", () => {
       mockStore.getInvocationRunAggregate.mockResolvedValue(
         aggregate({ total: 1, active: 0, failed: 1 })
       );
-      mockStore.incrementConsecutiveFailures.mockResolvedValue(3);
+      mockStore.countInvocationFailure.mockResolvedValue(3);
 
       const scheduler = createScheduler();
       const warnSpy = vi
@@ -1952,7 +1957,7 @@ describe("Scheduler", () => {
       mockStore.getInvocationRunAggregate.mockResolvedValue(
         aggregate({ total: 1, active: 0, failed: 1 })
       );
-      mockStore.incrementConsecutiveFailures.mockResolvedValue(3);
+      mockStore.countInvocationFailure.mockResolvedValue(3);
       mockStore.autoPause.mockImplementation(async (automationId: string) => {
         if (automationId === "auto-1") {
           throw new Error("D1 auto-pause timeout");
@@ -2064,7 +2069,10 @@ describe("Scheduler", () => {
         expect.any(Number)
       );
 
-      expect(mockStore.tryMarkInvocationFailureCounted).toHaveBeenCalledWith("inv-orphan");
+      expect(mockStore.countInvocationFailure).toHaveBeenCalledWith(
+        "inv-orphan",
+        expect.any(String)
+      );
 
       const bulkFailErrorCall = errorSpy.mock.calls.find(
         ([, data]) =>
@@ -2127,10 +2135,9 @@ describe("Scheduler", () => {
       );
 
       const scheduler = createScheduler();
-      await scheduler.tick();
+      await scheduler.tick(SWEEP_SLOT_MS);
 
-      expect(mockStore.tryMarkInvocationFailureCounted).toHaveBeenCalledWith("inv-crashed");
-      expect(mockStore.incrementConsecutiveFailures).toHaveBeenCalledWith("auto-1");
+      expect(mockStore.countInvocationFailure).toHaveBeenCalledWith("inv-crashed", "auto-1");
     });
 
     it("applies missed resets for failing automations whose latest invocation completed", async () => {
@@ -2142,10 +2149,32 @@ describe("Scheduler", () => {
       );
 
       const scheduler = createScheduler();
-      await scheduler.tick();
+      await scheduler.tick(SWEEP_SLOT_MS);
 
       expect(mockStore.resetConsecutiveFailures).toHaveBeenCalledWith("auto-1");
-      expect(mockStore.incrementConsecutiveFailures).not.toHaveBeenCalled();
+      expect(mockStore.countInvocationFailure).not.toHaveBeenCalled();
+    });
+
+    it("skips the finalization sweep on ticks off a 15-minute boundary", async () => {
+      mockStore.getUncountedFailedInvocations.mockResolvedValue([
+        { id: "inv-crashed", automation_id: "auto-1" },
+      ]);
+
+      await createScheduler().tick(SWEEP_SLOT_MS + 60_000);
+
+      expect(mockStore.getUncountedFailedInvocations).not.toHaveBeenCalled();
+      expect(mockStore.getStaleFailureResetCandidates).not.toHaveBeenCalled();
+      expect(mockStore.getOverdueAutomations).toHaveBeenCalled();
+    });
+
+    it.each([
+      [Date.UTC(2026, 9, 20, 12, 0), true],
+      [Date.UTC(2026, 9, 20, 12, 15, 59, 999), true],
+      [Date.UTC(2026, 9, 20, 12, 45), true],
+      [Date.UTC(2026, 9, 20, 12, 16), false],
+      [Date.UTC(2026, 9, 20, 12, 14, 59, 999), false],
+    ])("treats the slot at %i as a sweep slot: %s", (slotMs, expected) => {
+      expect(isFinalizationSweepSlot(slotMs)).toBe(expected);
     });
   });
 
@@ -2517,7 +2546,7 @@ describe("Scheduler", () => {
       await expect(scheduler.runComplete(runCompletion())).resolves.toBeUndefined();
 
       expect(mockStore.resetConsecutiveFailures).not.toHaveBeenCalled();
-      expect(mockStore.incrementConsecutiveFailures).not.toHaveBeenCalled();
+      expect(mockStore.countInvocationFailure).not.toHaveBeenCalled();
     });
 
     it("never resets after a partial failure, even when the invocation finishes", async () => {
@@ -2526,13 +2555,13 @@ describe("Scheduler", () => {
       mockStore.getInvocationRunAggregate.mockResolvedValue(
         aggregate({ total: 2, active: 0, failed: 1, completed: 1 })
       );
-      mockStore.tryMarkInvocationFailureCounted.mockResolvedValue(false);
+      mockStore.countInvocationFailure.mockResolvedValue(null);
 
       const scheduler = createScheduler();
       await expect(scheduler.runComplete(runCompletion())).resolves.toBeUndefined();
 
       expect(mockStore.resetConsecutiveFailures).not.toHaveBeenCalled();
-      expect(mockStore.incrementConsecutiveFailures).not.toHaveBeenCalled();
+      expect(mockStore.autoPause).not.toHaveBeenCalled();
     });
 
     it("still posts to slack when a late success corrects a swept timeout", async () => {
@@ -2630,8 +2659,7 @@ describe("Scheduler", () => {
         failure_reason: "Sandbox crashed",
         completed_at: expect.any(Number),
       });
-      expect(mockStore.tryMarkInvocationFailureCounted).toHaveBeenCalledWith("inv-1");
-      expect(mockStore.incrementConsecutiveFailures).toHaveBeenCalledWith("auto-1");
+      expect(mockStore.countInvocationFailure).toHaveBeenCalledWith("inv-1", "auto-1");
     });
 
     it("ignores callback when the guarded update finds the run already terminal", async () => {
@@ -2653,7 +2681,7 @@ describe("Scheduler", () => {
       mockStore.getInvocationRunAggregate.mockResolvedValue(
         aggregate({ total: 1, active: 0, failed: 1, completed: 0 })
       );
-      mockStore.incrementConsecutiveFailures.mockResolvedValue(3);
+      mockStore.countInvocationFailure.mockResolvedValue(3);
 
       const scheduler = createScheduler();
       await expect(
@@ -4464,8 +4492,7 @@ describe("Scheduler", () => {
           session_id: null,
           completed_at: expect.any(Number),
         });
-        expect(mockStore.tryMarkInvocationFailureCounted).not.toHaveBeenCalled();
-        expect(mockStore.incrementConsecutiveFailures).not.toHaveBeenCalled();
+        expect(mockStore.countInvocationFailure).not.toHaveBeenCalled();
       });
 
       it("reports a team archived after admission", async () => {
@@ -4485,7 +4512,7 @@ describe("Scheduler", () => {
         denyAfterAdmission();
 
         expect(await createScheduler().tick()).toEqual({ processed: 0, skipped: 1, failed: 0 });
-        expect(mockStore.incrementConsecutiveFailures).not.toHaveBeenCalled();
+        expect(mockStore.countInvocationFailure).not.toHaveBeenCalled();
         expect(mockStore.recordAuthorizationDenied).not.toHaveBeenCalled();
       });
 
@@ -4512,13 +4539,12 @@ describe("Scheduler", () => {
             expect.any(String),
             expect.objectContaining({ status: "unauthorized" })
           );
-          expect(mockStore.tryMarkInvocationFailureCounted).toHaveBeenCalledTimes(1);
-          expect(mockStore.incrementConsecutiveFailures).toHaveBeenCalledTimes(1);
+          expect(mockStore.countInvocationFailure).toHaveBeenCalledTimes(1);
         });
 
         it("reports a scheduled firing as failed, not skipped", async () => {
           expect(await createScheduler().tick()).toEqual({ processed: 0, skipped: 0, failed: 1 });
-          expect(mockStore.incrementConsecutiveFailures).toHaveBeenCalledTimes(1);
+          expect(mockStore.countInvocationFailure).toHaveBeenCalledTimes(1);
         });
       });
 
@@ -4534,7 +4560,7 @@ describe("Scheduler", () => {
           steered: 0,
           invocationIds: [expect.any(String)],
         });
-        expect(mockStore.incrementConsecutiveFailures).not.toHaveBeenCalled();
+        expect(mockStore.countInvocationFailure).not.toHaveBeenCalled();
       });
 
       it("re-authorizes each fanned-out child against current team state", async () => {
@@ -4585,7 +4611,7 @@ describe("Scheduler", () => {
       expect(mockSessionStoreCreate).not.toHaveBeenCalled();
       expect(stub.fetch).not.toHaveBeenCalled();
       expect(mockResolveSessionProviderAuth).not.toHaveBeenCalled();
-      expect(mockStore.incrementConsecutiveFailures).not.toHaveBeenCalled();
+      expect(mockStore.countInvocationFailure).not.toHaveBeenCalled();
       expect(mockStore.insertSkippedInvocation).not.toHaveBeenCalled();
       expect(mockStore.recordAuthorizationDenied).not.toHaveBeenCalled();
     });
@@ -4630,7 +4656,7 @@ describe("Scheduler", () => {
         expect(mockStore.insertInvocationGuarded).toHaveBeenCalledTimes(1);
         expect(mockSessionStoreCreate).toHaveBeenCalledTimes(1);
         expect(mockStore.recordAuthorizationDenied).not.toHaveBeenCalled();
-        expect(mockStore.incrementConsecutiveFailures).toHaveBeenCalledTimes(1);
+        expect(mockStore.countInvocationFailure).toHaveBeenCalledTimes(1);
       }
     );
 

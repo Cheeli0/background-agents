@@ -50,6 +50,8 @@ function makeAutomation(overrides?: Partial<AutomationRow>): AutomationRow {
   };
 }
 
+/** A cron slot on a 15-minute boundary, where the finalization sweep runs. */
+const SWEEP_SLOT_MS = Date.UTC(2026, 9, 20, 12, 15);
 describe("Scheduler (integration)", () => {
   beforeEach(async () => {
     await cleanD1Tables();
@@ -1033,13 +1035,13 @@ describe("Scheduler (integration)", () => {
       await seedInvocation(store, "auto-f2", "inv-f2", [{ id: "run-f2-a", status: "failed" }]);
 
       const scheduler = createScheduler();
-      await scheduler.tick();
+      await scheduler.tick(SWEEP_SLOT_MS);
 
       let automation = await store.getById("auto-f2");
       expect(automation!.consecutive_failures).toBe(1);
 
       // A second sweep must not double-strike (failure_counted_at CAS).
-      await scheduler.tick();
+      await scheduler.tick(SWEEP_SLOT_MS);
       automation = await store.getById("auto-f2");
       expect(automation!.consecutive_failures).toBe(1);
     });
@@ -1055,7 +1057,7 @@ describe("Scheduler (integration)", () => {
         { id: "run-f2r-b", status: "completed" },
       ]);
 
-      await createScheduler().tick();
+      await createScheduler().tick(SWEEP_SLOT_MS);
 
       const automation = await store.getById("auto-f2r");
       expect(automation!.consecutive_failures).toBe(0);
@@ -1123,7 +1125,11 @@ describe("Scheduler (integration)", () => {
           { automation_id: automationId, invocation_id: success.invocation_id },
         ]);
 
-        expect(await createScheduler().tick()).toEqual({ processed: 0, skipped: 0, failed: 0 });
+        expect(await createScheduler().tick(SWEEP_SLOT_MS)).toEqual({
+          processed: 0,
+          skipped: 0,
+          failed: 0,
+        });
 
         expect(await store.getById(automationId)).toMatchObject({
           enabled: 1,
@@ -1153,7 +1159,11 @@ describe("Scheduler (integration)", () => {
         ).toBe(true);
 
         expect(await store.getStaleFailureResetCandidates(now - 120_000, 10)).toEqual([]);
-        expect(await createScheduler().tick()).toEqual({ processed: 0, skipped: 0, failed: 0 });
+        expect(await createScheduler().tick(SWEEP_SLOT_MS)).toEqual({
+          processed: 0,
+          skipped: 0,
+          failed: 0,
+        });
         expect(await store.getById(automationId)).toMatchObject({
           enabled: 1,
           consecutive_failures: 2,
@@ -1209,7 +1219,11 @@ describe("Scheduler (integration)", () => {
           expect(await store.getStaleFailureResetCandidates(now - 120_000, 10)).toEqual([
             { automation_id: automationId, invocation_id: barrier.invocation_id },
           ]);
-          expect(await createScheduler().tick()).toEqual({ processed: 0, skipped: 0, failed: 0 });
+          expect(await createScheduler().tick(SWEEP_SLOT_MS)).toEqual({
+            processed: 0,
+            skipped: 0,
+            failed: 0,
+          });
           expect(await store.getById(automationId)).toMatchObject({
             consecutive_failures: status === "failed" ? 3 : 2,
             enabled: status === "failed" ? 0 : 1,

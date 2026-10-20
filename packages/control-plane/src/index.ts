@@ -72,7 +72,9 @@ export default {
         log: logger,
         correlation,
       },
-      Date.now()
+      // The slot this trigger fired for, not the moment it started: a late
+      // start must not move a job onto or off a slot boundary.
+      event.scheduledTime
     );
   },
 

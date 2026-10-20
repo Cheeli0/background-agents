@@ -1615,19 +1615,39 @@ export class AutomationStore {
   }
 
   /**
-   * CAS for auto-pause accounting: exactly one caller wins the right to count
-   * this invocation's failure, no matter how many callbacks race.
+   * Count one invocation's failure toward its automation's streak, at most
+   * once however many callbacks race. The counted mark and the strike commit
+   * together: a crash between two separate writes left an invocation counted
+   * with no strike, and the finalization sweep never revisits a counted one.
+   *
+   * The strike is written first, guarded on the invocation still being
+   * uncounted, so both writes see the same state inside the transaction.
+   * Returns the new streak, or `null` when another caller already counted it.
    */
-  async tryMarkInvocationFailureCounted(invocationId: string): Promise<boolean> {
+  async countInvocationFailure(invocationId: string, automationId: string): Promise<number | null> {
     const now = Date.now();
-    const result = await this.db
-      .prepare(
-        `UPDATE automation_invocations SET failure_counted_at = ?, updated_at = ?
-         WHERE id = ? AND failure_counted_at IS NULL`
-      )
-      .bind(now, now, invocationId)
-      .run();
-    return (result.meta?.changes ?? 0) > 0;
+    const [, marked, streak] = await this.db.batch<{ consecutive_failures: number }>([
+      this.db
+        .prepare(
+          `UPDATE automations SET consecutive_failures = consecutive_failures + 1, updated_at = ?
+           WHERE id = ? AND deleted_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM automation_invocations
+               WHERE id = ? AND failure_counted_at IS NULL)`
+        )
+        .bind(now, automationId, invocationId),
+      this.db
+        .prepare(
+          `UPDATE automation_invocations SET failure_counted_at = ?, updated_at = ?
+           WHERE id = ? AND failure_counted_at IS NULL`
+        )
+        .bind(now, now, invocationId),
+      this.db
+        .prepare("SELECT consecutive_failures FROM automations WHERE id = ? AND deleted_at IS NULL")
+        .bind(automationId),
+    ]);
+    if ((marked.meta?.changes ?? 0) === 0) return null;
+    return streak.results[0]?.consecutive_failures ?? 0;
   }
 
   async listInvocations(
@@ -1979,22 +1999,6 @@ export class AutomationStore {
   }
 
   // --- Failure tracking ---
-
-  async incrementConsecutiveFailures(automationId: string): Promise<number> {
-    await this.db
-      .prepare(
-        "UPDATE automations SET consecutive_failures = consecutive_failures + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL"
-      )
-      .bind(Date.now(), automationId)
-      .run();
-
-    const row = await this.db
-      .prepare("SELECT consecutive_failures FROM automations WHERE id = ? AND deleted_at IS NULL")
-      .bind(automationId)
-      .first<{ consecutive_failures: number }>();
-
-    return row?.consecutive_failures ?? 0;
-  }
 
   async resetConsecutiveFailures(automationId: string): Promise<void> {
     await this.db
