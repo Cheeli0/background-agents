@@ -4,12 +4,9 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
 from sandbox_runtime.event_size import MAX_EVENT_BYTES
+from sandbox_runtime.token_coalescer import TOKEN_COALESCE_INTERVAL_SECONDS as INTERVAL
 from sandbox_runtime.token_coalescer import TokenCoalescer
-
-INTERVAL = 0.2
 
 
 class Clock:
@@ -52,7 +49,6 @@ def make(
     return TokenCoalescer(recorder, **kwargs)
 
 
-@pytest.mark.asyncio
 async def test_first_token_goes_out_at_once_and_later_ones_keep_only_the_latest():
     recorder, clock = Recorder(), Clock()
     coalescer = make(recorder, clock)
@@ -67,7 +63,6 @@ async def test_first_token_goes_out_at_once_and_later_ones_keep_only_the_latest(
     assert recorder.contents() == [("token", "H"), ("token", "Hel")]
 
 
-@pytest.mark.asyncio
 async def test_a_token_after_a_quiet_interval_is_not_held():
     recorder, clock = Recorder(), Clock()
     coalescer = make(recorder, clock)
@@ -80,7 +75,6 @@ async def test_a_token_after_a_quiet_interval_is_not_held():
     assert coalescer.pending_count == 0
 
 
-@pytest.mark.asyncio
 async def test_a_non_token_event_flushes_held_tokens_first():
     recorder, clock = Recorder(), Clock()
     coalescer = make(recorder, clock)
@@ -92,7 +86,6 @@ async def test_a_non_token_event_flushes_held_tokens_first():
     assert recorder.contents() == [("token", "a"), ("token", "ab"), ("tool_call", None)]
 
 
-@pytest.mark.asyncio
 async def test_execution_complete_carries_the_final_text_ahead_of_it():
     recorder, clock = Recorder(), Clock()
     coalescer = make(recorder, clock)
@@ -104,7 +97,6 @@ async def test_execution_complete_carries_the_final_text_ahead_of_it():
     assert recorder.contents()[-2:] == [("token", "Done."), ("execution_complete", None)]
 
 
-@pytest.mark.asyncio
 async def test_the_trailing_flush_sends_the_final_text_with_no_later_event():
     recorder = Recorder()
     coalescer = make(recorder, interval=0.01)
@@ -117,7 +109,6 @@ async def test_the_trailing_flush_sends_the_final_text_with_no_later_event():
     assert recorder.contents() == [("token", "a"), ("token", "abc")]
 
 
-@pytest.mark.asyncio
 async def test_tokens_arriving_during_a_trailing_flush_are_still_sent():
     release = asyncio.Event()
     sent: list[str] = []
@@ -140,7 +131,6 @@ async def test_tokens_arriving_during_a_trailing_flush_are_still_sent():
     assert sent == ["a", "ab", "abc"]
 
 
-@pytest.mark.asyncio
 async def test_different_parts_and_messages_do_not_overwrite_each_other():
     recorder, clock = Recorder(), Clock()
     coalescer = make(recorder, clock)
@@ -159,7 +149,6 @@ async def test_different_parts_and_messages_do_not_overwrite_each_other():
     )
 
 
-@pytest.mark.asyncio
 async def test_a_token_near_the_size_limit_is_never_held_so_its_refusal_is_reported():
     recorder, clock = Recorder(result=False), Clock()
     coalescer = make(recorder, clock)
@@ -175,6 +164,20 @@ async def test_a_token_near_the_size_limit_is_never_held_so_its_refusal_is_repor
         "opening more",
         oversized["content"],
     ]
+
+
+async def test_aclose_sends_held_tokens_and_later_tokens_still_flush():
+    recorder = Recorder()
+    coalescer = make(recorder, interval=0.01)
+    await coalescer.send(token("a"))
+    await coalescer.send(token("ab"))
+
+    await coalescer.aclose()
+    assert recorder.contents() == [("token", "a"), ("token", "ab")]
+
+    # A token held after close still gets its trailing flush.
+    await coalescer.send(token("abc"))
+    await asyncio.wait_for(_until(lambda: recorder.contents()[-1] == ("token", "abc")), 1.0)
 
 
 async def _until(predicate) -> None:

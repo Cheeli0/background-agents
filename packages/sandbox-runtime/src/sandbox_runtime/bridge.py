@@ -397,6 +397,10 @@ class AgentBridge:
             health_task.cancel()
             await self.boot_attach.stop()
             await self.activity.shutdown()
+            try:
+                await self.token_coalescer.aclose()
+            except Exception as close_error:
+                self.log.error("bridge.token_coalescer_close_failed", exc=close_error)
             # Cleanup failures are logged, never raised: an exception here
             # would replace the one that ended the run, and a deterministic
             # startup failure has to reach main() so the supervisor sees its
@@ -1030,12 +1034,15 @@ class AgentBridge:
 
         async def contain_activity(deadline: float) -> bool:
             harness = self._require_harness()
-            return await self.activity.drain_for_shutdown(
+            contained = await self.activity.drain_for_shutdown(
                 deadline=deadline,
                 prompt_error="sandbox_lifetime_expiring",
                 push_cancellation_event=self._shutdown_push_error_event,
                 stop_execution=harness.stop_execution,
             )
+            # The drained turns' last text goes out before preservation reports.
+            await self.token_coalescer.flush()
+            return contained
 
         async def persist_session() -> None:
             # The provider prepares Docker during capture, after the stop deadline.

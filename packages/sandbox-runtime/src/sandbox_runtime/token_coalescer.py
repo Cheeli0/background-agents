@@ -17,6 +17,7 @@ unchanged, and the turn's final text is always delivered before its completion.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Final
@@ -80,9 +81,25 @@ class TokenCoalescer:
         return True
 
     async def flush(self) -> None:
-        """Send every held token now."""
+        """Send every held token now.
+
+        Turn ends are covered without calling this: every turn ends with a
+        terminal non-token event, which flushes first. The bridge calls it
+        where a turn is cut short instead: shutdown preparation and teardown.
+        """
         async with self._lock:
             await self._flush_locked()
+
+    async def aclose(self) -> None:
+        """Stop the trailing timer and send every held token."""
+        timer = self._timer
+        if timer is not None:
+            timer.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await timer
+            # A timer cancelled before its first step never ran its finally.
+            self._timer = None
+        await self.flush()
 
     @property
     def pending_count(self) -> int:
