@@ -43,7 +43,7 @@ describe("abandoned draft sweep cron routing", () => {
     );
 
     await worker.scheduled(
-      { cron: ABANDONED_DRAFT_SWEEP_CRON } as ScheduledEvent,
+      { cron: ABANDONED_DRAFT_SWEEP_CRON, scheduledTime: Date.now() } as ScheduledEvent,
       {
         DB: env.DB,
         SESSION: sessionNamespace,
@@ -63,7 +63,7 @@ describe("abandoned draft sweep cron routing", () => {
     );
 
     await worker.scheduled(
-      { cron: SCHEDULER_TICK_CRON } as ScheduledEvent,
+      { cron: SCHEDULER_TICK_CRON, scheduledTime: Date.now() } as ScheduledEvent,
       {
         DB: env.DB,
         SESSION: sessionNamespace,

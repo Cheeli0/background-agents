@@ -156,7 +156,7 @@ describe("SCHEDULED_JOBS", () => {
     await findScheduledJob(SCHEDULER_TICK_CRON)!.run(deps, 1_000);
 
     expect(Scheduler).toHaveBeenCalledWith(deps.db, deps.env, deps.backgroundTasks);
-    expect(schedulerTick).toHaveBeenCalledTimes(1);
+    expect(schedulerTick).toHaveBeenCalledExactlyOnceWith(1_000);
     expect(deps.submitted.map((entry) => entry.name)).toEqual(["autofix_queue_health"]);
     expect(checkAutofixQueueHealth).not.toHaveBeenCalled();
     await deps.submitted[0]!.task();

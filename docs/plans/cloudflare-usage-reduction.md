@@ -81,6 +81,10 @@ restarts the clock unconditionally.
 
 ### C. Run the automation finalization sweep every 15 minutes
 
+Done (CHE-1054). The tick receives its cron slot time (`event.scheduledTime` on Cloudflare) and runs
+the sweep only on 15-minute slots; `countInvocationFailure` in
+`packages/control-plane/src/db/automation-store.ts` writes the mark and the strike in one batch.
+
 - **Today:** `finalizationSweep` (`packages/control-plane/src/scheduler/scheduler.ts`) runs on every
   one-minute tick. Its `getUncountedFailedInvocations` query
   (`packages/control-plane/src/db/automation-store.ts`) reads ~183 rows per call, which is ~13% of

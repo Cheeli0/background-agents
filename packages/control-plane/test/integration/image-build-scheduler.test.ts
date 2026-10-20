@@ -15,7 +15,7 @@ describe("image build scheduler integration", () => {
   it("routes the image-build cron to maintenance instead of the automation scheduler", async () => {
     await expect(
       worker.scheduled(
-        { cron: IMAGE_BUILD_SCHEDULER_CRON } as ScheduledEvent,
+        { cron: IMAGE_BUILD_SCHEDULER_CRON, scheduledTime: Date.now() } as ScheduledEvent,
         env,
         createExecutionContext()
       )
