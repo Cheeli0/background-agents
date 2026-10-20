@@ -39,6 +39,7 @@ import {
   recordSessionInboxFetch,
   SESSION_INBOX_REVALIDATION_INTERVAL_MS,
 } from "@/lib/session-inbox-revalidation";
+import { subscribeSessionTitleChanges } from "@/lib/session-title-events";
 
 // A fallback for sessions with no open socket: socket events, focus, and read
 // state changes already revalidate the inbox, and every poll is a D1 query.
@@ -48,6 +49,7 @@ const SESSION_CREATOR_FILTER_STORAGE_KEY = "open-inspect-sidebar-session-creator
 export type SessionItem = SessionInboxSession;
 type SessionCreatorFilter = "all" | "mine";
 type PaginationKey = ReturnType<typeof buildSessionInboxKey>;
+type SessionInboxItemUpdate = (item: SessionInboxItem) => SessionInboxItem | null;
 
 interface AdditionalPagesState {
   filterIdentity: string;
@@ -77,12 +79,14 @@ function useCategoryPagination(
   });
   const [paginationRequest, setPaginationRequest] = useState<PaginationRequest | null>(null);
   const paginationGeneration = useRef(0);
+  const pendingItemUpdates = useRef<SessionInboxItemUpdate[] | null>(null);
   const firstPage = snapshot?.categories[category];
   const additionalPages =
     additionalPagesState.filterIdentity === filterIdentity ? additionalPagesState.pages : [];
 
   const resetRetainedPages = useCallback(() => {
     paginationGeneration.current += 1;
+    pendingItemUpdates.current = null;
     setAdditionalPagesState({ filterIdentity, pages: [] });
     setPaginationRequest(null);
   }, [filterIdentity]);
@@ -129,9 +133,18 @@ function useCategoryPagination(
       paginationRequest.generation === paginationGeneration.current
     ) {
       const sequence = nextPageSequence.current++;
+      const updates = pendingItemUpdates.current ?? [];
       const page = {
         ...loadedPage,
-        items: loadedPage.items.filter((item) => !canonicalRootIds.has(item.rootSession.id)),
+        items: loadedPage.items
+          .filter((item) => !canonicalRootIds.has(item.rootSession.id))
+          .flatMap((item) => {
+            const updated = updates.reduce<SessionInboxItem | null>(
+              (current, update) => (current ? update(current) : null),
+              item
+            );
+            return updated ? [updated] : [];
+          }),
       };
       setAdditionalPagesState((state) => ({
         filterIdentity,
@@ -141,6 +154,7 @@ function useCategoryPagination(
         ],
       }));
     }
+    pendingItemUpdates.current = null;
     setPaginationRequest(null);
   }, [canonicalRootIds, filterIdentity, loadedPage, nextPageSequence, paginationRequest]);
 
@@ -148,6 +162,7 @@ function useCategoryPagination(
   const hasMore = lastPage?.hasMore ?? false;
   const loadMore = useCallback(() => {
     if (!snapshot || !lastPage?.nextCursor || paginationRequest) return;
+    pendingItemUpdates.current = [];
     setPaginationRequest({
       filterIdentity,
       generation: paginationGeneration.current,
@@ -167,25 +182,24 @@ function useCategoryPagination(
 
   // Mutations revalidate the head snapshot, but pages loaded through `Load
   // more` live only in this retained state. Reconcile them in place or they
-  // keep rendering the pre-mutation rows.
-  const updateRetainedItems = useCallback(
-    (update: (item: SessionInboxItem) => SessionInboxItem | null) => {
-      setAdditionalPagesState((state) => ({
-        ...state,
-        pages: state.pages.map(({ page, sequence }) => ({
-          sequence,
-          page: {
-            ...page,
-            items: page.items.flatMap((item) => {
-              const updated = update(item);
-              return updated ? [updated] : [];
-            }),
-          },
-        })),
-      }));
-    },
-    []
-  );
+  // keep rendering the pre-mutation rows. Replay updates on any pending page
+  // too, since its response may have been fetched before the mutation.
+  const updateRetainedItems = useCallback((update: SessionInboxItemUpdate) => {
+    pendingItemUpdates.current?.push(update);
+    setAdditionalPagesState((state) => ({
+      ...state,
+      pages: state.pages.map(({ page, sequence }) => ({
+        sequence,
+        page: {
+          ...page,
+          items: page.items.flatMap((item) => {
+            const updated = update(item);
+            return updated ? [updated] : [];
+          }),
+        },
+      })),
+    }));
+  }, []);
   return {
     firstPageItems: firstPage?.items ?? [],
     additionalPages,
@@ -391,6 +405,20 @@ export function useSidebarSessions() {
       updateFinishedRetained(update);
     },
     [updateAttentionRetained, updateFinishedRetained, updateInProgressRetained]
+  );
+
+  useEffect(
+    () =>
+      subscribeSessionTitleChanges((sessionId, title) => {
+        const updateTitle = (session: SessionItem) =>
+          session.id === sessionId ? { ...session, title } : session;
+        updateAllRetainedItems((item) => ({
+          ...item,
+          rootSession: updateTitle(item.rootSession),
+          descendantSessions: item.descendantSessions.map(updateTitle),
+        }));
+      }),
+    [updateAllRetainedItems]
   );
 
   // Every session open acknowledges its terminal message, read or not, so
