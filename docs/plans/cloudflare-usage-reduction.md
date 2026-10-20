@@ -40,6 +40,10 @@ DO duration.
 
 ### A. Coalesce token events in the sandbox bridge
 
+Done (CHE-1052). The coalescer sits in `AgentBridge._send_event`, the one path every turn event
+takes, rather than inside `BufferedEventForwarder`, so the forwarder's delivery state machine is
+unchanged. Runtime generation 77.
+
 - **Problem:** each streamed token event triggers an upsert in the session DO
   (`packages/control-plane/src/session/sandbox-events/streaming.handler.ts`, `upsertTokenEvent` in
   `packages/control-plane/src/session/event-repository.ts`). Claude sends one event per text delta

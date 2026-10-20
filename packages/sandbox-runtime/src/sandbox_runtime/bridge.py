@@ -69,6 +69,7 @@ from .prompt_budgets import resolve_prompt_limits
 from .push_operation import PushOperation, PushRejected, PushRequest
 from .repo_config import load_repo_manifest
 from .shutdown_preparation import ShutdownPreparationCoordinator
+from .token_coalescer import TokenCoalescer
 from .types import GitUser
 
 if TYPE_CHECKING:
@@ -230,6 +231,11 @@ class AgentBridge:
         # Reconnect-safe event delivery: buffers while the WS is down and
         # re-sends unacknowledged critical events (see event_forwarder.py).
         self.event_forwarder = BufferedEventForwarder(sandbox_id=sandbox_id, log=self.log)
+        # Fork-only: token frames are coalesced before the forwarder sees them
+        # (see token_coalescer.py); every other event flushes them first.
+        self.token_coalescer = TokenCoalescer(
+            lambda event: self.event_forwarder.send(event), log=self.log
+        )
         self.boot_attach = BootAttach(
             early_connect=early_connect,
             harness=harness,
@@ -391,6 +397,10 @@ class AgentBridge:
             health_task.cancel()
             await self.boot_attach.stop()
             await self.activity.shutdown()
+            try:
+                await self.token_coalescer.aclose()
+            except Exception as close_error:
+                self.log.error("bridge.token_coalescer_close_failed", exc=close_error)
             # Cleanup failures are logged, never raised: an exception here
             # would replace the one that ended the run, and a deterministic
             # startup failure has to reach main() so the supervisor sees its
@@ -651,9 +661,10 @@ class AgentBridge:
     async def _send_event(self, event: dict[str, Any]) -> bool:
         """Send event to control plane, buffering if WS is unavailable.
 
-        Returns whether it reached an open connection (see the forwarder).
+        Returns whether it reached an open connection (see the forwarder). A
+        token held for the next coalesced flush reports True.
         """
-        return await self.event_forwarder.send(event)
+        return await self.token_coalescer.send(event)
 
     async def _handle_command(self, cmd: dict[str, Any]) -> asyncio.Task[None] | None:
         """Handle command from control plane.
@@ -1023,12 +1034,15 @@ class AgentBridge:
 
         async def contain_activity(deadline: float) -> bool:
             harness = self._require_harness()
-            return await self.activity.drain_for_shutdown(
+            contained = await self.activity.drain_for_shutdown(
                 deadline=deadline,
                 prompt_error="sandbox_lifetime_expiring",
                 push_cancellation_event=self._shutdown_push_error_event,
                 stop_execution=harness.stop_execution,
             )
+            # The drained turns' last text goes out before preservation reports.
+            await self.token_coalescer.flush()
+            return contained
 
         async def persist_session() -> None:
             # The provider prepares Docker during capture, after the stop deadline.
