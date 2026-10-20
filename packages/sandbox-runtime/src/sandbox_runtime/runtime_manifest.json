@@ -1,6 +1,6 @@
 {
-  "runtimeVersion": "v76-child-output-discovery",
-  "generation": 76,
+  "runtimeVersion": "v77-token-coalescing",
+  "generation": 77,
   "minimumCompatibleGeneration": 62,
   "minimumPreservationGeneration": 71,
   "minimumRebuildGeneration": 76,

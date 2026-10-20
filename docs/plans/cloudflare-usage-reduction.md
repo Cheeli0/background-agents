@@ -40,6 +40,10 @@ DO duration.
 
 ### A. Coalesce token events in the sandbox bridge
 
+Done (CHE-1052). The coalescer sits in `AgentBridge._send_event`, the one path every turn event
+takes, rather than inside `BufferedEventForwarder`, so the forwarder's delivery state machine is
+unchanged. Runtime generation 77.
+
 - **Problem:** each streamed token event triggers an upsert in the session DO
   (`packages/control-plane/src/session/sandbox-events/streaming.handler.ts`, `upsertTokenEvent` in
   `packages/control-plane/src/session/event-repository.ts`). Claude sends one event per text delta
@@ -99,17 +103,42 @@ the sweep only on 15-minute slots; `countInvocationFailure` in
 - **Acceptance:** the sweep query's daily rows read drop about 15×, and the auto-pause behaviour
   tests still pass.
 
-### D. Shrink the inbox scan with auto-archive
+### D. Stuck sessions, then the inbox scan
 
-- **Problem:** the inbox query (`packages/control-plane/src/db/session-inbox-store.ts`) reads the
-  viewer's whole unarchived set, ~900 rows per call.
-- **First, measure:** count unarchived sessions by `status` and `spawn_source` to find what
-  dominates. Auto-archive only covers completed, failed and cancelled sessions
-  (`packages/control-plane/src/session/auto-archive-policy.ts`). Also check whether the per-run
-  batch cap leaves a backlog.
-- **Then change:** extend auto-archive, keeping its unread and active-lineage protections
-  (`packages/control-plane/src/db/session-auto-archive-store.ts`).
-- **Acceptance:** fewer rows per inbox call, and no unread or active session is archived.
+- **Part 1, done (CHE-1055).** A sandbox launch whose provider create failed (or that the circuit
+  breaker refused) left its prompt `pending` forever. The session stayed `active`, archive refused
+  it for queued work, Cancel left it `cancelled`, which archive also refused, and auto-archive never
+  selected it. Five such sessions were repaired by hand on 2026-10-20; each had a `failed` sandbox
+  with no provider object or heartbeat, one never-started `pending` message, and no events.
+  - A launch that leaves nothing able to connect (`launchFailure()` in
+    `packages/control-plane/src/sandbox/lifecycle/manager.ts`) arms the DO alarm 30 s out, and the
+    alarm fails the waiting prompt with the launch's reason, as it already does for a connect
+    timeout. A launch started in between keeps the prompt. Sessions already stuck are repaired the
+    next time their alarm fires.
+  - Cancelled sessions can be archived, and unarchive restores them as `cancelled`.
+  - A dead sandbox does not re-arm the alarm (`evaluateAlarmPolicy` returns `terminal` first), so no
+    alarm change was needed.
+- **Part 2, measured 2026-10-20** (production D1, before Part 1 deployed):
+  - 91 unarchived sessions against 2,854 archived. By status and `spawn_source`:
+    completed/automation 59, completed/linear-bot 10, failed/automation 9, completed/github-bot 6,
+    cancelled/agent 3, failed/linear-bot 2, active/github-bot 1, completed/user 1. Only 2 are older
+    than 7 days.
+  - No `created` or `active` session is more than a day old, so no other session is in the Part 1
+    stuck state, and the auto-archive cap leaves no backlog.
+  - D1 query insights, last 24 h, by rows read: the inbox query 1.51M over 1,092 calls (~1,386 per
+    call); the finalization sweep's two queries ~425k (cut ~15× by item C); the automation list
+    101k; the auto-archive candidate query 80k over 24 runs (~3,336 per run).
+- **Part 3, findings:**
+  - The inbox query plan is already index-driven (`idx_sessions_status_updated`, index joins,
+    re-rooting over the materialized set), so its cost is roughly 15 reads per visible unarchived
+    session. Extending the auto-archive rules to stale `created`/`active` sessions would change
+    nothing: there are none. The lever left is the unarchived set itself, which is mostly completed
+    automation sessions from the last day.
+  - Done: the auto-archive candidate query's `protected_roots` CTE filtered `status != 'archived'`,
+    which scanned every session. It now uses the inbox's `UNARCHIVED_STATUSES_SQL` list and probes
+    the status index.
+- **Why it matters:** the inbox query (`packages/control-plane/src/db/session-inbox-store.ts`) reads
+  the viewer's whole unarchived set, ~900 rows per call.
 
 ## Rejected
 

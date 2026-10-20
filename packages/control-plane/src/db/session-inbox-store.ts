@@ -54,7 +54,7 @@ export type ListSessionInboxSnapshotResult = Record<SessionInboxCategory, ListSe
  * the table, and `status != 'archived'` can only be checked by scanning it;
  * an IN list lets SQLite probe `idx_sessions_status_updated` per live status.
  */
-const UNARCHIVED_STATUSES_SQL = sessionStatusSchema.options
+export const UNARCHIVED_STATUSES_SQL = sessionStatusSchema.options
   .filter((status) => status !== "archived")
   .map((status) => `'${status}'`)
   .join(", ");

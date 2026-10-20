@@ -186,6 +186,25 @@ export class SessionCoreRepository {
     );
   }
 
+  /**
+   * Fork-only. Whether the session was cancelled when it was archived.
+   * Unarchive otherwise derives the status from messages, which would turn a
+   * cancelled session, terminal by design, into a promptable `failed` one.
+   */
+  wasCancelledWhenArchived(): boolean {
+    const row = this.sql
+      .exec(`SELECT archived_from_cancelled FROM session LIMIT 1`)
+      .toArray()[0] as { archived_from_cancelled?: number | null } | undefined;
+    return row?.archived_from_cancelled === 1;
+  }
+
+  setArchivedFromCancelled(cancelled: boolean): void {
+    this.sql.exec(
+      `UPDATE session SET archived_from_cancelled = ? WHERE id = (SELECT id FROM session LIMIT 1)`,
+      cancelled ? 1 : 0
+    );
+  }
+
   addSessionCost(cost: number, updatedAt: number): number {
     const row = this.sql
       .exec(

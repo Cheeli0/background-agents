@@ -20,6 +20,8 @@ export interface AlarmHandlerDeps {
   alarmScheduler: AlarmScheduler;
   /** Wakes queued work for a live runtime that nothing else will; idempotent. */
   redriveIdleQueue?: () => Promise<void>;
+  /** Fork-only: why the last launch left nothing able to connect, or null. */
+  launchFailure?: () => string | null;
   /** Resolved per use so it honors settings persisted after construction. */
   getExecutionTimeoutMs: () => number;
   now: () => number;
@@ -102,6 +104,16 @@ export function createAlarmHandler(deps: AlarmHandlerDeps): AlarmHandler {
         // The boot was for that prompt; it fails with the same words the user
         // sees, and nothing re-drives it onto a fresh sandbox.
         await deps.messageQueue.failPendingMessage(bootPrompt.id, lifecycleResult.reason);
+      } else if (bootPrompt && lifecycleResult === "no_action") {
+        // Fork-only: a launch whose provider create failed, or that the
+        // circuit breaker refused, leaves a failed row the alarm reads as
+        // terminal, and the prompt waits for a socket that never opens. Fail
+        // it the way a boot that gave up is failed; a launch started since
+        // clears the failure and keeps the prompt.
+        const launchFailure = deps.launchFailure?.() ?? null;
+        if (launchFailure !== null) {
+          await deps.messageQueue.failPendingMessage(bootPrompt.id, launchFailure);
+        }
       }
       // Last, so the watchdogs have already fenced any runtime they found
       // stale: a lost queue kick is repeated only for a live runtime.

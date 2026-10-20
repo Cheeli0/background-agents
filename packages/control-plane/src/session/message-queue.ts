@@ -63,6 +63,13 @@ import type {
 const AUTOFIX_ATTEMPT_WINDOW_MS = 24 * 60 * 60 * 1_000;
 const STUCK_PROCESSING_ERROR = "Execution timed out (stuck processing)";
 
+/**
+ * Fork-only. How long after a failed launch the alarm fails the prompt it was
+ * for. A launch started meanwhile (a retry, a re-drive) owns the prompt
+ * instead: the alarm rechecks the failure before acting on it.
+ */
+const LAUNCH_FAILURE_PROMPT_GRACE_MS = 30_000;
+
 type EnqueueAutofixResponse = Extract<
   GitHubAutofixSessionResponse,
   { kind: "enqueued" | "duplicate" | "rejected" }
@@ -507,8 +514,10 @@ export class SessionMessageQueue {
       // callers' request timeouts. The message is already persisted as
       // pending and dispatches when the sandbox WebSocket connects.
       this.backgroundTasks.submit(
-        () =>
-          this.sandboxLifecycle.spawnSandbox().catch((error) => {
+        async () => {
+          try {
+            await this.sandboxLifecycle.spawnSandbox();
+          } catch (error) {
             // Expected provider failures report themselves inside the lifecycle
             // manager; this catch only sees throws from before those handlers.
             // Route it through the same call so the reason is persisted as well
@@ -517,7 +526,10 @@ export class SessionMessageQueue {
               error instanceof Error ? error.message : "Failed to spawn sandbox"
             );
             throw error;
-          }),
+          } finally {
+            await this.armLaunchFailureAlarm();
+          }
+        },
         {
           name: "sandbox.spawn",
           context: { message_id: message.id },
@@ -623,6 +635,19 @@ export class SessionMessageQueue {
       queue_wait_ms: now - message.created_at,
       has_attachments: !!message.attachments,
     });
+  }
+
+  /**
+   * Fork-only. When a background launch left nothing able to connect (the
+   * provider create threw, or the circuit breaker refused it), arm the alarm
+   * that fails the prompt it was for (see the alarm handler). That prompt is
+   * waiting for a sandbox WebSocket that will never open; left pending,
+   * nothing dispatches or fails it, and the session stays active with queued
+   * work that archive refuses.
+   */
+  private async armLaunchFailureAlarm(): Promise<void> {
+    if (this.sandboxLifecycle.launchFailure() === null) return;
+    await this.alarmScheduler.schedule(Date.now() + LAUNCH_FAILURE_PROMPT_GRACE_MS);
   }
 
   async handleFatalSandboxFailure(reason: string): Promise<void> {

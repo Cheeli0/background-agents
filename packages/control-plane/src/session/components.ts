@@ -685,6 +685,7 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
     preserveBeforeWatchdogs: (allowCaptureRetry) =>
       lifecycleManager.handleShutdownAlarm(allowCaptureRetry),
     redriveIdleQueue: () => lifecycleManager.redriveIdleQueue(),
+    launchFailure: () => lifecycleManager.launchFailure(),
   });
 
   const schedulePullRequestRefresh = (trigger: "open" | "manual"): void => {

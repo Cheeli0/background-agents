@@ -401,6 +401,8 @@ export interface SandboxLifecycle {
   terminateUnresponsiveSandbox(trigger: UnresponsiveSandboxTrigger): Promise<void>;
   terminateFailedSandbox(reason: string): Promise<boolean>;
   reportSandboxError(reason: string): void;
+  /** Why the last launch ended with nothing able to connect, or null if one may still. */
+  launchFailure(): string | null;
 }
 
 export type UnresponsiveSandboxTrigger =
@@ -1035,6 +1037,21 @@ export class SandboxLifecycleManager
       });
     }
     this.broadcaster.broadcast({ type: "sandbox_error", error: reason });
+  }
+
+  /**
+   * Fork-only. Why the last launch left nothing that can connect, or null when
+   * a sandbox may still arrive: a launch in flight, a bridge attached, or a row
+   * that isn't failed. A provider create that threw and a launch the circuit
+   * breaker refused both end here with the row failed and the reason persisted
+   * by `reportSandboxError`.
+   */
+  launchFailure(): string | null {
+    if (this.isSpawningSandbox || this.isTerminatingSandbox) return null;
+    if (this.wsManager.getSandboxWebSocket() !== null) return null;
+    const sandbox = this.storage.getSandbox();
+    if (sandbox?.status !== "failed") return null;
+    return sandbox.last_spawn_error ?? "The sandbox failed to start.";
   }
 
   /**

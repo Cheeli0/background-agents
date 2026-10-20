@@ -238,6 +238,7 @@ function buildQueue(
     terminateUnresponsiveSandbox: vi.fn(async () => {}),
     terminateFailedSandbox: vi.fn(async () => true),
     reportSandboxError: vi.fn((_reason: string) => {}),
+    launchFailure: vi.fn((): string | null => null),
   };
   const backgroundTasks = createTestBackgroundTasks();
   const sessionIndex = { touchUpdatedAt: vi.fn(async () => true) };
@@ -968,6 +969,47 @@ describe("SessionMessageQueue", () => {
     );
     // The spawn failure is absorbed by the boundary, not thrown at the caller.
     expect(h.backgroundTasks.failures).toEqual([expect.any(Error)]);
+  });
+
+  it("arms the alarm that fails the prompt when a background launch leaves nothing to connect", async () => {
+    const h = buildQueue();
+    h.repository.getNextPendingMessage.mockReturnValueOnce(createMessage()).mockReturnValue(null);
+    h.sandboxLifecycle.launchFailure.mockReturnValue("Failed to create sandbox with HTTP 404");
+    const before = Date.now();
+
+    await h.queue.processMessageQueue();
+    await h.backgroundTasks.settle();
+
+    expect(h.setAlarm).toHaveBeenCalledTimes(1);
+    const at = h.setAlarm.mock.calls[0][0];
+    expect(at).toBeGreaterThanOrEqual(before + 30_000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 30_000);
+    // The alarm fails it, after rechecking; the launch path never does.
+    expect(h.repository.recordMessageCompletion).not.toHaveBeenCalled();
+  });
+
+  it("arms the alarm when the background launch throws", async () => {
+    const h = buildQueue();
+    h.repository.getNextPendingMessage.mockReturnValueOnce(createMessage()).mockReturnValue(null);
+    h.sandboxLifecycle.spawnSandbox.mockRejectedValue(new Error("modal exploded"));
+    h.sandboxLifecycle.launchFailure.mockReturnValue("modal exploded");
+
+    await h.queue.processMessageQueue();
+    await h.backgroundTasks.settle();
+
+    expect(h.setAlarm).toHaveBeenCalledTimes(1);
+    expect(h.backgroundTasks.failures).toEqual([expect.any(Error)]);
+  });
+
+  it("arms nothing while the launch can still connect", async () => {
+    const h = buildQueue();
+    h.repository.getNextPendingMessage.mockReturnValueOnce(createMessage()).mockReturnValue(null);
+
+    await h.queue.processMessageQueue();
+    await h.backgroundTasks.settle();
+
+    expect(h.sandboxLifecycle.launchFailure).toHaveBeenCalled();
+    expect(h.setAlarm).not.toHaveBeenCalled();
   });
 
   it("rejects a prompt whose session closed while its fingerprint was being hashed", async () => {

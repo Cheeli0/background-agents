@@ -4,6 +4,7 @@ import {
   COMPLETED_SESSION_AUTO_ARCHIVE_AGE_MS,
   FAILED_SESSION_AUTO_ARCHIVE_AGE_MS,
 } from "../session/auto-archive-policy";
+import { UNARCHIVED_STATUSES_SQL } from "./session-inbox-store";
 import { unreadSql } from "./session-read-state";
 import type { SqlDatabase } from "./sql-database";
 
@@ -20,7 +21,9 @@ export class SessionAutoArchiveStore {
         `WITH protected_roots AS MATERIALIZED (
          SELECT DISTINCT COALESCE(member.root_session_id, member.id) AS root_id
          FROM sessions member
-         WHERE member.status != 'archived' AND ${this.memberProtectionSql()}
+         -- An IN list probes idx_sessions_status_updated; != 'archived' scanned
+         -- every session, archived history included.
+         WHERE member.status IN (${UNARCHIVED_STATUSES_SQL}) AND ${this.memberProtectionSql()}
        )
        SELECT s.id FROM sessions s
        WHERE ${this.ageSql()}
