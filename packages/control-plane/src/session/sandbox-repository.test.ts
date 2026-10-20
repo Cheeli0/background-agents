@@ -138,3 +138,65 @@ describe("SandboxRepository completeProviderResume (SQLite)", () => {
     }
   );
 });
+
+describe("SandboxRepository updateSandboxLastActivity (SQLite)", () => {
+  const INTERVAL_MS = 15_000;
+
+  function createRepository(lastActivity: number | null) {
+    const db = new DatabaseSync(":memory:");
+    const { sql } = createNodeSqlStorage(db);
+    initSchema(sql);
+    const repository = new SandboxRepository(sql, log, TEST_ENCRYPTION_KEY);
+    repository.createSandbox({
+      id: "row-1",
+      status: "ready",
+      gitSyncStatus: "completed",
+      createdAt: 1_000,
+    });
+    sql.exec("UPDATE sandbox SET last_activity = ?", lastActivity);
+    const lastActivityValue = () =>
+      (sql.exec("SELECT last_activity FROM sandbox").one() as { last_activity: number | null })
+        .last_activity;
+    return { db, repository, lastActivityValue };
+  }
+
+  it("skips a renewal while the stored value is younger than the interval", () => {
+    const { db, repository, lastActivityValue } = createRepository(100_000);
+    try {
+      repository.updateSandboxLastActivity(100_000 + INTERVAL_MS - 1, INTERVAL_MS);
+      expect(lastActivityValue()).toBe(100_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("writes a renewal once the stored value is at least the interval old", () => {
+    const { db, repository, lastActivityValue } = createRepository(100_000);
+    try {
+      repository.updateSandboxLastActivity(100_000 + INTERVAL_MS, INTERVAL_MS);
+      expect(lastActivityValue()).toBe(100_000 + INTERVAL_MS);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("writes the first renewal when no activity is recorded", () => {
+    const { db, repository, lastActivityValue } = createRepository(null);
+    try {
+      repository.updateSandboxLastActivity(5_000, INTERVAL_MS);
+      expect(lastActivityValue()).toBe(5_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("always writes without an interval, as an explicit clock restart", () => {
+    const { db, repository, lastActivityValue } = createRepository(100_000);
+    try {
+      repository.updateSandboxLastActivity(100_001);
+      expect(lastActivityValue()).toBe(100_001);
+    } finally {
+      db.close();
+    }
+  });
+});

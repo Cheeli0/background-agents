@@ -103,13 +103,14 @@ export class EventRepository {
     id = `${type}:${messageId}`,
     preserveCreatedAt = false
   ): void {
+    // The id encodes the message id, so a conflict never changes message_id.
+    // Assigning an unchanged indexed column still rewrites its index entry,
+    // and Durable Object SQLite bills index writes as rows written.
     this.sql.exec(
       `INSERT INTO events (id, type, data, message_id, created_at, timeline_sequence)
        VALUES (?, ?, ?, ?, ?, ${NEXT_TIMELINE_SEQUENCE_SQL})
        ON CONFLICT(id) DO UPDATE SET
-         data = excluded.data,
-         message_id = excluded.message_id,
-         created_at = ${preserveCreatedAt ? "events.created_at" : "excluded.created_at"}`,
+         data = excluded.data${preserveCreatedAt ? "" : ",\n         created_at = excluded.created_at"}`,
       id,
       type,
       JSON.stringify(event),
@@ -131,8 +132,7 @@ export class EventRepository {
       `INSERT INTO events (id, type, data, message_id, created_at, timeline_sequence)
        VALUES (?, ?, ?, ?, ?, ${NEXT_TIMELINE_SEQUENCE_SQL})
        ON CONFLICT(id) DO UPDATE SET
-         data = excluded.data,
-         message_id = excluded.message_id`,
+         data = excluded.data`,
       id,
       event.type,
       JSON.stringify(event),

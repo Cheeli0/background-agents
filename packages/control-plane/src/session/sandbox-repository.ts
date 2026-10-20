@@ -508,10 +508,25 @@ export class SandboxRepository {
     );
   }
 
-  updateSandboxLastActivity(timestamp: number): void {
+  /**
+   * Record activity at `timestamp`. With `minIntervalMs`, skip the write while
+   * the stored value is younger than that: a skipped UPDATE writes no rows,
+   * and Durable Object SQLite bills every row written.
+   */
+  updateSandboxLastActivity(timestamp: number, minIntervalMs = 0): void {
+    if (minIntervalMs <= 0) {
+      this.sql.exec(
+        `UPDATE sandbox SET last_activity = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
+        timestamp
+      );
+      return;
+    }
     this.sql.exec(
-      `UPDATE sandbox SET last_activity = ? WHERE id = (SELECT id FROM sandbox LIMIT 1)`,
-      timestamp
+      `UPDATE sandbox SET last_activity = ?
+       WHERE id = (SELECT id FROM sandbox LIMIT 1)
+         AND (last_activity IS NULL OR last_activity <= ?)`,
+      timestamp,
+      timestamp - minIntervalMs
     );
   }
 

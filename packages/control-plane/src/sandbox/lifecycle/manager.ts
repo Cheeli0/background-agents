@@ -48,6 +48,7 @@ import {
   DEFAULT_HEARTBEAT_CONFIG,
   DEFAULT_CONNECTING_TIMEOUT_CONFIG,
   DEFAULT_BOOT_BUDGET_CONFIG,
+  LAST_ACTIVITY_WRITE_INTERVAL_MS,
   type CircuitBreakerConfig,
   type CircuitBreakerState,
   type SpawnConfig,
@@ -287,8 +288,8 @@ export interface SandboxStorage extends VmStartupReconciliationStorage, Allocati
     imageId: string,
     runtimeVersion: string | null
   ): boolean;
-  /** Update last activity timestamp */
-  updateSandboxLastActivity(timestamp: number): void;
+  /** Update last activity timestamp, skipping writes younger than `minIntervalMs`. */
+  updateSandboxLastActivity(timestamp: number, minIntervalMs?: number): void;
   /** Increment circuit breaker failure count */
   incrementCircuitBreakerFailure(timestamp: number): void;
   /** Reset circuit breaker failure count */
@@ -2033,9 +2034,13 @@ export class SandboxLifecycleManager
     return this.shutdown.onRefusedReconnect();
   }
 
-  /** Update last activity timestamp. */
+  /**
+   * Renew the activity timestamp. Steps, tool calls, artifacts and processing
+   * heartbeats all renew it; the inactivity timeout is minutes long, so a
+   * renewal younger than `LAST_ACTIVITY_WRITE_INTERVAL_MS` is skipped.
+   */
   updateLastActivity(timestamp: number): void {
-    this.storage.updateSandboxLastActivity(timestamp);
+    this.storage.updateSandboxLastActivity(timestamp, LAST_ACTIVITY_WRITE_INTERVAL_MS);
   }
 
   /**

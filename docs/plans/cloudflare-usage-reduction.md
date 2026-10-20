@@ -62,6 +62,10 @@ DO duration.
 
 ### B. Remove no-op DO writes
 
+Done (CHE-1053). Activity renewals use `LAST_ACTIVITY_WRITE_INTERVAL_MS` in
+`packages/control-plane/src/sandbox/lifecycle/decisions.ts`; the checkpoint-release write still
+restarts the clock unconditionally.
+
 - **Throttle last activity:** guard `updateSandboxLastActivity`
   (`packages/control-plane/src/session/sandbox-repository.ts`) so it skips the write when the stored
   value is under 15 s old.
