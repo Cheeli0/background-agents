@@ -118,13 +118,25 @@ the sweep only on 15-minute slots; `countInvocationFailure` in
   - Cancelled sessions can be archived, and unarchive restores them as `cancelled`.
   - A dead sandbox does not re-arm the alarm (`evaluateAlarmPolicy` returns `terminal` first), so no
     alarm change was needed.
-- **Part 2, measure (trusted operator, after Part 1 deploys).** Count unarchived sessions by
-  `status` and `spawn_source`, find any left in the stuck state, and check the auto-archive sweep's
-  `truncated` log for a backlog against its cap of 40 per hour. Record the results here.
-- **Part 3, extend auto-archive only if Part 2 shows a need.** Raise the cap for a backlog, or
-  extend the age rules to whatever terminal sessions dominate. Never auto-archive `created` or
-  `active` sessions, and keep the unread and active-lineage protections
-  (`packages/control-plane/src/db/session-auto-archive-store.ts`).
+- **Part 2, measured 2026-10-20** (production D1, before Part 1 deployed):
+  - 91 unarchived sessions against 2,854 archived. By status and `spawn_source`:
+    completed/automation 59, completed/linear-bot 10, failed/automation 9, completed/github-bot 6,
+    cancelled/agent 3, failed/linear-bot 2, active/github-bot 1, completed/user 1. Only 2 are older
+    than 7 days.
+  - No `created` or `active` session is more than a day old, so no other session is in the Part 1
+    stuck state, and the auto-archive cap leaves no backlog.
+  - D1 query insights, last 24 h, by rows read: the inbox query 1.51M over 1,092 calls (~1,386 per
+    call); the finalization sweep's two queries ~425k (cut ~15× by item C); the automation list
+    101k; the auto-archive candidate query 80k over 24 runs (~3,336 per run).
+- **Part 3, findings:**
+  - The inbox query plan is already index-driven (`idx_sessions_status_updated`, index joins,
+    re-rooting over the materialized set), so its cost is roughly 15 reads per visible unarchived
+    session. Extending the auto-archive rules to stale `created`/`active` sessions would change
+    nothing: there are none. The lever left is the unarchived set itself, which is mostly completed
+    automation sessions from the last day.
+  - Done: the auto-archive candidate query's `protected_roots` CTE filtered `status != 'archived'`,
+    which scanned every session. It now uses the inbox's `UNARCHIVED_STATUSES_SQL` list and probes
+    the status index.
 - **Why it matters:** the inbox query (`packages/control-plane/src/db/session-inbox-store.ts`) reads
   the viewer's whole unarchived set, ~900 rows per call.
 
