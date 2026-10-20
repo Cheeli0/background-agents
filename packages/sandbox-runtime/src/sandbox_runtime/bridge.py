@@ -69,6 +69,7 @@ from .prompt_budgets import resolve_prompt_limits
 from .push_operation import PushOperation, PushRejected, PushRequest
 from .repo_config import load_repo_manifest
 from .shutdown_preparation import ShutdownPreparationCoordinator
+from .token_coalescer import TokenCoalescer
 from .types import GitUser
 
 if TYPE_CHECKING:
@@ -230,6 +231,11 @@ class AgentBridge:
         # Reconnect-safe event delivery: buffers while the WS is down and
         # re-sends unacknowledged critical events (see event_forwarder.py).
         self.event_forwarder = BufferedEventForwarder(sandbox_id=sandbox_id, log=self.log)
+        # Fork-only: token frames are coalesced before the forwarder sees them
+        # (see token_coalescer.py); every other event flushes them first.
+        self.token_coalescer = TokenCoalescer(
+            lambda event: self.event_forwarder.send(event), log=self.log
+        )
         self.boot_attach = BootAttach(
             early_connect=early_connect,
             harness=harness,
@@ -651,9 +657,10 @@ class AgentBridge:
     async def _send_event(self, event: dict[str, Any]) -> bool:
         """Send event to control plane, buffering if WS is unavailable.
 
-        Returns whether it reached an open connection (see the forwarder).
+        Returns whether it reached an open connection (see the forwarder). A
+        token held for the next coalesced flush reports True.
         """
-        return await self.event_forwarder.send(event)
+        return await self.token_coalescer.send(event)
 
     async def _handle_command(self, cmd: dict[str, Any]) -> asyncio.Task[None] | None:
         """Handle command from control plane.
