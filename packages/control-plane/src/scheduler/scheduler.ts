@@ -933,7 +933,8 @@ export class Scheduler {
     let launchedChildren = 0;
 
     // 1. Recovery sweeps
-    await this.recoverySweep(store, isFinalizationSweepSlot(slotMs));
+    await this.recoverySweep(store);
+    if (isFinalizationSweepSlot(slotMs)) await this.finalizationSweep(store);
     await sweepHeldPrompts(this.continuityDeps(store), now);
 
     // 2. Process overdue automations, bounded by the per-tick child budget.
@@ -1047,8 +1048,7 @@ export class Scheduler {
 
   // ─── Recovery sweep ──────────────────────────────────────────────────────
 
-  private async recoverySweep(store: AutomationStore, runFinalization: boolean): Promise<void> {
-    const finalize = () => (runFinalization ? this.finalizationSweep(store) : Promise.resolve());
+  private async recoverySweep(store: AutomationStore): Promise<void> {
     const now = Date.now();
     const [orphanedResult, timedOutResult] = await Promise.allSettled([
       store.getOrphanedStartingRuns(ORPHAN_THRESHOLD_MS, RECOVERY_SWEEP_LIMIT),
@@ -1086,10 +1086,7 @@ export class Scheduler {
       });
     }
 
-    if (orphaned.length === 0 && timedOut.length === 0) {
-      await finalize();
-      return;
-    }
+    if (orphaned.length === 0 && timedOut.length === 0) return;
 
     for (const run of orphaned) {
       this.log.warn("Recovering orphaned starting run", {
@@ -1146,10 +1143,7 @@ export class Scheduler {
       }
     }
 
-    if (recoveredRuns.length === 0) {
-      await finalize();
-      return;
-    }
+    if (recoveredRuns.length === 0) return;
 
     // Failure accounting: strikes are per INVOCATION (CAS-deduped), so two
     // stuck children of one fan-out cost one strike, not two.
@@ -1170,8 +1164,6 @@ export class Scheduler {
         });
       }
     }
-
-    await finalize();
   }
 
   /**

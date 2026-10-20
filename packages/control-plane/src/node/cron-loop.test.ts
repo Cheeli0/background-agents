@@ -50,6 +50,18 @@ describe("CronLoop", () => {
     expect(names.filter((name) => name === "hourly")).toHaveLength(1);
   });
 
+  it("passes the slot time, not the fire time, to a late run", async () => {
+    const run = vi.fn<(job: ScheduledJob, nowMs: number) => Promise<void>>(async () => {});
+    loop = new CronLoop({ jobs: [job("tick", "* * * * *")], run, log });
+    loop.start();
+
+    // The wall clock runs ahead of the timer, as after an event-loop stall.
+    vi.setSystemTime(T0 + 30_000 + 90_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ name: "tick" }), T0 + 30_000);
+  });
+
   it("skips a slot while the previous run of the same job is still going", async () => {
     let finish!: () => void;
     const run = vi.fn(
