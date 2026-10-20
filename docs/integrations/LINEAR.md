@@ -253,55 +253,30 @@ corrected before the deployment is eligible.
 
 ### The prompt exceeds the 64,000-character limit
 
-The limit applies to the assembled prompt, including Linear's webhook `promptContext`,
-Open-Inspect's **Issue Session Instructions**, and formatting. The issue description alone does not
-show how much context Linear sends. In an investigated delegation, Linear expanded the parent issue
-with all its children and detailed issue relations, including repeated references to the same
-issues.
+The 64,000-character limit applies to the complete assembled prompt, not just the issue description.
+Open-Inspect constructs the initial prompt as follows:
 
-To investigate an unexpectedly large prompt:
+1. Use Linear's webhook `promptContext` when supplied. Otherwise, build context from the fetched
+   issue details and triggering instruction.
+2. Wrap Linear content as untrusted user content, with escaping and surrounding instructions.
+3. Append the configured **Issue Session Instructions**.
+4. Check the assembled string's length before creating a coding session. An oversized prompt is
+   rejected without truncation.
 
-1. Check the issue's parent, its child list, and its relations. Look for issues that are both
-   children and linked as `related` to the same parent.
-2. Remove redundant `related` links where the parent-child relationship already expresses the
-   intended connection. Preserve parent-child relationships and meaningful blocking or related
-   links.
-3. Review configured **Issue Session Instructions** and any Linear workspace/team agent guidance for
-   unnecessary text. These were not the cause in the case below.
-4. If the size is still unexplained, inspect the actual rejected `AgentSessionEvent` webhook's
-   `promptContext` through private operator diagnostics. Linear's **Copy as prompt** export can be
-   much smaller than the webhook context and did not reveal the expansion in this investigation.
-5. Delegate again and verify that Open-Inspect creates a session. Remove any temporary capture
-   instrumentation and captured payloads after the investigation.
+Linear's `promptContext` can include comments, project context, workspace/team agent guidance, and
+an expanded parent issue. The parent can contain its child list and detailed relations, with
+metadata such as team, project, labels, status, and IDs. An issue referenced both as a child and
+through a `related` link can appear in multiple expanded blocks. Short issue and parent descriptions
+therefore do not guarantee a small prompt.
 
-Webhook context can contain private issue and comment content. Keep captures private and record only
-structural findings and character counts in shared documentation.
+Linear's **Copy as prompt** export can be much smaller than the webhook's `promptContext`. Use the
+actual webhook context when accounting for unexpected size; the export alone may omit expanded
+content.
 
-#### CHE-1060 investigation
-
-CHE-926 and its replacement CHE-1060 hit the limit even though their descriptions and parent
-description were short. A captured CHE-1060 delegation showed that parent CHE-915 contributed 57,931
-characters. Its `<sub-issues>` block alone contributed 35,132 characters across 36 children, with
-metadata such as team, project, labels, status, and IDs.
-
-The parent also had 21 detailed relation blocks. Eleven `related` links pointed to issues already
-listed as its children. Removing those eleven redundant links saved 10,793 characters when replaying
-the captured prompt:
-
-| Measurement                                       | Characters |
-| ------------------------------------------------- | ---------- |
-| Assembled captured prompt before relation cleanup | 64,664     |
-| Replayed prompt without duplicate relation blocks | 53,871     |
-| Reduction                                         | 10,793     |
-
-Earlier rejected delegations reported slightly different totals, including 64,657. The table
-compares the same captured prompt before and after removing the duplicate blocks.
-
-The next CHE-1060 delegation created a production coding session. The 64,000-character limit stayed
-unchanged. Parent-child relationships remained intact, and the temporary capture instrumentation and
-stored payload were removed. This was a Linear relationship cleanup and required no permanent code
-change or deployment. The expansion described here was observed in this webhook; inspect the actual
-payload before assuming another oversized prompt has the same cause.
+To reduce the prompt, remove redundant `related` links where a parent-child relationship already
+expresses the intended connection, and shorten unnecessary context or configured instructions.
+Preserve meaningful relationships and blockers. Delegate again after the cleanup. Changes to Linear
+issue relationships take effect on the next delegation without an Open-Inspect deployment.
 
 ### Open-Inspect asks which repository to use
 
