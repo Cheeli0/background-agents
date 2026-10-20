@@ -18,8 +18,9 @@ function createHandler() {
   const confirmIndexStatus = vi.fn<SessionStatusService["confirmIndexStatus"]>();
   const preserveForArchive = vi.fn(async () => undefined);
   const repairIndexStatus = vi.fn(async () => undefined);
+  const setArchivedFromCancelled = vi.fn((_cancelled: boolean) => {});
   const handler = new SessionLifecycleHandler(
-    { getSession: () => session } as SessionCoreRepository,
+    { getSession: () => session, setArchivedFromCancelled } as unknown as SessionCoreRepository,
     {} as SandboxStateReader,
     { getPendingOrProcessingCount } as unknown as MessageRepository,
     { beginTransition, confirmIndexStatus, repairIndexStatus } as unknown as SessionStatusService,
@@ -38,6 +39,7 @@ function createHandler() {
     autoArchiveEligible,
     repairIndexStatus,
     getPendingOrProcessingCount,
+    setArchivedFromCancelled,
   };
 }
 
@@ -116,14 +118,26 @@ describe("SessionLifecycleHandler.autoArchive", () => {
     expect(fixture.beginTransition).not.toHaveBeenCalled();
   });
 
-  it("automatically archives old cancelled sessions without changing manual cancellation rules", async () => {
+  it("automatically archives old cancelled sessions and remembers they were cancelled", async () => {
     const fixture = createHandler();
     fixture.session.status = "cancelled";
     fixture.session.updated_at = Date.now() - 8 * 24 * 60 * 60 * 1000;
-    expect((await fixture.handler.archive()).status).toBe(409);
     expect(await (await fixture.handler.autoArchive()).json()).toMatchObject({
       outcome: "archived",
     });
+    expect(fixture.setArchivedFromCancelled).toHaveBeenCalledWith(true);
+  });
+
+  it("archives a cancelled session on request (fork)", async () => {
+    const fixture = createHandler();
+    fixture.session.status = "cancelled";
+    fixture.beginTransition.mockResolvedValue(true);
+
+    const response = await fixture.handler.archive();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ outcome: "archived" });
+    expect(fixture.setArchivedFromCancelled).toHaveBeenCalledWith(true);
   });
 
   it("fails closed if the global eligibility read fails", async () => {

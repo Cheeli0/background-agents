@@ -759,6 +759,13 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     description: "Retain rejected sandbox startup cleanup intent",
     run: "ALTER TABLE sandbox ADD COLUMN startup_rejected INTEGER NOT NULL DEFAULT 0",
   },
+  // Fork-only migrations use ids from 10001 so they never take an id upstream
+  // will assign. On an upstream sync, keep them after upstream's entries.
+  {
+    id: 10001,
+    description: "Remember that an archived session was cancelled (fork)",
+    run: "ALTER TABLE session ADD COLUMN archived_from_cancelled INTEGER NOT NULL DEFAULT 0",
+  },
 ];
 
 function removePersistedHookOutputTails(sql: SqlStorage): void {

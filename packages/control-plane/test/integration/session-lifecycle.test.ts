@@ -76,6 +76,96 @@ describe("POST /internal/archive", () => {
   });
 });
 
+describe("a sandbox launch that fails before connecting (fork)", () => {
+  async function waitForMessageStatus(
+    stub: DurableObjectStub,
+    messageId: string,
+    status: string
+  ): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const [row] = await queryDO<{ status: string }>(
+        stub,
+        `SELECT status FROM messages WHERE id = '${messageId}'`
+      );
+      if (row?.status === status) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Timed out waiting for message ${messageId} to be ${status}`);
+  }
+
+  // The integration provider's create call fails, exactly the production
+  // state: failed sandbox, no provider object, a never-started prompt.
+  it("fails the prompt it was for, so the session settles and can be archived", async () => {
+    const { stub } = await initSession({ userId: "user-1" });
+    await waitForSandboxStatus(stub, "failed");
+
+    const prompt = await stub.fetch("http://internal/internal/prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "review the PR", authorId: "user-1", source: "web" }),
+    });
+    const { messageId } = await prompt.json<{ messageId: string }>();
+    // The failed launch arms the alarm that fails the prompt.
+    await expect
+      .poll(async () => {
+        const [row] = await queryDO<{ pending_deadline: number | null }>(
+          stub,
+          "SELECT pending_deadline FROM session_alarm_state"
+        );
+        return row?.pending_deadline ?? 0;
+      })
+      .toBeGreaterThan(Date.now() + 10_000);
+    await runInSessionDO(stub, (instance: SessionDO) => instance.alarm());
+    await waitForMessageStatus(stub, messageId, "failed");
+
+    const [session] = await queryDO<{ status: string }>(stub, "SELECT status FROM session");
+    expect(session.status).not.toBe("active");
+    const [message] = await queryDO<{ error_message: string | null; started_at: number | null }>(
+      stub,
+      `SELECT error_message, started_at FROM messages WHERE id = '${messageId}'`
+    );
+    expect(message.started_at).toBeNull();
+    expect(message.error_message).toEqual(expect.any(String));
+
+    const archived = await stub.fetch("http://internal/internal/archive", { method: "POST" });
+    expect(archived.status).toBe(200);
+    expect(await archived.json()).toMatchObject({ outcome: "archived", status: "archived" });
+  });
+});
+
+describe("archiving a cancelled session (fork)", () => {
+  it("archives it, and unarchive restores it as cancelled rather than failed", async () => {
+    const { stub } = await initSession({ userId: "user-1" });
+    expect((await stub.fetch("http://internal/internal/cancel", { method: "POST" })).status).toBe(
+      200
+    );
+
+    const archived = await stub.fetch("http://internal/internal/archive", { method: "POST" });
+    expect(archived.status).toBe(200);
+    expect(await archived.json()).toMatchObject({ outcome: "archived" });
+
+    const restored = await stub.fetch("http://internal/internal/unarchive", { method: "POST" });
+    expect(await restored.json()).toEqual({ status: "cancelled" });
+    const [session] = await queryDO<{ status: string }>(stub, "SELECT status FROM session");
+    expect(session.status).toBe("cancelled");
+  });
+
+  it("restores a session archived from another status as before", async () => {
+    const { stub } = await initSession({ userId: "user-1" });
+    await stub.fetch("http://internal/internal/cancel", { method: "POST" });
+    await stub.fetch("http://internal/internal/archive", { method: "POST" });
+    await stub.fetch("http://internal/internal/unarchive", { method: "POST" });
+
+    // Archived again from cancelled, then forced to a non-cancelled status
+    // and archived from there: the flag follows the latest archive.
+    await queryDO(stub, "UPDATE session SET status = 'completed'");
+    await stub.fetch("http://internal/internal/archive", { method: "POST" });
+    const restored = await stub.fetch("http://internal/internal/unarchive", { method: "POST" });
+    expect(await restored.json()).not.toEqual({ status: "cancelled" });
+  });
+});
+
 describe("POST /internal/unarchive", () => {
   // Unarchive restores; it does not start work. Asserting "active" was the
   // defect: nothing settles an idle `active` session, because every settle path

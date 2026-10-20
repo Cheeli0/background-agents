@@ -103,17 +103,30 @@ the sweep only on 15-minute slots; `countInvocationFailure` in
 - **Acceptance:** the sweep query's daily rows read drop about 15×, and the auto-pause behaviour
   tests still pass.
 
-### D. Shrink the inbox scan with auto-archive
+### D. Stuck sessions, then the inbox scan
 
-- **Problem:** the inbox query (`packages/control-plane/src/db/session-inbox-store.ts`) reads the
-  viewer's whole unarchived set, ~900 rows per call.
-- **First, measure:** count unarchived sessions by `status` and `spawn_source` to find what
-  dominates. Auto-archive only covers completed, failed and cancelled sessions
-  (`packages/control-plane/src/session/auto-archive-policy.ts`). Also check whether the per-run
-  batch cap leaves a backlog.
-- **Then change:** extend auto-archive, keeping its unread and active-lineage protections
+- **Part 1, done (CHE-1055).** A sandbox launch whose provider create failed (or that the circuit
+  breaker refused) left its prompt `pending` forever. The session stayed `active`, archive refused
+  it for queued work, Cancel left it `cancelled`, which archive also refused, and auto-archive never
+  selected it. Five such sessions were repaired by hand on 2026-10-20; each had a `failed` sandbox
+  with no provider object or heartbeat, one never-started `pending` message, and no events.
+  - A launch that leaves nothing able to connect (`launchFailure()` in
+    `packages/control-plane/src/sandbox/lifecycle/manager.ts`) arms the DO alarm 30 s out, and the
+    alarm fails the waiting prompt with the launch's reason, as it already does for a connect
+    timeout. A launch started in between keeps the prompt. Sessions already stuck are repaired the
+    next time their alarm fires.
+  - Cancelled sessions can be archived, and unarchive restores them as `cancelled`.
+  - A dead sandbox does not re-arm the alarm (`evaluateAlarmPolicy` returns `terminal` first), so no
+    alarm change was needed.
+- **Part 2, measure (trusted operator, after Part 1 deploys).** Count unarchived sessions by
+  `status` and `spawn_source`, find any left in the stuck state, and check the auto-archive sweep's
+  `truncated` log for a backlog against its cap of 40 per hour. Record the results here.
+- **Part 3, extend auto-archive only if Part 2 shows a need.** Raise the cap for a backlog, or
+  extend the age rules to whatever terminal sessions dominate. Never auto-archive `created` or
+  `active` sessions, and keep the unread and active-lineage protections
   (`packages/control-plane/src/db/session-auto-archive-store.ts`).
-- **Acceptance:** fewer rows per inbox call, and no unread or active session is archived.
+- **Why it matters:** the inbox query (`packages/control-plane/src/db/session-inbox-store.ts`) reads
+  the viewer's whole unarchived set, ~900 rows per call.
 
 ## Rejected
 
