@@ -178,12 +178,9 @@ export class SessionLifecycleHandler {
       return Response.json({ error: "Session not found" }, { status: 404 });
     }
 
-    if (session.status === "cancelled") {
-      return archiveResponse("skipped_cancelled", {
-        error: "Cancelled sessions cannot be archived",
-      });
-    }
-
+    // Fork-only: a cancelled session can be archived. Cancel is the only way
+    // to clear queued work the session can't run, and archive refused both,
+    // leaving the session stuck. Unarchive restores it as cancelled.
     if (this.messageRepository.getPendingOrProcessingCount() > 0) {
       return archiveResponse("skipped_queued_work", {
         error: "Cannot archive a session with queued work",
@@ -194,6 +191,9 @@ export class SessionLifecycleHandler {
   }
 
   private async commitArchive(previousStatus: SessionStatus): Promise<Response> {
+    if (previousStatus !== "archived") {
+      this.sessionCoreRepository.setArchivedFromCancelled(previousStatus === "cancelled");
+    }
     // Commit archived before starting preservation, but do not await its index
     // projection: reconnects must see draining in the same turn.
     await Promise.all([
@@ -272,6 +272,14 @@ export class SessionLifecycleHandler {
 
     if (session.status !== "archived") {
       return Response.json({ error: "Session is not archived" }, { status: 409 });
+    }
+
+    // A cancelled session stays terminal through an archive round trip; its
+    // messages would read as a failed, promptable session.
+    if (this.sessionCoreRepository.wasCancelledWhenArchived()) {
+      await this.statusService.transition("cancelled");
+      this.sessionCoreRepository.setArchivedFromCancelled(false);
+      return Response.json({ status: "cancelled" });
     }
 
     // Restoring, not starting: unarchive returns the session to whatever its

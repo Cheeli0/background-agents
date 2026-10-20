@@ -899,3 +899,68 @@ describe("spawn admission race (#1589)", () => {
     );
   });
 });
+
+describe("launchFailure (fork)", () => {
+  function managerFor(
+    sandbox: ReturnType<typeof createMockSandbox>,
+    provider = createMockProvider(),
+    bridgeAttached = false
+  ) {
+    const storage = createMockStorage(createMockSession(), sandbox);
+    const broadcaster = createMockBroadcaster();
+    const manager = createTestLifecycleManager(
+      provider,
+      storage,
+      storage,
+      broadcaster,
+      createMockWebSocketManager(bridgeAttached),
+      createMockAlarmScheduler(),
+      createMockIdGenerator(),
+      createUnmanagedShutdown(),
+      createTestConfig()
+    );
+    return { manager, storage };
+  }
+
+  it("reports the persisted reason once a launch failed with nothing to connect", () => {
+    const { manager } = managerFor(
+      createMockSandbox({ status: "failed", last_spawn_error: "Failed to create sandbox" })
+    );
+    expect(manager.launchFailure()).toBe("Failed to create sandbox");
+  });
+
+  it("falls back to a generic reason when none was persisted", () => {
+    const { manager } = managerFor(createMockSandbox({ status: "failed", last_spawn_error: null }));
+    expect(manager.launchFailure()).toEqual(expect.any(String));
+  });
+
+  it.each(["pending", "spawning", "connecting", "ready", "stopped"] as const)(
+    "reports nothing while the row is %s",
+    (status) => {
+      const { manager } = managerFor(createMockSandbox({ status, last_spawn_error: "old" }));
+      expect(manager.launchFailure()).toBeNull();
+    }
+  );
+
+  it("reports nothing while a bridge is attached", () => {
+    const { manager } = managerFor(
+      createMockSandbox({ status: "failed", last_spawn_error: "old" }),
+      createMockProvider(),
+      true
+    );
+    expect(manager.launchFailure()).toBeNull();
+  });
+
+  it("reports the provider's error after a create that throws", async () => {
+    const provider = createMockProvider({
+      createSandbox: vi.fn(async () => {
+        throw new SandboxProviderError("Failed to create sandbox with HTTP 404", "permanent");
+      }),
+    });
+    const { manager } = managerFor(createMockSandbox({ status: "pending" }), provider);
+
+    await manager.spawnSandbox();
+
+    expect(manager.launchFailure()).toBe("Failed to create sandbox with HTTP 404");
+  });
+});
