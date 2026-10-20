@@ -251,6 +251,33 @@ not need to be uninstalled and reinstalled. A client-credentials viewer-organiza
 the application credentials resolve to a different workspace than the incoming webhook and must be
 corrected before the deployment is eligible.
 
+### The prompt exceeds the 64,000-character limit
+
+The 64,000-character limit applies to the complete assembled prompt, not just the issue description.
+Open-Inspect constructs the initial prompt as follows:
+
+1. Use Linear's webhook `promptContext` when supplied. Otherwise, build context from the fetched
+   issue details and triggering instruction.
+2. Wrap Linear content as untrusted user content, with escaping and surrounding instructions.
+3. Append the configured **Issue Session Instructions**.
+4. Check the assembled string's length before creating a coding session. An oversized prompt is
+   rejected without truncation.
+
+Linear's `promptContext` can include comments, project context, workspace/team agent guidance, and
+an expanded parent issue. The parent can contain its child list and detailed relations, with
+metadata such as team, project, labels, status, and IDs. An issue referenced both as a child and
+through a `related` link can appear in multiple expanded blocks. Short issue and parent descriptions
+therefore do not guarantee a small prompt.
+
+Linear's **Copy as prompt** export can be much smaller than the webhook's `promptContext`. Use the
+actual webhook context when accounting for unexpected size; the export alone may omit expanded
+content.
+
+To reduce the prompt, remove redundant `related` links where a parent-child relationship already
+expresses the intended connection, and shorten unnecessary context or configured instructions.
+Preserve meaningful relationships and blockers. Delegate again after the cleanup. Changes to Linear
+issue relationships take effect on the next delegation without an Open-Inspect deployment.
+
 ### Open-Inspect asks which repository to use
 
 Reply with `owner/repo`. To avoid future prompts, add the repo to the issue or ask an admin to map
