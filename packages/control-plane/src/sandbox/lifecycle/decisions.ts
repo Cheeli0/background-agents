@@ -465,6 +465,13 @@ export const DEFAULT_INACTIVITY_CONFIG: InactivityConfig = {
 };
 
 /**
+ * Activity renewals younger than this are not written. Fork-only: it bounds
+ * Durable Object SQLite writes, and staleness this small is invisible against
+ * the inactivity timeout above.
+ */
+export const LAST_ACTIVITY_WRITE_INTERVAL_MS = 15_000;
+
+/**
  * Possible inactivity actions.
  */
 export type InactivityAction =
