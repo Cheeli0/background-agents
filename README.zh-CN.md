@@ -114,19 +114,18 @@ App 安装范围限定了工作区能够访问的仓库。沙箱 git 凭据仅�
 
 ## 软件包
 
-| 软件包                                            | 说明                                 |
-| ------------------------------------------------- | ------------------------------------ |
-| [control-plane](packages/control-plane)           | Cloudflare Workers + Durable Objects |
-| [web](packages/web)                               | Next.js 网页客户端                   |
-| [sandbox-runtime](packages/sandbox-runtime)       | 沙箱内共享的智能体运行时             |
-| [modal-infra](packages/modal-infra)               | Modal 沙箱基础设施                   |
-| [daytona-infra](packages/daytona-infra)           | Daytona 快照基础设施                 |
-| [e2b-infra](packages/e2b-infra)                   | E2B 沙箱模板基础设施                 |
-| [opencomputer-infra](packages/opencomputer-infra) | OpenComputer 模板基础设施            |
-| [slack-bot](packages/slack-bot)                   | Slack 集成（从消息创建会话）         |
-| [github-bot](packages/github-bot)                 | GitHub 集成（自动审查、@提及）       |
-| [linear-bot](packages/linear-bot)                 | Linear 集成（议题 → 编程会话）       |
-| [shared](packages/shared)                         | 共享类型与工具函数                   |
+| 软件包                                      | 说明                                 |
+| ------------------------------------------- | ------------------------------------ |
+| [control-plane](packages/control-plane)     | Cloudflare Workers + Durable Objects |
+| [web](packages/web)                         | Next.js 网页客户端                   |
+| [sandbox-runtime](packages/sandbox-runtime) | 沙箱内共享的智能体运行时             |
+| [modal-infra](packages/modal-infra)         | Modal 沙箱基础设施                   |
+| [daytona-infra](packages/daytona-infra)     | Daytona 快照基础设施                 |
+| [e2b-infra](packages/e2b-infra)             | E2B 沙箱模板基础设施                 |
+| [slack-bot](packages/slack-bot)             | Slack 集成（从消息创建会话）         |
+| [github-bot](packages/github-bot)           | GitHub 集成（自动审查、@提及）       |
+| [linear-bot](packages/linear-bot)           | Linear 集成（议题 → 编程会话）       |
+| [shared](packages/shared)                   | 共享类型与工具函数                   |
 
 ## 入门
 
@@ -278,7 +277,8 @@ docker compose up -d postgres redis
 - 脚本运行期间会向会话报告进度。失败报告会保留执行阶段、可用的仓库信息以及错误或警告元数据，但钩子的标准输出和标准错误会被丢弃，不会收集或显示。镜像构建没有对应会话，因此两者都不报告。请参阅
   [Open-Inspect 的工作原理](docs/HOW_IT_WORKS.md#fresh-start-no-snapshot)
 - 两个钩子都会收到 `OPENINSPECT_BOOT_MODE`（`build`、`fresh`、`repo_image`、`snapshot_restore`）
-- 如果共享安装具有访问权限，钩子中的 git 操作可以对配置的源码管理（SCM）主机上的其他私有仓库进行身份认证
+- 钩子使用的 GitHub 会话凭据仅限于会话已持久化的仓库集合；团队拥有的会话还会与所属团队当前的仓库授权取交集。私有子模块、基于 Git 的依赖和同级仓库克隆所涉及的仓库必须包含在该集合中；仅有 App 安装的访问权限不会扩大此集合
+- GitHub 镜像构建凭据仅覆盖构建所涉及的仓库；团队拥有的环境构建还受所属团队仓库授权的限制。GitLab 使用部署级 PAT，不按会话缩小权限范围。关于凭据缓存和授权撤销等详情，请参阅[仓库与凭据边界](docs/AUTH.md#repository-and-credential-boundaries)
 
 ## 许可证
 
@@ -292,7 +292,6 @@ MIT
 - [Modal](https://modal.com)：云沙箱基础设施
 - [Daytona](https://www.daytona.io)：云端开发沙箱
 - [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)：云沙箱基础设施
-- [OpenComputer](https://www.opencomputer.dev)：云沙箱基础设施
 - [E2B](https://e2b.dev)：云沙箱基础设施
 - [Cloudflare Workers](https://workers.cloudflare.com)：边缘计算
 - [OpenCode](https://opencode.ai)：编程智能体运行时（内置执行框架）
