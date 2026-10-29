@@ -3,6 +3,7 @@
 import {
   ACTOR_ADMISSION_DENIED_CODE,
   ACTOR_EMAIL_REQUIRED_CODE,
+  type ActorProfileClaims,
 } from "@open-inspect/shared/types/actors";
 import { authenticate, isAuthError } from "../auth/authenticate";
 import type { Principal } from "../auth/principal";
@@ -33,6 +34,7 @@ import type {
   RouteAuthentication,
   RouteAuthorizationRequirement,
   RouteParams,
+  ServiceActorClaimsResult,
 } from "../routes/shared";
 import { SessionInternalPaths } from "../session/contracts";
 import { createSessionRuntimeClient } from "../session/runtime-client";
@@ -464,9 +466,15 @@ async function finalizeServiceActor(
         admissionPolicy.requireBotEnrollment(attestedEmail ? [attestedEmail] : []);
       }
     );
+    const knownActor: KnownActor = { ...actor, canonicalUserId: user.id };
+    // Enrolled by a concurrent request after this one authenticated (#2470):
+    // apply claims exactly as for an actor known at authentication.
+    if (user.outcome === "existing" && claims) {
+      await claimKnownActorProfile(ctx, knownActor, claims);
+    }
     ctx.principal = {
       ...principal,
-      actor: { ...actor, canonicalUserId: user.id },
+      actor: knownActor,
     };
     return null;
   } catch (cause) {
@@ -510,22 +518,38 @@ async function completeKnownActorProfile(
   actor: KnownActor
 ): Promise<void> {
   if (!policy.serviceActorClaims) return;
+  let prepared: ServiceActorClaimsResult;
   try {
-    const prepared = await policy.serviceActorClaims(request.clone(), ctx);
-    if (prepared.kind === "rejected") return;
+    prepared = await policy.serviceActorClaims(request.clone(), ctx);
+  } catch (cause) {
+    return warnProfileClaimFailed(ctx, cause);
+  }
+  if (prepared.kind === "claims") await claimKnownActorProfile(ctx, actor, prepared.claims);
+}
+
+async function claimKnownActorProfile(
+  ctx: RequestContext,
+  actor: KnownActor,
+  claims: ActorProfileClaims
+): Promise<void> {
+  try {
     const profileClaim = new KnownActorProfileClaim(
       new UserStore(ctx.db),
       new IdentityClaimStore(ctx.db)
     );
-    await profileClaim.claim(actor, prepared.claims);
+    await profileClaim.claim(actor, claims);
   } catch (cause) {
-    logger.warn("Failed to complete known service actor profile", {
-      event: "auth.service_actor_profile_failed",
-      error: cause instanceof Error ? cause : String(cause),
-      request_id: ctx.request_id,
-      trace_id: ctx.trace_id,
-    });
+    warnProfileClaimFailed(ctx, cause);
   }
+}
+
+function warnProfileClaimFailed(ctx: RequestContext, cause: unknown): void {
+  logger.warn("Failed to complete known service actor profile", {
+    event: "auth.service_actor_profile_failed",
+    error: cause instanceof Error ? cause : String(cause),
+    request_id: ctx.request_id,
+    trace_id: ctx.trace_id,
+  });
 }
 
 function authorizationUserId(ctx: RequestContext): string | null {
