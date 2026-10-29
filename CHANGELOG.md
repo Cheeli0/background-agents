@@ -2,6 +2,17 @@
 
 New features, integrations, and notable improvements to Open-Inspect — newest first.
 
+## October 29, 2026
+
+**Saved MCP credentials are listed by name.** Editing an MCP server used to show only that
+credentials existed, and saving a new value silently deleted every saved environment variable or
+header you didn't retype. The edit form now lists each saved name with its value hidden: leave a row
+blank to keep its value, enter a new value to replace it, or remove the row to delete it. Names are
+returned only to people with `mcp_servers.manage`; read-only users see neither names nor values, and
+values are never returned to anyone. API clients can send `keepCredentialKeys` with
+`PUT /mcp-servers/:id` for the same per-name edits; without it, sent credentials still replace the
+saved set.
+
 ## October 28, 2026
 
 **Session connections recover automatically.** Transient disconnects now retry without an attempt
