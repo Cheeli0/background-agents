@@ -1,6 +1,8 @@
 import { parseBody } from "./body";
 import { Hono } from "hono";
 import {
+  bulkImportSkillsInputSchema,
+  bulkSkillImportPreviewInputSchema,
   createSkillInputSchema,
   createSkillProfileInputSchema,
   importSkillInputSchema,
@@ -36,10 +38,13 @@ import {
   SkillRevisionValidationError,
 } from "../skills/content-addressing";
 import {
+  fetchBulkSkillImport,
+  fetchSelectedBulkSkillImport,
   fetchSkillImport,
   resolveSkillImportRepository,
   SkillImportError,
   type SkillImportResult,
+  sourceMovedError,
 } from "../skills/git-import";
 import { admit, dispatch } from "../routing/admit";
 import type { ControlPlaneHonoEnv } from "../routing/hono-env";
@@ -200,19 +205,28 @@ async function authorizeSkillRepositories(
   return authorizeWorkspaceRepositories(ctx, { repositories: resolved });
 }
 
+async function authorizedImportRepository(
+  env: Env,
+  ctx: RequestContext,
+  source: SkillImportSourceInput
+) {
+  const provider = createRouteSourceControlProvider(env);
+  const resolved = await resolveSkillImportRepository(provider, source);
+  const denied = await authorizeWorkspaceRepositories(ctx, {
+    repositories: [{ owner: resolved.repoOwner, name: resolved.repoName, repoId: resolved.repoId }],
+  });
+  return denied ?? { provider, resolved };
+}
+
 async function fetchAuthorizedSkillImport(
   env: Env,
   ctx: RequestContext,
   source: SkillImportSourceInput,
   name?: string | null
 ): Promise<SkillImportResult | Response> {
-  const provider = createRouteSourceControlProvider(env);
-  const resolved = await resolveSkillImportRepository(provider, source);
-  const denied = await authorizeWorkspaceRepositories(ctx, {
-    repositories: [{ owner: resolved.repoOwner, name: resolved.repoName, repoId: resolved.repoId }],
-  });
-  if (denied) return denied;
-  return fetchSkillImport(provider, source, name, resolved);
+  const access = await authorizedImportRepository(env, ctx, source);
+  if (access instanceof Response) return access;
+  return fetchSkillImport(access.provider, source, name, access.resolved);
 }
 
 async function handlePreviewSkill(
@@ -242,15 +256,11 @@ async function handlePreviewSkill(
 /**
  * Shape one fetched import as its preview, including whether the canonical
  * name is still free so the importer can override it before confirming.
- *
- * @param heldByName - Name the target skill already holds, on a re-import;
- *   that name is available to it even though the catalog has it taken.
  */
-async function importPreviewResponse(
-  ctx: RequestContext,
+function importPreviewResponse(
   result: SkillImportResult,
-  heldByName?: string
-): Promise<SkillImportPreviewResponse> {
+  nameAvailable: boolean
+): SkillImportPreviewResponse {
   return {
     name: result.name,
     source: result.source,
@@ -263,8 +273,7 @@ async function importPreviewResponse(
     totalBytes: result.totalBytes,
     files: result.files,
     warnings: result.warnings,
-    nameAvailable:
-      result.name === heldByName || (await new SkillStore(ctx.db).nameAvailable(result.name)),
+    nameAvailable,
   };
 }
 
@@ -282,10 +291,7 @@ function confirmedImport(
   }
 ): Response | null {
   if (result.source.commitSha !== expected.expectedCommitSha) {
-    return error(
-      `The source moved to commit ${result.source.commitSha} since it was previewed. Preview the import again.`,
-      409
-    );
+    return skillImportWriteError(sourceMovedError(result.source.commitSha));
   }
   if (result.source.sourceSha256 !== expected.expectedSourceSha256) {
     return error("The source content changed since it was previewed. Preview again.", 409);
@@ -311,7 +317,9 @@ async function handlePreviewSkillImport(
   try {
     const result = await fetchAuthorizedSkillImport(env, ctx, parsed.source, parsed.name);
     if (result instanceof Response) return result;
-    return json(await importPreviewResponse(ctx, result));
+    return json(
+      importPreviewResponse(result, await new SkillStore(ctx.db).nameAvailable(result.name))
+    );
   } catch (e) {
     return skillImportWriteError(e);
   }
@@ -353,6 +361,117 @@ async function handleImportSkill(
       ...sourceAuditFields(result.source),
     });
     return json({ skill }, 201);
+  } catch (e) {
+    return skillImportWriteError(e);
+  }
+}
+
+async function handlePreviewBulkSkillImport(
+  request: Request,
+  env: Env,
+  _params: object,
+  ctx: RequestContext
+): Promise<Response> {
+  const parsed = await parseBody(
+    request,
+    bulkSkillImportPreviewInputSchema,
+    "Invalid bulk skill import source"
+  );
+  if (parsed instanceof Response) return parsed;
+  try {
+    const access = await authorizedImportRepository(env, ctx, parsed.source);
+    if (access instanceof Response) return access;
+    const result = await fetchBulkSkillImport(access.provider, parsed.source, access.resolved);
+    const nameCounts = new Map<string, number>();
+    for (const skill of result.skills) {
+      nameCounts.set(skill.name, (nameCounts.get(skill.name) ?? 0) + 1);
+    }
+    const unavailableNames = await new SkillStore(ctx.db).unavailableNames(
+      result.skills.map((skill) => skill.name)
+    );
+    const skills = result.skills.map((skill) =>
+      importPreviewResponse(
+        skill,
+        nameCounts.get(skill.name) === 1 && !unavailableNames.has(skill.name)
+      )
+    );
+    return json({
+      skills,
+      commitSha: result.commitSha,
+      totalFiles: result.totalFiles,
+      totalBytes: result.totalBytes,
+    });
+  } catch (e) {
+    return skillImportWriteError(e);
+  }
+}
+
+async function handleBulkSkillImport(
+  request: Request,
+  env: Env,
+  _params: object,
+  ctx: RequestContext
+): Promise<Response> {
+  const userId = canonicalUserId(ctx);
+  if (!userId) return error("Canonical user required", 403);
+  const parsed = await parseBody(request, bulkImportSkillsInputSchema, "Invalid bulk skill import");
+  if (parsed instanceof Response) return parsed;
+  const denied = await authorizeSkillRepositories(
+    env,
+    ctx,
+    parsed.assignments.flatMap((assignment) =>
+      assignment.type === "repository" ? [assignment.repository] : []
+    )
+  );
+  if (denied) return denied;
+  try {
+    const access = await authorizedImportRepository(env, ctx, parsed.source);
+    if (access instanceof Response) return access;
+    // Only the selected roots are read, in request order, after the commit is confirmed.
+    const { skills: selected } = await fetchSelectedBulkSkillImport(
+      access.provider,
+      parsed.source,
+      {
+        expectedCommitSha: parsed.expectedCommitSha,
+        subdirectories: parsed.skills.map((skill) => skill.subdirectory),
+      },
+      access.resolved
+    );
+    for (const [index, reviewed] of parsed.skills.entries()) {
+      const fetched = selected[index];
+      if (fetched.name !== reviewed.name) {
+        return error(
+          `The reviewed skill at ${reviewed.subdirectory ?? "repository root"} is now named ${fetched.name}. Preview again.`,
+          409
+        );
+      }
+      const stale = confirmedImport(fetched, {
+        expectedCommitSha: parsed.expectedCommitSha,
+        expectedSourceSha256: reviewed.expectedSourceSha256,
+        expectedRevisionSha256: reviewed.expectedRevisionSha256,
+      });
+      if (stale) return stale;
+    }
+
+    const skills = await new SkillStore(ctx.db).createImportedSkills(
+      selected.map((skill) => ({
+        name: skill.name,
+        content: skill.content,
+        source: skill.source,
+      })),
+      parsed.assignments,
+      userId
+    );
+    for (const [index, skill] of skills.entries()) {
+      audit(ctx, {
+        action: "skill.imported",
+        skill_id: skill.id,
+        revision_id: skill.currentRevisionId,
+        revision_created: true,
+        ...sourceAuditFields(selected[index].source),
+      });
+    }
+    return json({ skills }, 201);
   } catch (e) {
     return skillImportWriteError(e);
   }
@@ -407,7 +526,10 @@ async function handlePreviewSkillReimport(
     if (source instanceof Response) return source;
     const result = await fetchAuthorizedSkillImport(env, ctx, source, skill.name);
     if (result instanceof Response) return result;
-    return json(await importPreviewResponse(ctx, result, skill.name));
+    // The target already holds its own name, so that name stays available to it.
+    const nameAvailable =
+      result.name === skill.name || (await new SkillStore(ctx.db).nameAvailable(result.name));
+    return json(importPreviewResponse(result, nameAvailable));
   } catch (e) {
     return skillImportWriteError(e);
   }
@@ -712,6 +834,10 @@ skillRoutes.post("/skills/resolve-preview", SKILLS_READ, (c) => dispatch(c, hand
 skillRoutes.get("/skills/:id", SKILLS_READ, (c) => dispatch(c, handleGetSkill));
 
 skillRoutes.post("/skills", SKILLS_MANAGE, (c) => dispatch(c, handleCreateSkill));
+skillRoutes.post("/skills/import/bulk/preview", SKILLS_MANAGE, (c) =>
+  dispatch(c, handlePreviewBulkSkillImport)
+);
+skillRoutes.post("/skills/import/bulk", SKILLS_MANAGE, (c) => dispatch(c, handleBulkSkillImport));
 skillRoutes.post("/skills/import/preview", SKILLS_MANAGE, (c) =>
   dispatch(c, handlePreviewSkillImport)
 );

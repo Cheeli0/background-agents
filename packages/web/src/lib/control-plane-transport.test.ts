@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BULK_SKILL_IMPORT_TIMEOUT_MS } from "@/app/api/skills/import/bulk/request-timeout";
 import { BROWSER_AUTH_CALLBACK_TIMEOUT_MS } from "./browser-auth-proxy";
 import { dispatchControlPlaneFetch } from "./control-plane-transport";
+
+const mocks = vi.hoisted(() => ({
+  bindingFetch: vi.fn<typeof fetch>(),
+}));
+
+vi.mock("@opennextjs/cloudflare", () => ({
+  getCloudflareContext: async () => ({
+    env: { CONTROL_PLANE_WORKER: { fetch: mocks.bindingFetch } },
+  }),
+}));
 
 describe("control-plane transport deadlines", () => {
   beforeEach(() => {
@@ -69,4 +80,31 @@ describe("control-plane transport deadlines", () => {
     caller.abort(new Error("Caller disconnected"));
     await rejected;
   });
+
+  it.each(["development", "production"] as const)(
+    "allows a slow collection response beyond the default deadline in %s",
+    async (mode) => {
+      vi.stubEnv("NODE_ENV", mode);
+      const slowFetch = (_input: unknown, init?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          setTimeout(() => resolve(Response.json({ skills: [] })), 20_000);
+        });
+      vi.mocked(fetch).mockImplementation(slowFetch);
+      mocks.bindingFetch.mockImplementation(slowFetch);
+
+      const pending = dispatchControlPlaneFetch(
+        "https://control-plane.example/skills/import/bulk/preview",
+        {},
+        {},
+        false,
+        BULK_SKILL_IMPORT_TIMEOUT_MS
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      expect((await pending).status).toBe(200);
+      const transport = mode === "production" ? mocks.bindingFetch : vi.mocked(fetch);
+      expect(transport).toHaveBeenCalledOnce();
+    }
+  );
 });
