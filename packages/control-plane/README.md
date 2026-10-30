@@ -63,6 +63,52 @@ not pass through Hono.
 | --------- | ------ | ------------ |
 | `/health` | GET    | Health check |
 
+### Personal MCP Connections
+
+| Endpoint                              | Method | Description                                           |
+| ------------------------------------- | ------ | ----------------------------------------------------- |
+| `/mcp-connections`                    | GET    | List the authenticated user's connection status       |
+| `/mcp-connections/:serverId/connect`  | POST   | Begin personal OAuth consent                          |
+| `/mcp-connections/oauth/callback`     | POST   | Redeem consent bound to the same browser session      |
+| `/mcp-connections/:serverId`          | DELETE | Disconnect the authenticated user's grant             |
+| `/mcp-servers/:id/revoke-connections` | POST   | Revoke every personal grant for a disabled definition |
+
+For offboarding or definition deletion, a human with `mcp_servers.manage` first disables the
+definition, then calls `POST /mcp-servers/:id/revoke-connections`, then deletes the definition.
+Revocation returns 409 while the definition is enabled and 404 if it does not exist. It atomically
+removes consent attempts, increments grant revisions, clears credentials and refresh claims, and
+fences callbacks/refreshes already in flight. It works for suspended owners without reactivating
+them. It does not revoke tokens at the external OAuth provider. The ordinary authorization audit
+records the acting user, route, request ID, and HTTP outcome; the correlated
+`mcp_server.connections_revoked` log records completion. Ownership/deletion safety triggers remain
+in force. The endpoint uses the same signed web-service plus browser-session authentication as other
+human settings operations; a bare service credential cannot invoke it.
+
+Consent is ephemeral: each connection retains at most its current pending/claimed attempt after
+publication. Settlement, failure, supersession, and disconnect delete verifier material.
+Reconnecting keeps a working grant usable until the new consent settles, which replaces it with a
+new grant revision; an abandoned or failed attempt leaves it in place. Expired, logged-out,
+obsolete, and pre-existing terminal history is lazily pruned when that owner lists, starts, or
+redeems connections; idle expired rows need no periodic job to bound repeated attempts. Changing
+authentication configuration invalidates grants, but metadata-only saves and reordered credential
+maps or equivalent repository scopes do not. The proxy and OAuth flows accept only HTTPS URLs whose
+hostname passes lexical checks (no IP literals, local or internal names, credentials in URLs, or
+non-default ports), and a token or authorization endpoint must share its issuer's origin. The check
+applies to the hostname as written: DNS results and connection addresses are not validated, so an
+administrator-registered hostname that resolves to a private address is still reached. Disabling a
+definition blocks pending callbacks before token exchange as well as new consent.
+
+Personal delegation is supported by the OpenCode and Claude harnesses. Codex reports no personal MCP
+capability and omits managed personal connectors from native configuration; public and service
+connectors remain available. Healthy bridge-process reconnects preserve personal delegation, but
+process replacement during a prepared turn remains fenced until a new sandbox allocation.
+
+In a session where several people prompt, each turn delegates as its own author. The proxy
+authenticates the shared sandbox, not the process inside it, so a process left running from an
+earlier turn can make personal MCP calls during the active author's turn. That covers another
+person's turn and automated ones (Autofix and other GitHub turns, Linear, automations), which can
+carry text from outside the team. This is a known limitation.
+
 ### Actors
 
 | Endpoint     | Method | Description                                                       |

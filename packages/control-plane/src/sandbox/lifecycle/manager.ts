@@ -1,3 +1,5 @@
+import { resolveRuntimeMcpServers } from "../../mcp/runtime-config";
+import type { RuntimeMcpServerConfig } from "@open-inspect/shared/types/integrations";
 /**
  * SandboxLifecycleManager - orchestrates sandbox lifecycle operations.
  *
@@ -363,6 +365,7 @@ export interface SandboxLifecycleConfig extends AlarmPolicyConfig, SandboxLaunch
   circuitBreaker: CircuitBreakerConfig;
   spawn: SpawnConfig;
   controlPlaneUrl: string;
+  recordMcpServers?: (servers: RuntimeMcpServerConfig[]) => void;
   /**
    * Session ID for log correlation, resolved per use. Optional — logs will
    * omit sessionId if not provided. A thunk rather than a value because the
@@ -827,7 +830,15 @@ export class SandboxLifecycleManager
       const prebuiltImageId: string | null = selectedImage?.providerImageId ?? null;
       const prebuiltImageSha: string | null = selectedImage?.primaryBaseSha ?? null;
 
-      const mcpServers = await this.launchContext.loadMcpServers(repositories);
+      const mcpDefinitions = await this.launchContext.loadMcpServers(repositories);
+      const mcpServers = mcpDefinitions
+        ? resolveRuntimeMcpServers(mcpDefinitions, {
+            controlPlaneUrl: this.config.controlPlaneUrl,
+            sessionId: session.session_name || session.id,
+            sandboxToken: sandboxAuthToken,
+          })
+        : undefined;
+      this.config.recordMcpServers?.(mcpServers ?? []);
 
       const codeServerEnabled = session.code_server_enabled === 1;
       const vncEnabled = session.vnc_enabled === 1;
@@ -907,9 +918,17 @@ export class SandboxLifecycleManager
           sandboxId: expectedSandboxId,
           generationCreatedAtMs: retry.createdAt,
           sandboxAuthToken,
+          mcpServers: mcpDefinitions
+            ? resolveRuntimeMcpServers(mcpDefinitions, {
+                controlPlaneUrl: this.config.controlPlaneUrl,
+                sessionId,
+                sandboxToken: sandboxAuthToken,
+              })
+            : undefined,
           prebuiltImageId: null,
           prebuiltImageSha: null,
         };
+        this.config.recordMcpServers?.(retryConfig.mcpServers ?? []);
         await this.vmStartup.recordPendingProviderReference(generation, retryConfig);
         const created = await this.vmStartup.createWithVmRecovery(retryConfig, generation);
         if (!created) return;
@@ -1161,7 +1180,15 @@ export class SandboxLifecycleManager
       const vncEnabled = session.vnc_enabled === 1;
       const agentSlackNotifyEnabled =
         await this.launchContext.resolveAgentSlackNotifyEnabled(session);
-      const mcpServers = await this.launchContext.loadMcpServers(repositories);
+      const mcpDefinitions = await this.launchContext.loadMcpServers(repositories);
+      const mcpServers = mcpDefinitions
+        ? resolveRuntimeMcpServers(mcpDefinitions, {
+            controlPlaneUrl: this.config.controlPlaneUrl,
+            sessionId: session.session_name || session.id,
+            sandboxToken: sandboxAuthToken,
+          })
+        : undefined;
+      this.config.recordMcpServers?.(mcpServers ?? []);
       const { sandboxSettings, timeoutSeconds } =
         this.launchContext.resolveSandboxSettings(session);
       const restoreConfig = {
