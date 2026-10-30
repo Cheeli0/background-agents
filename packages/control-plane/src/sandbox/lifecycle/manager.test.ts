@@ -188,6 +188,51 @@ describe("SandboxLifecycleManager", () => {
         clock.mockRestore();
       }
     });
+
+    it.each([
+      { kind: "spawn", clockOffsetMs: 0 },
+      { kind: "spawn", clockOffsetMs: -1_000 },
+      { kind: "restore", clockOffsetMs: 0 },
+      { kind: "restore", clockOffsetMs: -1_000 },
+    ] as const)(
+      "$kind reservations strictly advance the persisted generation (clock offset $clockOffsetMs ms)",
+      async ({ kind, clockOffsetMs }) => {
+        const previousCreatedAt = 1_700_000_000_000;
+        const clock = vi.spyOn(Date, "now").mockReturnValue(previousCreatedAt + clockOffsetMs);
+        try {
+          const sandbox = createMockSandbox({
+            status: "stopped",
+            created_at: previousCreatedAt,
+            snapshot_image_id: kind === "restore" ? "saved-image" : null,
+            snapshot_runtime_version: kind === "restore" ? COMPATIBLE_RUNTIME_VERSION : null,
+          });
+          const storage = createMockStorage(createMockSession(), sandbox);
+          const provider = createMockProvider();
+          const manager = createTestLifecycleManager(
+            provider,
+            storage,
+            storage,
+            createMockBroadcaster(),
+            createMockWebSocketManager(false),
+            createMockAlarmScheduler(),
+            createMockIdGenerator(),
+            createUnmanagedShutdown(),
+            createTestConfig()
+          );
+
+          await manager.spawnSandbox();
+
+          expect(sandbox.created_at).toBe(previousCreatedAt + 1);
+          const launch = vi.mocked(
+            kind === "spawn" ? provider.createSandbox : provider.restoreFromSnapshot!
+          ).mock.calls[0][0];
+          expect(launch.generationCreatedAtMs).toBe(sandbox.created_at);
+          expect(launch.sandboxId).toMatch(new RegExp(`-${sandbox.created_at}$`));
+        } finally {
+          clock.mockRestore();
+        }
+      }
+    );
   });
 });
 

@@ -1,5 +1,6 @@
 """Translate a session launch into Modal image, environment, and resource arguments."""
 
+import functools
 import json
 import secrets
 import time
@@ -25,6 +26,8 @@ from ..app import app
 from ..app_config import APP_NAME
 from ..images.base import base_image
 from .launch_policy import (
+    ALLOCATION_GENERATION_CREATED_AT_MS_TAG,
+    ALLOCATION_SANDBOX_TAG,
     docker_allocation_name,
     docker_allocation_tags,
     docker_base_image,
@@ -36,7 +39,13 @@ from .models import SandboxConfig, SandboxHandle
 from .termination import terminate_and_wait
 from .tunnels import SandboxTunnels
 from .vcs_env import inject_vcs_env_vars
-from .vm_recovery import VMAllocationOutcome, VMServiceLaunch, find_owned_vm, owned_vm_tags_match
+from .vm_recovery import (
+    VMAllocationHolder,
+    VMAllocationOutcome,
+    VMServiceLaunch,
+    classify_vm_allocation_holder,
+    parse_generation_created_at_ms,
+)
 
 _RESERVED_LAUNCH_ENV_VARS = {
     "RESTORED_FROM_SNAPSHOT",
@@ -57,6 +66,8 @@ _RESERVED_LAUNCH_ENV_VARS = {
 
 log = get_logger("manager")
 ACCESS_PASSWORD_READ_TIMEOUT_SECONDS = 30
+# A name collision allows one retry after retiring an older racing holder.
+DOCKER_ALLOCATION_CREATE_ATTEMPTS = 2
 
 
 class RepositoryImageUnavailableError(RuntimeError):
@@ -94,6 +105,11 @@ async def _create_sandbox(
         if repository_image:
             raise RepositoryImageUnavailableError("repository image is unavailable") from e
         raise
+
+
+def _check_launch_deadline(launch_deadline_at_ms: int | None) -> None:
+    if launch_deadline_at_ms is not None and time.time() * 1000 >= launch_deadline_at_ms:
+        raise VMAllocationOutcome("window_closed", "VM launch deadline expired")
 
 
 def _session_identity(session_config: Any) -> str:
@@ -265,33 +281,66 @@ class SandboxLauncher:
         *,
         session_id: str,
         sandbox_id: str,
-        retire_sandbox_id: str | None,
         create_kwargs: dict[str, Any],
         repository_image: bool,
         service_launch: VMServiceLaunch,
         launch_deadline_at_ms: int | None = None,
+        retire_sandbox_id: str | None = None,
     ) -> tuple[modal.Sandbox, bool]:
-        """Create a named VM or adopt only the allocation owned by this generation."""
-        if retire_sandbox_id:
-            await self._retire_docker_allocation(session_id, retire_sandbox_id)
+        """Create or adopt this generation's VM, retiring only older same-session holders."""
+        _check_launch_deadline(launch_deadline_at_ms)
         name = docker_allocation_name(session_id)
         tags = docker_allocation_tags(session_id, sandbox_id)
-        existing = await self._find_owned_docker_allocation(name, tags)
-        if existing is None:
-            if launch_deadline_at_ms is not None and time.time() * 1000 >= launch_deadline_at_ms:
-                raise VMAllocationOutcome("window_closed", "VM launch deadline expired")
+        # Control-plane sandbox IDs end in their strictly increasing reservation timestamp.
+        generation_created_at_ms = (
+            parse_generation_created_at_ms(sandbox_id.rsplit("-", 1)[-1])
+            if sandbox_id.startswith("sandbox-")
+            else None
+        )
+        allocation_tags = {**tags, **service_launch.tags()}
+        if generation_created_at_ms is not None:
+            allocation_tags[ALLOCATION_GENERATION_CREATED_AT_MS_TAG] = str(generation_created_at_ms)
+        find_holder = functools.partial(
+            self._find_docker_allocation_holder,
+            name,
+            tags,
+            generation_created_at_ms=generation_created_at_ms,
+            predecessor_generation=(
+                docker_allocation_tags(session_id, retire_sandbox_id)[ALLOCATION_SANDBOX_TAG]
+                if retire_sandbox_id
+                else None
+            ),
+        )
+        holder, existing = await find_holder()
+        for _ in range(DOCKER_ALLOCATION_CREATE_ATTEMPTS):
+            if holder not in ("absent", "older"):
+                break
+            if holder == "older":
+                # Each retirement is immediately followed by a create that can take the name.
+                assert existing is not None
+                _check_launch_deadline(launch_deadline_at_ms)
+                await self._retire_docker_allocation(existing)
+            _check_launch_deadline(launch_deadline_at_ms)
             try:
                 sandbox = await _create_sandbox(
-                    {**create_kwargs, "name": name, "tags": {**tags, **service_launch.tags()}},
+                    {**create_kwargs, "name": name, "tags": allocation_tags},
                     repository_image=repository_image,
                 )
                 return sandbox, False
             except modal.exception.AlreadyExistsError as e:
-                existing = await self._find_owned_docker_allocation(name, tags)
-                if existing is None:
+                _check_launch_deadline(launch_deadline_at_ms)
+                holder, existing = await find_holder()
+                if holder == "absent":
                     raise VMAllocationOutcome(
-                        "race_pending", "VM allocation is not yet visible"
+                        "race_pending", "VM allocation is not yet available"
                     ) from e
+        if holder != "current":
+            # Foreign and not-older holders are never retired; an older holder is left running
+            # once no create attempt remains to replace it.
+            raise VMAllocationOutcome(
+                "other_generation", "Docker sandbox allocation ownership mismatch"
+            )
+        assert existing is not None
         log.info(
             "sandbox.docker_allocation_adopted",
             sandbox_id=sandbox_id,
@@ -333,27 +382,28 @@ class SandboxLauncher:
         return {key: passwords[key] for key in keys}
 
     @staticmethod
-    async def _find_owned_docker_allocation(
-        name: str, tags: dict[str, str]
-    ) -> modal.Sandbox | None:
-        found = await find_owned_vm(name, tags)
-        return found[0] if found else None
-
-    async def _retire_docker_allocation(self, session_id: str, sandbox_id: str) -> None:
-        """Terminate a prior named VM only when its ownership tags match."""
-        name = docker_allocation_name(session_id)
+    async def _find_docker_allocation_holder(
+        name: str,
+        tags: dict[str, str],
+        *,
+        generation_created_at_ms: int | None,
+        predecessor_generation: str | None,
+    ) -> tuple[VMAllocationHolder, modal.Sandbox | None]:
+        """Look up and classify the VM holding this session's allocation name, read-only."""
         try:
             sandbox = await modal.Sandbox.from_name.aio(APP_NAME, name)
         except modal.exception.NotFoundError:
-            return
-        if not owned_vm_tags_match(
-            await sandbox.get_tags.aio(), docker_allocation_tags(session_id, sandbox_id)
-        ):
-            log.warn("sandbox.docker_allocation_retire_mismatch", sandbox_id=sandbox_id)
-            return
-        await terminate_and_wait(sandbox)
-        log.info(
-            "sandbox.docker_allocation_retired",
-            sandbox_id=sandbox_id,
-            modal_object_id=sandbox.object_id,
+            return "absent", None
+        holder = classify_vm_allocation_holder(
+            await sandbox.get_tags.aio(),
+            tags,
+            generation_created_at_ms=generation_created_at_ms,
+            predecessor_generation=predecessor_generation,
         )
+        return holder, sandbox
+
+    @staticmethod
+    async def _retire_docker_allocation(sandbox: modal.Sandbox) -> None:
+        """Terminate an older same-session VM and wait until it releases the name."""
+        await terminate_and_wait(sandbox)
+        log.info("sandbox.docker_allocation_retired", modal_object_id=sandbox.object_id)
