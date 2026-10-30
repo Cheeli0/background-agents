@@ -73,6 +73,84 @@ describe("POST /sessions/:id/prompt", () => {
 });
 
 describe("POST /internal/prompt", () => {
+  it.each([
+    ["duplicate", "Fix the bug", 200],
+    ["conflicting", "Fix a different bug", 409],
+  ])(
+    "keeps a newer participant identity when a %s retry repeats an older one",
+    async (_retry, retryContent, retryStatus) => {
+      const { stub } = await initSession();
+      const original = {
+        content: "Fix the bug",
+        authorId: "github:1001",
+        source: "github",
+        clientRequestId: "original-request",
+        canonicalUserId: "old-user",
+        scmEnrichment: { userId: "1001", login: "old-login", name: "Old Name", email: null },
+      };
+      const enqueue = (body: typeof original) =>
+        stub.fetch("http://internal/internal/prompt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      expect((await enqueue(original)).status).toBe(200);
+      const newer = await enqueue({
+        ...original,
+        content: "Fix the newer bug",
+        clientRequestId: "newer-request",
+        canonicalUserId: "current-user",
+        scmEnrichment: { ...original.scmEnrichment, login: "current-login", name: "Current Name" },
+      });
+      expect(newer.status).toBe(200);
+
+      const retry = await enqueue({ ...original, content: retryContent });
+
+      expect(retry.status).toBe(retryStatus);
+      expect(
+        await queryDO(
+          stub,
+          "SELECT canonical_user_id, scm_login, scm_name FROM participants WHERE user_id = ?",
+          original.authorId
+        )
+      ).toEqual([
+        { canonical_user_id: "current-user", scm_login: "current-login", scm_name: "Current Name" },
+      ]);
+      expect(
+        await queryDO(
+          stub,
+          "SELECT client_request_id, author_canonical_user_id FROM messages ORDER BY rowid"
+        )
+      ).toEqual([
+        { client_request_id: "original-request", author_canonical_user_id: "old-user" },
+        { client_request_id: "newer-request", author_canonical_user_id: "current-user" },
+      ]);
+    }
+  );
+
+  it("refuses a used request id from a new author without adding its participant", async () => {
+    const { stub } = await initSession();
+    const enqueue = (authorId: string, canonicalUserId: string) =>
+      stub.fetch("http://internal/internal/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: "Fix the bug",
+          authorId,
+          source: "github",
+          clientRequestId: "original-request",
+          canonicalUserId,
+        }),
+      });
+    expect((await enqueue("github:1001", "first-user")).status).toBe(200);
+
+    expect((await enqueue("github:2002", "other-user")).status).toBe(409);
+
+    expect(
+      await queryDO(stub, "SELECT id FROM participants WHERE user_id = ?", "github:2002")
+    ).toEqual([]);
+  });
+
   it("enqueues prompt and returns messageId", async () => {
     const { stub } = await initSession();
 
