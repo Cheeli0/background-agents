@@ -185,6 +185,18 @@ Provider-account mode removes that provider's canonical API key from the sandbox
 runtime cannot bypass the selected subscription. API-key mode continues to use ordinary global,
 team, repository, or environment secrets.
 
+MCP server environment variables and headers (**Settings > MCP Servers**) are encrypted with
+`REPO_SECRETS_ENCRYPTION_KEY` and are not returned after saving. A local server's environment
+variables and an unrouted remote server's headers are injected into the sandbox; a remote server
+routed through Open-Inspect keeps its headers in the control plane, which adds them to each request
+it forwards. Personal MCP OAuth connections (**Settings > Connections**) are encrypted with a key
+derived from `TOKEN_ENCRYPTION_KEY` and never reach the sandbox.
+
+MCP server credentials saved before this encryption existed can still be stored as plaintext. The
+control plane reads them (logging `mcp_server.env_decrypt_fallback`) but does not rewrite them, and
+saving the same values again leaves them as they are. To store them encrypted, change the credential
+values or recreate the server.
+
 ### Legacy managed OAuth coexistence
 
 Legacy scoped OpenAI/xAI OAuth remains supported for sessions pinned to it. Provider-account
