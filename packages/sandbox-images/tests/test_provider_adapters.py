@@ -246,6 +246,7 @@ def test_daytona_hash_builds_leave_previous_base_snapshots_for_explicit_retentio
 
 def test_daytona_snapshot_uses_configured_memory(monkeypatch, tmp_path):
     image = Mock()
+    image._context_list = []
     for method in ("add_local_dir", "run_commands", "env", "workdir"):
         getattr(image, method).return_value = image
     image_class = Mock()
@@ -291,6 +292,31 @@ def test_daytona_config_rejects_invalid_snapshot_memory(monkeypatch, memory_gib)
         RuntimeError, match="DAYTONA_BASE_SNAPSHOT_MEMORY_GIB must be a positive integer"
     ):
         load_config()
+
+
+def test_daytona_snapshot_copies_windows_context_with_forward_slashes(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules,
+        "daytona",
+        SimpleNamespace(
+            CreateSnapshotParams=Mock(), Daytona=Mock(), Image=Mock(), Resources=Mock()
+        ),
+    )
+    posix_context_paths = runpy.run_path(str(ROOT / "packages/daytona-infra/src/toolchain.py"))[
+        "_posix_context_paths"
+    ]
+    windows_path = "Users\\dev\\repo\\.cache\\daytona-abc"
+    context = SimpleNamespace(archive_path=windows_path)
+    image = SimpleNamespace(
+        _context_list=[context],
+        _dockerfile=f"FROM base\nCOPY {windows_path} /tmp/openinspect-image\n",
+    )
+
+    assert posix_context_paths(image) is image
+    assert context.archive_path == "Users/dev/repo/.cache/daytona-abc"
+    assert image._dockerfile == (
+        "FROM base\nCOPY Users/dev/repo/.cache/daytona-abc /tmp/openinspect-image\n"
+    )
 
 
 def test_daytona_config_loads_snapshot_memory(monkeypatch):

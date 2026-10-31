@@ -38,6 +38,10 @@ fi
 
 uv sync --frozen
 
+# The SDK prints build logs with non-ASCII characters; a Windows console
+# defaults to cp1252 and aborts the build on the first one.
+export PYTHONUTF8=1
+
 # build-template.py reads E2B_TEMPLATE_ID / E2B_API_KEY / E2B_API_URL /
 # E2B_TEMPLATE_CPU / E2B_TEMPLATE_MEMORY_MB from the environment.
 uv run python build-template.py
