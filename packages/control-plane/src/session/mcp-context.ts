@@ -166,7 +166,12 @@ export class SessionMcpContext {
         .toArray()[0] as MessageContext | undefined) ?? null
     );
   }
-  async prepare(messageId: string): Promise<ManagedMcpExecution> {
+  /**
+   * The prompt's execution context for the personal servers this sandbox runs, or null
+   * when it runs none. Such a sandbox refuses a prompt without one, so a turn that may
+   * use none of them still gets a context.
+   */
+  async prepare(messageId: string): Promise<ManagedMcpExecution | null> {
     const message = this.active();
     if (!message || message.id !== messageId) throw new McpError("mcp_context_changed", 409);
     const runtime = this.sql
@@ -175,13 +180,13 @@ export class SessionMcpContext {
     const personal = this.launch().filter(
       (entry) => entry.authMode === "user_oauth" && !entry.withheld
     );
+    if (!personal.length) return null;
     const result: ManagedMcpExecution = {
       messageId,
       revision: message.mcp_revision,
       servers: [],
       unavailable: [],
     };
-    if (!personal.length) return result;
     try {
       result.connectionUrl = new URL(
         "/settings?tab=mcp-connections",
@@ -196,13 +201,14 @@ export class SessionMcpContext {
     // The user/session check is identical for every personal server: run it once.
     let userAccess: Promise<void> | undefined;
     for (const entry of personal) {
+      // Autofix, other bot and automation turns have no author to delegate as: they run
+      // without personal servers by design, so there is nothing to warn about.
+      if (!message.mcp_eligible || !message.admitted_canonical_user_id) continue;
       try {
         if (runtime?.mcp_runtime_version === POISONED_RUNTIME_VERSION)
           throw new McpError("mcp_runtime_restart_required");
         if (runtime?.mcp_runtime_version !== 1) throw new McpError("mcp_unsupported");
         if (!sandbox?.modal_sandbox_id || sandbox.status !== "ready" || sandbox.fenced || !session)
-          throw new McpError("mcp_execution_inactive");
-        if (!message.mcp_eligible || !message.admitted_canonical_user_id)
           throw new McpError("mcp_execution_inactive");
         userAccess ??= assertMcpUserAccess(
           this.db,
@@ -261,9 +267,13 @@ export class SessionMcpContext {
   /**
    * The warning for personal servers this allocation withheld, or null. The sandbox
    * never ran them, so only the control plane can say why. One warning names them
-   * all, so a prompt never carries several warnings with the same timestamp.
+   * all, so a prompt never carries several warnings with the same timestamp. A turn
+   * with no author to delegate as could not have used them either, so it gets none.
    */
-  withheldWarning(): string | null {
+  withheldWarning(messageId: string): string | null {
+    const message = this.active();
+    if (message?.id !== messageId || !message.mcp_eligible || !message.admitted_canonical_user_id)
+      return null;
     const byReason = new Map<PersonalMcpWithheldCode, string[]>();
     for (const entry of this.launch())
       if (entry.withheld)
