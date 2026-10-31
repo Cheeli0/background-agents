@@ -75,10 +75,10 @@ modal_environment_web_suffix  = ""
 # Daytona REST API
 # Only required when sandbox_provider = "daytona"
 # Create an API key at https://app.daytona.io with permissions:
-#   Sandboxes: Read, Write  |  Snapshots: Read, Write, Delete
+#   Sandboxes: Read, Write, Delete  |  Snapshots: Read, Write, Delete
 # Seed the base snapshot with packages/daytona-infra/src/bootstrap.py before enabling.
 daytona_api_url = ""           # e.g., "https://app.daytona.io/api"
-daytona_api_key = ""           # Requires Sandboxes (Read/Write) + Snapshots (Read/Write/Delete)
+daytona_api_key = ""           # Requires Sandboxes (Read/Write/Delete) + Snapshots (Read/Write/Delete)
 daytona_base_snapshot = ""     # Prefix for the Terraform-managed Daytona snapshot
 # daytona_base_snapshot_memory_gib = 2 # Memory inherited by sandboxes created from the snapshot
 # daytona_target = ""          # Optional Daytona target name
