@@ -22,7 +22,12 @@ export const auditEventTimestampSchema = z
 export const auditOperationResultSchema = z.enum(["applied", "no_op", "denied", "rejected"]);
 
 /** Principal categories currently emitted by the control plane. */
-export const auditPrincipalKindSchema = z.enum(["user", "service", "sandbox"]);
+export const auditPrincipalKindSchema = z.enum([
+  "user",
+  "service",
+  "sandbox",
+  "personal-access-token",
+]);
 
 /** Forward-compatible structured metadata attached to an audit event. */
 export const auditEventMetadataSchema = z.record(z.string(), z.unknown());
@@ -82,6 +87,7 @@ export const AUDIT_OPERATION_ACTIONS = [
   "memory.approved",
   "memory.rejected",
   "memory.superseded",
+  "memory.personal_read",
   "session.private_break_glass",
   "session.visibility_changed",
   "session.moved",
@@ -90,6 +96,9 @@ export const AUDIT_OPERATION_ACTIONS = [
   "session.created_private",
   "workspace.member_role_updated",
   "workspace.member_status_updated",
+  "workspace.admission_policy_updated",
+  // No longer written; kept so stored freeze/unfreeze events still read as operations.
+  "workspace.admission_policy_maintenance",
   "workspace.default_role_assigned",
   "workspace.owner_bootstrapped",
   "workspace.user_merged",
@@ -108,6 +117,9 @@ export const AUDIT_OPERATION_ACTIONS = [
   "team.secret_set",
   "team.secret_deleted",
   "automation.executor_changed",
+  "personal_access_token.created",
+  "personal_access_token.revoked",
+  "workspace.personal_access_token_policy_updated",
 ] as const;
 
 export const AUTHORIZATION_DECISION_METADATA_SCHEMA = "authorization_decision.v1";

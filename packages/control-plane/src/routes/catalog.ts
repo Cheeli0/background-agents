@@ -1,3 +1,5 @@
+import { mcpConnectionRoutes } from "./mcp-connections";
+import { mcpProxyRoutes } from "./mcp-proxy";
 /**
  * Canonical control-plane HTTP route catalog.
  *
@@ -7,6 +9,7 @@
 
 import type { RouteModule } from "../routing/hono-env";
 import { webhookRoutes } from "../webhooks";
+import { actorRoutes } from "./actors";
 import { analyticsRoutes } from "./analytics";
 import { auditEventRoutes } from "./audit-events";
 import { autofixRoutes } from "./autofix";
@@ -22,6 +25,8 @@ import { imageBuildRoutes } from "./image-builds";
 import { integrationSettingsRoutes } from "./integration-settings";
 import { keyboardShortcutRoutes } from "./keyboard-shortcuts";
 import { mcpServerRoutes } from "./mcp-servers";
+import { personalAccessTokenAdminRoutes } from "./personal-access-token-admin";
+import { personalAccessTokenRoutes } from "./personal-access-tokens";
 import { memoryRoutes } from "./memories";
 import { modelPreferencesRoutes } from "./model-preferences";
 import { modelProviderAccountRoutes } from "./model-provider-accounts";
@@ -38,6 +43,7 @@ import { teamRoutes } from "./teams";
 import { teamChannelBindingRoutes } from "./team-channel-bindings";
 import { teamSecretsRoutes } from "./team-secrets";
 import { teamSettingsRoutes } from "./settings-teams";
+import { admissionPolicyRoutes } from "./settings-admission-policy";
 
 /** Registration order is the precedence order: each module is mounted where it appears. */
 export const catalog: readonly RouteModule[] = [
@@ -90,6 +96,8 @@ export const catalog: readonly RouteModule[] = [
 
   // MCP servers
   mcpServerRoutes,
+  mcpConnectionRoutes,
+  mcpProxyRoutes,
 
   // Analytics
   analyticsRoutes,
@@ -120,4 +128,16 @@ export const catalog: readonly RouteModule[] = [
 
   // Read-only GitHub bot routing hints
   githubRoutingRoutes,
+
+  // Bot actor enrollment with an attested profile
+  actorRoutes,
+
+  // Deployment-additive browser sign-in rules
+  admissionPolicyRoutes,
+
+  // Personal access tokens: human-only issuance, listing, and revocation
+  personalAccessTokenRoutes,
+
+  // Workspace governance of personal access tokens: policy, every member's tokens, revocation
+  personalAccessTokenAdminRoutes,
 ];

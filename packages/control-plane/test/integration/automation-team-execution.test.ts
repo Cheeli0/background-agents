@@ -5,11 +5,17 @@ import { isAutomationExecutionAuthorized } from "../../src/automation/authorizat
 import { createCloudflareEnv } from "../../src/cloudflare/platform";
 import { AutomationStore } from "../../src/db/automation-store";
 import { SessionIndexStore } from "../../src/db/session-index";
-import { Scheduler } from "../../src/scheduler/scheduler";
+import { createScheduler as createAutomationScheduler } from "../../src/scheduler/factory";
 import { cleanD1Tables } from "./cleanup";
 import { queryDO, seedActiveUser, serviceFetch, sqlDatabase } from "./helpers";
 import { fetchRuns } from "./run-helpers";
 import { seedTeam } from "./ownership-test-helpers";
+import type { ManualTriggerRequester } from "../../src/scheduler/contracts";
+
+/** A person firing from the browser, with only their live role bounding the run. */
+function asPerson(userId: string): ManualTriggerRequester {
+  return { userId, scmEnrichment: null, actorKind: "person" };
+}
 
 const EXECUTOR = "11111111111111111111111111111111";
 const LEAD = "22222222222222222222222222222222";
@@ -40,7 +46,7 @@ function authorized(automationId: string, executionUserId?: string) {
 }
 
 function createScheduler() {
-  return new Scheduler(sqlDatabase(env.DB), createCloudflareEnv(env), { submit() {} });
+  return createAutomationScheduler(sqlDatabase(env.DB), createCloudflareEnv(env), { submit() {} });
 }
 
 async function expectNoLaunch(automationId: string) {
@@ -126,7 +132,7 @@ describe("automation team execution (integration)", () => {
   it("rejects nonmember administrator manual execution", async () => {
     const row = await saveAutomation("auto-nonmember-requester");
     expect(await authorized(row.id)).toBe(true);
-    await expect(createScheduler().trigger(row.id, ADMIN)).rejects.toMatchObject({
+    await expect(createScheduler().trigger(row.id, asPerson(ADMIN))).rejects.toMatchObject({
       name: "AutomationExecutionUnauthorizedError",
       reason: "execution_authorization_denied",
     });
@@ -143,7 +149,7 @@ describe("automation team execution (integration)", () => {
     expect(await authorized(row.id)).toBe(false);
     expect(await authorized(row.id, MEMBER)).toBe(false);
     const scheduler = createScheduler();
-    await expect(scheduler.trigger(row.id, MEMBER)).rejects.toMatchObject({
+    await expect(scheduler.trigger(row.id, asPerson(MEMBER))).rejects.toMatchObject({
       reason: "team_archived",
     });
     const store = new AutomationStore(env.DB);
@@ -297,7 +303,7 @@ describe("automation team execution (integration)", () => {
         .bind(visibility, TEAM)
         .run();
       const row = await saveAutomation(`auto-session-${visibility}`);
-      await createScheduler().trigger(row.id, MEMBER);
+      await createScheduler().trigger(row.id, asPerson(MEMBER));
       await expectLaunchedSession(row.id, TEAM, visibility, MEMBER);
     }
   );
@@ -309,7 +315,7 @@ describe("automation team execution (integration)", () => {
       .bind(TEAM)
       .run();
     const row = await saveAutomation("auto-workspace-session", null);
-    await createScheduler().trigger(row.id, MEMBER);
+    await createScheduler().trigger(row.id, asPerson(MEMBER));
     await expectLaunchedSession(row.id, null, "workspace", MEMBER);
   });
 });

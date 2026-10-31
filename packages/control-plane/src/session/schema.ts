@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS session (
 CREATE TABLE IF NOT EXISTS participants (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  canonical_user_id TEXT,                           -- D1 users.id for cosmetic profile joins only
+  canonical_user_id TEXT,                           -- D1 users.id of the participant's account; NULL for unmapped integration authors
   scm_user_id TEXT,                                 -- SCM numeric ID
   scm_login TEXT,                                   -- SCM username
   scm_email TEXT,                                   -- For git commit attribution
@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS participants (
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
   author_id TEXT NOT NULL,
+  author_canonical_user_id TEXT,                    -- Author's account when queued; NULL for Autofix turns and authors without one
   content TEXT NOT NULL,
   source TEXT NOT NULL,                             -- 'web', 'slack', 'extension', 'github'
   model TEXT,                                       -- LLM model for this specific message (per-message override)
@@ -313,6 +314,17 @@ function parseSqlColumnNames(rows: unknown[]): string[] {
       );
     }
     return row.name;
+  });
+}
+
+function parseAppliedMigrationIds(rows: unknown[]): number[] {
+  return rows.map((row, index) => {
+    if (!isRecord(row) || typeof row.id !== "number") {
+      throw new TypeError(
+        `Invalid schema migration metadata at row ${index}: expected an object with a numeric id`
+      );
+    }
+    return row.id;
   });
 }
 
@@ -759,6 +771,40 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     description: "Retain rejected sandbox startup cleanup intent",
     run: "ALTER TABLE sandbox ADD COLUMN startup_rejected INTEGER NOT NULL DEFAULT 0",
   },
+  {
+    id: 57,
+    description: "Record each prompt author's account as it was when the prompt was queued",
+    run: "ALTER TABLE messages ADD COLUMN author_canonical_user_id TEXT",
+  },
+  {
+    id: 58,
+    description: "Retain admitted MCP author and queue-owned context",
+    run: (sql) => {
+      runMigration(sql, "ALTER TABLE messages ADD COLUMN admitted_canonical_user_id TEXT");
+      runMigration(sql, "ALTER TABLE messages ADD COLUMN mcp_eligible INTEGER NOT NULL DEFAULT 0");
+      runMigration(sql, "ALTER TABLE messages ADD COLUMN mcp_revision INTEGER NOT NULL DEFAULT 0");
+      runMigration(sql, "ALTER TABLE messages ADD COLUMN mcp_context TEXT");
+      runMigration(sql, "ALTER TABLE messages ADD COLUMN mcp_closed INTEGER NOT NULL DEFAULT 1");
+      runMigration(sql, "ALTER TABLE sandbox ADD COLUMN mcp_servers TEXT");
+      runMigration(
+        sql,
+        "ALTER TABLE sandbox ADD COLUMN mcp_runtime_version INTEGER NOT NULL DEFAULT 0"
+      );
+      runMigration(
+        sql,
+        "ALTER TABLE sandbox ADD COLUMN mcp_rate_window INTEGER NOT NULL DEFAULT 0"
+      );
+      runMigration(sql, "ALTER TABLE sandbox ADD COLUMN mcp_rate_count INTEGER NOT NULL DEFAULT 0");
+      sql.exec(
+        "CREATE TABLE IF NOT EXISTS mcp_proxy_leases (id TEXT PRIMARY KEY, sandbox_id TEXT NOT NULL, expires_at INTEGER NOT NULL)"
+      );
+    },
+  },
+  {
+    id: 59,
+    description: "Distinguish bridge process replacement from transport reconnect",
+    run: "ALTER TABLE sandbox ADD COLUMN mcp_bridge_instance_id TEXT",
+  },
   // Fork-only migrations use ids from 10001 so they never take an id upstream
   // will assign. On an upstream sync, keep them after upstream's entries.
   {
@@ -809,8 +855,9 @@ export function applyMigrations(sql: SqlStorage): void {
     `CREATE TABLE IF NOT EXISTS _schema_migrations (id INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`
   );
 
-  const rows = sql.exec(`SELECT id FROM _schema_migrations`).toArray() as Array<{ id: number }>;
-  const applied = new Set(rows.map((r) => r.id));
+  const applied = new Set(
+    parseAppliedMigrationIds(sql.exec(`SELECT id FROM _schema_migrations`).toArray())
+  );
 
   for (const migration of MIGRATIONS) {
     if (applied.has(migration.id)) continue;

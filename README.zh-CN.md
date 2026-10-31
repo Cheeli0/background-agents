@@ -122,9 +122,11 @@ App 安装范围限定了工作区能够访问的仓库。沙箱 git 凭据仅�
 | [modal-infra](packages/modal-infra)         | Modal 沙箱基础设施                   |
 | [daytona-infra](packages/daytona-infra)     | Daytona 快照基础设施                 |
 | [e2b-infra](packages/e2b-infra)             | E2B 沙箱模板基础设施                 |
+| [boat-infra](packages/boat-infra)           | Boat 沙箱快照基础设施                |
 | [slack-bot](packages/slack-bot)             | Slack 集成（从消息创建会话）         |
 | [github-bot](packages/github-bot)           | GitHub 集成（自动审查、@提及）       |
 | [linear-bot](packages/linear-bot)           | Linear 集成（议题 → 编程会话）       |
+| [mcp-server](packages/mcp-server)           | 本地 MCP 服务器（个人访问令牌）      |
 | [shared](packages/shared)                   | 共享类型与工具函数                   |
 
 ## 入门
@@ -212,6 +214,9 @@ OpenAI 模型可通过 OAuth 使用你现有的 ChatGPT 订阅，无需单独的
   [GitHub 集成](docs/integrations/GITHUB.md)
 - **Linear 机器人**：在议题中提及智能体或将议题分配给它，即可启动编程会话、发布进度并关联最终的 PR。请参阅
   [Linear 集成](docs/integrations/LINEAR.md)
+- **MCP 服务器**：通过个人访问令牌，让 Claude
+  Code 或其他 MCP 客户端读取会话和自动化运行记录，并可按需创建和运行自动化或导入技能。请参阅
+  [MCP 服务器](packages/mcp-server/README.md)
 - **Webhook**：通过经过身份认证的 HTTP POST，从任何外部系统触发会话
 
 ### 自动化
@@ -293,6 +298,7 @@ MIT
 - [Daytona](https://www.daytona.io)：云端开发沙箱
 - [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox)：云沙箱基础设施
 - [E2B](https://e2b.dev)：云沙箱基础设施
+- [Boat](https://boat.dev)：云沙箱基础设施
 - [Cloudflare Workers](https://workers.cloudflare.com)：边缘计算
 - [OpenCode](https://opencode.ai)：编程智能体运行时（内置执行框架）
 - [Claude Agent SDK](https://docs.anthropic.com/en/docs/agent-sdk)：编程智能体运行时（Claude

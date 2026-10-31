@@ -78,6 +78,9 @@ Otherwise the classifier chooses the best target for the request, including **No
 the task does not require a codebase. When the match is unclear, Open-Inspect asks you to choose a
 repository, environment, or **No repository** in the Slack thread.
 
+Channel-started sessions never include personal memories, because their replies post where others
+read them. Repository and environment memories still apply.
+
 ### From a DM
 
 Open a direct message with the Open-Inspect bot and send the request:
@@ -88,6 +91,11 @@ Can you investigate the flaky login test in acme/web?
 
 DMs do not need an `@mention`. If you include one anyway, Open-Inspect strips it before sending the
 request to the agent.
+
+A DM-started session uses your personal memories as a web session does: the bot marks its create
+request `directMessage` (Slack conversation IDs starting with `D`), and the control plane applies
+your saved preference. See
+[Personal memory follows the owner's prompts](../MEMORY.md#personal-memory-follows-the-owners-prompts).
 
 ### Model and reasoning overrides
 
@@ -284,9 +292,54 @@ A top-level Slack request starts a new Slack thread. Reply in that thread to sen
 to the same Open-Inspect session. This applies in both channels and DMs: in a direct message, the
 follow-up still needs to be a thread reply, not a fresh top-level DM.
 
-Image attachments on interactive channel follow-ups must accompany an `@mention` of the bot. In a DM
-thread, no mention is needed. Watched-channel automation threads are text-only, as described in
-[Channel Message Triggers](#channel-message-triggers).
+In a channel thread, a follow-up and its images need an `@mention` of the bot, unless the thread is
+a [solo thread](#solo-threads). In a DM thread, no mention is needed. Watched-channel automation
+threads are text-only, as described in [Channel Message Triggers](#channel-message-triggers).
+
+### Solo threads
+
+A channel thread becomes a solo thread when your `@mention` of the bot starts its session and the
+bot's acknowledgement says: "You can reply without mentioning me while you are the only person in
+this thread." The bot adds that line only when it reads the thread as the session starts and finds
+that only you and bots have posted. In a solo thread, your replies send an instruction to this
+session without an `@mention`, including replies with images or forwarded messages.
+
+| Thread                                                     | Does a reply need an `@mention` to send an instruction? |
+| ---------------------------------------------------------- | ------------------------------------------------------- |
+| Solo thread, reply from the person who started the session | No                                                      |
+| Another person has posted in the thread                    | Yes, for everyone, from then on                         |
+| Another person posted before the session started           | Yes; the acknowledgement has no solo line               |
+| DM thread                                                  | No                                                      |
+
+The bot reads the thread when the session starts, after any target choice, so a person who replied
+before then counts, even in a thread your mention started. When the bot notices another person in a
+solo thread, from their post or from the thread it reads for your next unmentioned reply, it posts a
+message in the thread for everyone: "This thread now has multiple people. From now on, mention @bot
+to send an instruction to this session." In rare cases, such as two people posting at the same
+moment, that message can appear twice. The thread then needs an `@mention` for the rest of its life,
+even if that person deletes their message. Other bots and Slackbot do not count as people.
+
+An unmentioned reply sends an instruction to the session only when all of these hold:
+
+- The thread has an open session. An unmentioned reply never starts a session.
+- The reply has something to run: text, an image, or a forwarded message. A reply with only flags or
+  only a file that is not an image is not sent.
+- The reply does not open by mentioning a teammate, as in `@alice can you check this?`.
+- The reply is a new message. Edits and replies also sent to the channel are not sent.
+- The bot can read the whole thread from Slack and sees no other person in it. The bot reads the
+  thread on every unmentioned reply. If Slack does not return the whole thread, the reply is not
+  sent.
+
+A reply that is sent gets the same :eyes: reaction as a mentioned follow-up and works the same way:
+`!model` and `!reasoning` apply, and delivery problems are reported in the thread. It does not also
+run channel message triggers. A reply that is not sent gets no response from the bot, except the
+message above when the thread shows another person, or the error for a malformed `!model` or
+`!reasoning` flag. It can still reach the session as thread context with your next instruction, and
+it can still match a [channel message trigger](#channel-message-triggers).
+
+Solo threads use the `message.channels` and `message.groups` event subscriptions and the
+`channels:history` and `groups:history` scopes that the bundled app manifest already includes. A
+thread stays solo for about 7 days after its session starts; after that, mention the bot again.
 
 Open-Inspect keeps the Slack thread connected to the session for about 7 days. If you reply after
 that mapping expires, or if you reply outside the thread, the bot may start target selection again
@@ -324,6 +377,7 @@ When the agent finishes, Slack receives a completion reply with:
 - Created artifacts such as pull requests or branches
 - A few key tool actions, such as edits or commands
 - The final status, model, session target, and reasoning effort when available
+- Any personal MCP server warnings for the prompt, with a **Your MCP Connections** button
 - A **View Session** button
 
 If the agent created a manual-PR branch and no PR artifact is already present, Slack may also show a
@@ -457,6 +511,10 @@ Then, in the web app, create a **Slack Message** automation and add a **Slack Ch
 condition to filter by content. See
 [Slack Message Triggers](../AUTOMATIONS.md#slack-message-triggers) for the full field reference.
 
+Messages from other bots and integrations are ignored unless the automation turns on **Trigger on
+bot messages** (see [Bot messages](../AUTOMATIONS.md#bot-messages)). No extra Slack scope is needed:
+bot posts arrive on the same `message.channels` and `message.groups` subscriptions.
+
 ### Run feedback
 
 - A triggering message gets a 👀 reaction while its run is in flight.
@@ -541,6 +599,11 @@ access, and Slack publication gates are not a promise that every team read is en
 - The source-control installation is the outer repository boundary, not a per-Slack-user GitHub
   permission list. Team bindings, memberships, and repository grants further constrain team work.
 - Invite the bot only into trusted channels; identity linking does not itself grant team membership.
+- The first time someone messages the bot, Open-Inspect links them to an account by their Slack
+  profile email, which is why the app needs `users:read.email`. A new user whose email the bot
+  cannot read, typically an external Slack Connect user, cannot use the bot, and a new account is
+  created only when the email passes the workspace's sign-in rules (see
+  [Bot enrollment](../AUTH.md#bot-enrollment)). People the bot already knows keep working.
 - Bot messages are ignored so the Slack bot does not respond to itself.
 - Agent notifications require bot membership and the publication checks described above.
 - Accepted notification text is sanitized and shortened to fit Slack block limits; extremely large
@@ -564,6 +627,15 @@ If setup was just changed, confirm the Slack app event subscriptions and interac
 The Slack app needs the direct message event subscription configured. Once that is set up, send the
 bot a plain DM with your request. No `@mention` is required.
 
+### The bot can't link or admit a new user
+
+"I couldn't read the email on your Slack profile" means the bot could not read the person's profile
+email: Slack can briefly fail to return it, Slack Connect users often hide it, or the app lacks the
+`users:read.email` scope (reinstall the app after adding it). "Your account is not authorized to
+join this Open-Inspect workspace" means no account has that email and it is not allowed by an email
+or domain sign-in rule; the person can sign in on the web with that email, or an Owner or
+Administrator can add it under **Settings > Workspace access > Who can sign in**.
+
 ### Open-Inspect asks which target to use
 
 Choose a repository, environment, or **No repository** from the dropdown, or resend the request with
@@ -578,8 +650,8 @@ days, so older threads may need a fresh request.
 
 Confirm the Slack app has the `files:read` bot scope and was reinstalled after that scope was added.
 Use PNG, JPEG, WebP, or GIF images no larger than 10 MiB, with at most six images in one message.
-For a channel request or interactive channel follow-up, `@mention` the bot; DMs do not need a
-mention.
+For a channel request or interactive channel follow-up, `@mention` the bot unless the thread is a
+[solo thread](#solo-threads); DMs do not need a mention.
 
 The bot may also need `channels:history` for public-channel messages or `groups:history` for
 private-channel messages so it can recover file details that Slack omits from `app_mention` events.

@@ -63,6 +63,100 @@ not pass through Hono.
 | --------- | ------ | ------------ |
 | `/health` | GET    | Health check |
 
+### Personal MCP Connections
+
+| Endpoint                              | Method            | Description                                                    |
+| ------------------------------------- | ----------------- | -------------------------------------------------------------- |
+| `/mcp-connections`                    | GET               | List the authenticated user's connection status                |
+| `/mcp-connections/:serverId/connect`  | POST              | Begin personal OAuth consent                                   |
+| `/mcp-connections/oauth/callback`     | POST              | Redeem consent bound to the same browser session               |
+| `/mcp-connections/:serverId`          | DELETE            | Disconnect the authenticated user's grant                      |
+| `/mcp-servers/:id/revoke-connections` | POST              | Revoke every personal grant for a disabled definition          |
+| `/sessions/:id/mcp/:serverId`         | GET, POST, DELETE | Sandbox-authenticated Streamable HTTP proxy to a routed server |
+
+For offboarding or definition deletion, a human with `mcp_servers.manage` first disables the
+definition, then calls `POST /mcp-servers/:id/revoke-connections`, then deletes the definition.
+Revocation returns 409 while the definition is enabled and 404 if it does not exist. It atomically
+removes consent attempts, increments grant revisions, clears credentials and refresh claims, and
+fences callbacks/refreshes already in flight. It works for suspended owners without reactivating
+them. It does not revoke tokens at the external OAuth provider. The ordinary authorization audit
+records the acting user, route, request ID, and HTTP outcome; the correlated
+`mcp_server.connections_revoked` log records completion. The ownership and deletion safety triggers
+(see [D1 Schema](#d1-schema-sessions-environments-automations)) remain in force. The endpoint uses
+the same signed web-service plus browser-session authentication as other human settings operations;
+a bare service credential cannot invoke it.
+
+Consent is ephemeral: each connection retains at most its current pending/claimed attempt after
+publication. Settlement, failure, supersession, and disconnect delete verifier material.
+Reconnecting keeps a working grant usable until the new consent settles, which replaces it with a
+new grant revision; an abandoned or failed attempt leaves it in place. Expired, logged-out,
+obsolete, and pre-existing terminal history is lazily pruned when that owner lists, starts, or
+redeems connections; idle expired rows need no periodic job to bound repeated attempts. Changing
+authentication configuration invalidates grants, but metadata-only saves and reordered credential
+maps or equivalent repository scopes do not. The proxy and OAuth flows accept only HTTPS URLs whose
+hostname passes lexical checks (no IP literals, local or internal names, credentials in URLs, or
+non-default ports), and a token or authorization endpoint must share its issuer's origin. The check
+applies to the hostname as written: DNS results and connection addresses are not validated, so an
+administrator-registered hostname that resolves to a private address is still reached. Disabling a
+definition blocks pending callbacks before token exchange as well as new consent.
+
+Personal delegation is supported by the OpenCode and Claude harnesses on sandbox runtime generation
+80 and later. A launch on Codex, or on an older image or snapshot, keeps personal servers out of the
+sandbox; each prompt then gets one `mcp` warning that names the servers and the reason. Public and
+service connectors remain available. Healthy bridge-process reconnects preserve personal delegation,
+but process replacement during a prepared turn remains fenced until a new sandbox allocation.
+
+In a session where several people prompt, each turn delegates as its own author. The proxy
+authenticates the shared sandbox, not the process inside it, so a process left running from an
+earlier turn can make personal MCP calls during the active author's turn. That covers another
+person's turn and automated ones (Autofix and other GitHub turns, Linear, automations), which can
+carry text from outside the team. This is a known limitation. An automated turn has no author to
+delegate as, so it runs without personal servers and gets no warning: reconnecting cannot change
+that.
+
+A launch from the provider's base image assumes the current runtime, which holds when Terraform
+builds the base from the deployed commit. An operator-pinned base (for example
+`VERCEL_BASE_SNAPSHOT_ID`) can be older: such a sandbox receives its personal servers, but once it
+reports its runtime at readiness the control plane stops preparing and proxying them and the warning
+explains why.
+
+### Actors
+
+| Endpoint     | Method | Description                                                       |
+| ------------ | ------ | ----------------------------------------------------------------- |
+| `/actors/me` | POST   | Enroll the signed bot actor with its attested name, email, avatar |
+
+A new bot actor links to an existing user only by the email it presents when it is enrolled, and a
+known actor is never relinked. The first request that enrolls an actor must include its attested
+email. Slack sends `POST /actors/me` before any other request that carries the actor; Linear
+includes profile claims during session creation and enrolls follow-up and stop authors explicitly.
+
+A new Slack or Linear actor is enrolled only with an attested email: any request that would enroll
+one without it, including a claim-less read, is refused with 403 `actor_email_required` and writes
+nothing. A known actor is admitted with or without one. This keeps an email-less enrollment from
+giving someone a second account with the default role and none of their existing account's
+restrictions. Known limitation: new Slack users whose profile email the bot cannot read, typically
+external Slack Connect users, cannot start using the bot; Slack users it already knows keep working.
+Linear's catalog reads are actorless and session creation carries its actor's email. Follow-up
+authors try enrollment without profile claims first; only `actor_email_required` triggers a profile
+lookup and retry. Stops go directly to the control plane and use the same fallback when needed.
+
+Before creating a new canonical user, bot enrollment applies the same effective admission policy as
+web sign-in: the deployment's `ALLOWED_*` lists plus the rules managed through
+[`/settings/admission-policy`](#sign-in-rules). An attested Slack or Linear email must match an
+exact-email or email-domain rule from either source; otherwise the response is 403
+`actor_admission_denied`, with no user, identity, or default role written. `UNSAFE_ALLOW_ALL_USERS`
+permits new users only when every deployment and managed list is empty, as on the web. If the
+managed policy cannot be read, enrollment fails closed. GitHub bot profile emails are not attested
+and cannot admit a new user. Bots cannot prove GitHub username or organization admission: when the
+only rules are GitHub usernames or organizations, people must sign in on the web first, then use the
+bot with that account's email (or its GitHub identity).
+
+Existing actors and new actors linking by attested email to an existing account do not repeat
+admission. Their existing role and suspension still apply. Newly admitted users retain the Member
+default. These rules do not identify two different emails as one person: if both pass admission,
+separate accounts remain possible and require an administrator to merge them.
+
 ### Sessions
 
 | Endpoint                        | Method    | Description                          |
@@ -85,6 +179,15 @@ not pass through Hono.
 | `/sessions/:id/archive`         | POST      | Archive session                      |
 | `/sessions/:id/unarchive`       | POST      | Unarchive session                    |
 | `/sessions/batch-archive`       | POST      | Archive explicitly selected sessions |
+
+### Prompt Payload
+
+`POST /sessions/:id/prompt` takes `content` (which may be blank only when `attachments` are sent)
+and optional `source`, `model`, `reasoningEffort`, and `attachments`. `source` defaults to `web`;
+callers may send `web`, `slack`, `linear`, `extension`, or `github`. `automation` and `agent` are
+minted only on internal paths and are rejected with 400, because a prompt's source decides who opens
+its pull request: the GitHub App for an `automation` prompt, otherwise the prompting user's OAuth
+identity when available, falling back to the App.
 
 ### Create PR Payload
 
@@ -217,8 +320,13 @@ history. See [docs/MULTI_REPO_AUTOMATIONS.md](../../docs/MULTI_REPO_AUTOMATIONS.
 decisions.
 
 An invocation's status is **derived from its child runs, never stored**: no children → `skipped`;
-any child starting/running → `starting`/`running`; all terminal → `completed` (none failed),
-`failed` (none completed), `partial_failed` (a mix), or `skipped` (all skipped).
+any child starting/running → `starting`/`running`; otherwise any child waiting to relaunch →
+`retrying`; all terminal → `completed` (none failed), `failed` (none completed), `partial_failed` (a
+mix), or `skipped` (all skipped).
+
+A scheduled automation's `maxRetries` (0–5, default 0) lets a run whose launch fails before its
+prompt is sent wait as `retrying` and relaunch in place, with exponential backoff; manual and event
+runs are never retried.
 
 #### Webhook triggers
 
@@ -234,6 +342,70 @@ session:
 paused, or execution was denied before admission). A retry with the same `idempotencyKey` returns
 the original firing's ID, even while it is still running. The status endpoint serves only
 invocations this webhook caused, and never exposes session content.
+
+### Sign-in Rules
+
+| Endpoint                     | Method | Description                                                                      |
+| ---------------------------- | ------ | -------------------------------------------------------------------------------- |
+| `/settings/admission-policy` | GET    | Deployment, managed, and effective rules (`ETag: "admission-<revision>-<hash>"`) |
+| `/settings/admission-policy` | PUT    | Replace the managed rules; requires `If-Match` with the ETag (`428` without it)  |
+
+These routes need a human browser session and an active built-in Owner or Administrator (custom
+roles are refused even with `workspace.members.manage`). Managed rules add to the deployment's
+`ALLOWED_*` lists and cannot narrow them. A PUT is refused with `412 admission_policy_conflict` when
+the revision or the deployment's configuration changed since the read, and with
+`409 admission_policy_unsafe_allow_all` while `UNSAFE_ALLOW_ALL_USERS` is set. Managed rules are
+limited to 50, and a save that adds GitHub organizations is refused with
+`409 admission_policy_organization_limit` once deployment and managed organizations together exceed
+10 (or the deployment's own count, if higher). A save writes `workspace.admission_policy_updated` in
+the same transaction. See [Sign-In Allowlist](../../docs/AUTH.md#sign-in-allowlist).
+
+### Personal Access Tokens
+
+| Endpoint                         | Method | Description                                              |
+| -------------------------------- | ------ | -------------------------------------------------------- |
+| `/personal-access-tokens`        | GET    | The caller's tokens, newest first, without their secrets |
+| `/personal-access-tokens`        | POST   | Issue a token → `201` with the plaintext `token`, once   |
+| `/personal-access-tokens/:id`    | DELETE | Revoke one of the caller's tokens                        |
+| `/personal-access-tokens/policy` | GET    | The workspace token policy's rules                       |
+
+These routes accept only a human browser session, so a token can never issue or revoke tokens. An
+issue request names the token, its grant (`permissions`, a list of RBAC permission IDs), and its
+lifetime (`expiresInDays`, 1–365; every token expires). Each granted permission must be one the
+caller currently holds (`403 permission_not_held`) and one tokens may hold at all
+(`400 permission_not_grantable`; see `PERSONAL_ACCESS_TOKEN_GRANTABILITY` in
+`@open-inspect/shared/types/personal-access-tokens`, which withholds workspace administration). A
+user holds at most 50 tokens (`409 personal_access_token_limit_reached`). Issue and revoke write
+`personal_access_token.created` and `personal_access_token.revoked` audit events in the same
+transaction. Issuing also enforces the workspace token policy
+(`403 personal_access_tokens_disabled`, `400 lifetime_exceeds_policy`,
+`400 permission_not_allowed_by_policy`), and inserts the token only if the policy is still at the
+revision the request was checked against (`409 personal_access_token_policy_changed` otherwise). See
+[Personal access tokens](#personal-access-tokens-1) under the security model for how a token is
+admitted.
+
+Workspace governance requires `workspace.personal_access_tokens.manage` (Owner and Administrator by
+default, delegable to custom roles) and a human browser session:
+
+| Endpoint                                 | Method | Description                                                     |
+| ---------------------------------------- | ------ | --------------------------------------------------------------- |
+| `/settings/personal-access-token-policy` | GET    | The policy with its revision (`ETag: "pat-policy-<rev>"`)       |
+| `/settings/personal-access-token-policy` | PUT    | Replace the policy; requires `If-Match` with the revision       |
+| `/settings/personal-access-tokens`       | GET    | Every member's tokens with owners, newest first, `cursor`-paged |
+| `/settings/personal-access-tokens/:id`   | DELETE | Revoke any member's token                                       |
+| `/members/:id/personal-access-tokens`    | DELETE | Revoke every token one member holds → `{ revoked }`             |
+
+Revoke-all repeats until a pass finds no token, so a token the member issues before that last pass
+is revoked too. One issued after it is not: only suspension stops a member issuing. If the member
+keeps issuing through every pass, it answers `409 revoke_all_incomplete` with the count revoked;
+suspend the member and revoke again.
+
+The policy (`enabled`, `maxLifetimeDays`, `allowedPermissions`) is checked at authentication, so it
+applies to existing tokens at once: disabled refuses every token with `401`, a lower lifetime cap
+ends tokens older than it, and a permission ceiling narrows every grant. A ceiling that allows a
+permission must also allow its prerequisites (`skills.manage` needs `skills.read`), or the update is
+refused with `400 permission_prerequisite_missing`. A policy change writes
+`workspace.personal_access_token_policy_updated` in the same transaction as the change.
 
 ### Audit Events
 
@@ -382,14 +554,41 @@ Automations:
   unique per `(automation_id, environment_id)`).
 - `automation_repositories`: the live repository selection (0–10 rows per automation), unique per
   `(automation_id, repo_owner, repo_name)`.
-- `automation_invocations`: one thin row per firing — source, firing-scoped `trigger_key` (event
-  dedup, UNIQUE per automation) and `concurrency_key`, `skip_reason` for childless skips, and the
-  `failure_counted_at` compare-and-set stamp that makes auto-pause accounting exactly-once. Status
-  is **not** stored; it is derived from child runs (`DERIVED_INVOCATION_STATUS_SQL` in
-  `src/db/automation-store.ts` is the single definition).
+- `automation_invocations`: one thin row per firing — source, `actor_kind` (who authored the
+  triggering action: `person`, `bot`, `system` or `unknown`; the Slack bot-message limit counts
+  `bot`), firing-scoped `trigger_key` (event dedup, UNIQUE per automation) and `concurrency_key`,
+  `skip_reason` for childless skips, and the `failure_counted_at` compare-and-set stamp that makes
+  auto-pause accounting exactly-once. Status is **not** stored; it is derived from child runs
+  (`DERIVED_INVOCATION_STATUS_SQL` in `src/db/automation-store.ts` is the single definition).
 - `automation_runs`: one row per repository per invocation, linked by `invocation_id`, carrying the
   firing-time repository snapshot (`repo_owner/repo_name/repo_id/base_branch`) and the session
   linkage. Firing keys live on the invocation, not the run.
+
+Sign-in rules:
+
+- `workspace_admission_policy`: the single row of managed sign-in rules (`rules_json`, `revision`,
+  `updated_at`, `updated_by_user_id_snapshot`), added in migration 0094. Migration 0095 dropped its
+  `writes_frozen` column.
+
+Managed MCP (migration 0096):
+
+- `mcp_servers` gains `auth_mode` (`none`, `service_credentials`, or `user_oauth`; existing rows
+  default to `service_credentials`), `managed_routing`, `oauth_profile`, and `auth_revision`.
+- `mcp_oauth_clients`: the public OAuth client registered for a `user_oauth` server.
+- `mcp_connections`: one personal connection per user and server, with its encrypted grant and
+  status (`connected`, `disconnected`, `reconnect_required`).
+- `mcp_oauth_transactions`: in-flight consent attempts and their encrypted PKCE verifiers.
+- Triggers refuse deleting a server, deleting or merging a user, or moving an identity between users
+  while a live personal connection or consent is involved, and a connection can never change owner.
+
+Personal access tokens:
+
+- `personal_access_tokens`: one row per unrevoked token: owner, name, SHA-256 `token_hash` (unique),
+  cleartext `display_prefix`, `expires_at` (required), and minute-resolution `last_used_at`.
+  Deleting the owner deletes their tokens.
+- `personal_access_token_permissions`: a token's grant, one row per RBAC permission.
+- `workspace_personal_access_token_policy`: the single policy row (`enabled`, `max_lifetime_days`,
+  `allowed_permissions_json`, `revision`); a `NULL` limit means the system's own.
 
 ## Browser Authentication
 
@@ -414,6 +613,37 @@ runtime constructs Better Auth and the immutable provider list from the same con
 `GET /internal/auth/sign-in-providers` exposes only those identifiers to signed `service:web`
 requests so the React `/login` route can render them server-side.
 
+### Better Auth 1.7 Upgrade
+
+The upgrade from 1.6.25 to 1.7.14 follows the upstream
+[1.7 upgrade guide](https://www.better-auth.com/docs/guides/1-7-upgrade-guide) and
+[release changelog](https://github.com/better-auth/better-auth/blob/v1.7.14/packages/better-auth/CHANGELOG.md).
+
+- Provider profile `user` contains only mutable attributes. Our provider-profile plugin keeps the
+  built-in GitHub/Google OAuth transports. Both resolvers return `VerifiedProviderIdentity` as
+  profile data; the SDK account-subject resolver and canonical email claims read the same typed
+  `data.subject`.
+- `getAccessToken`, `refreshToken`, and `accountInfo` select the local `user_identities.id` through
+  `accountId`, plus the canonical `userId` for trusted server calls. They no longer accept
+  `providerId` or a provider subject as the selector. Profile integrity checks read
+  `account.accountId`, not `user.id`.
+- No database migration or issuer backfill is needed for this integration. The account schema is
+  unchanged from 1.6 in 1.7.3 and later; the existing unique `(provider, provider_user_id)` index
+  already prevents ambiguous account keys. Keep our application-owned `provider_issuer` column and
+  indexes. The mandatory issuer schema in 1.7.0 through 1.7.2 was reverted.
+- The custom adapter retains native atomic `consumeOne`. `incrementOne` is optional in 1.7.14;
+  Better Auth supplies guarded conditional-update fallbacks. We use memory rate limiting, not a
+  custom rate-limit or secondary-storage implementation.
+
+**Deployment cutover:** upgrade all control-plane instances sharing verification storage together.
+The [1.7.7 security change](https://github.com/better-auth/better-auth/pull/11494) namespaces
+database-backed OAuth state with `auth-state:` before hashing, so sign-ins started before the
+upgrade must restart. Do not add a legacy-state fallback or run mixed old/new auth nodes against the
+same storage. Existing browser sessions and encrypted OAuth credentials remain usable with the same
+`BROWSER_AUTH_SECRET`; do not rotate it as part of this upgrade. A rollback also requires restarting
+pending sign-ins. The web BFF does not install a Better Auth SDK and needs no matching package
+upgrade.
+
 ## Credential Encryption
 
 Three independent key domains protect stored credentials. Rotation guidance differs — never treat
@@ -432,7 +662,10 @@ them as interchangeable during an incident:
   ```
 
   Rotating it invalidates SCM credentials already copied into sessions. New sessions resolve current
-  GitHub credentials through Better Auth.
+  GitHub credentials through Better Auth. The same secret also protects personal MCP connection
+  credentials and consent verifiers, through a key derived for that purpose; after rotating it,
+  existing personal MCP connections fail until each owner clicks **Reconnect**, although Settings ›
+  Connections still shows them as connected.
 
 - **`BROWSER_AUTH_SECRET`** — Better Auth's secret. It signs browser session cookies **and**
   encrypts the sign-in OAuth credential columns on `user_identities` (`access_token`,
@@ -520,6 +753,63 @@ The web proxy bounds raw request bytes before parsing and preserves upstream ret
 headers.
 
 The former `/operator/sessions/archive` and `/internal/operator-archive` proposal is not exposed.
+
+### Personal access tokens
+
+A personal access token (`oi_pat_` followed by 64 hex characters) is presented as
+`Authorization: Bearer <token>` on a request without a service signature. It resolves to a distinct
+`personal-access-token` principal for its owner. Only the token's SHA-256 hash is stored, and
+revoking a token deletes its row.
+
+Two independent checks bound what a token can do, and both must pass:
+
+- **The route accepts tokens.** A route admits tokens only when its policy declares
+  `personalAccessTokens: "accept"`; the routes that do are listed below. Any other route that
+  authenticates the bearer refuses a valid token with `403 personal_access_token_not_accepted`,
+  whatever other principals it accepts. Public and handler-authenticated routes never resolve a
+  token, and sandbox routes verify the bearer as a sandbox token, so none of them returns that code.
+  `admit()` refuses to build an opted-in route unless it authorizes an active user and every one of
+  its requirements is decided by permissions a token may be granted. Each requirement is checked on
+  its own, so a requirement decided by ownership (collaborator or visibility management) or by team
+  membership is refused even beside a grantable permission. A grant can therefore always narrow what
+  an opted-in route allows.
+- **The token holds the permission.** Admission loads the owner's effective authorization as usual,
+  then narrows its permissions to the intersection with the token's grant. Every downstream
+  permission, scoped-permission, and resource check reads the narrowed set, so a token never exceeds
+  its grant or its owner, and loses a permission as soon as its owner does. A suspended owner's
+  tokens are refused.
+
+Routes that accept tokens today are the ones the MCP server's tools use. `router.policy.test.ts`
+pins this list, so adding to it is a visible change:
+
+- reading sessions: `GET /sessions` and `/sessions/:id/{events,messages,diff}`
+- reading automations: `GET /automations` and `/automations/:id{,/invocations,/runs/:runId}`
+- reading skills: `GET /skills` and `/skills/:id`
+- creating an automation (`POST /automations`) and triggering one (`POST /automations/:id/trigger`)
+- skill import and re-import, with their previews
+- reading one file of a session diff: `GET /sessions/:id/diff/:revisionId/files/:fileId`
+
+Two rules reach past route admission:
+
+- **A manual run stays within the token's grant.** The trigger route passes the admitted permissions
+  to the scheduler as a ceiling, and the execution check requires `sessions.create`, and
+  `repositories.use` or `environments.use` for the selected targets, to be in that ceiling as well
+  as in the owner's live role. This holds at admission and again at each child launch. The
+  invocation records `actor_kind = 'unknown'`, since a token does not establish who fired it.
+- **A token's `skills.manage` needs `skills.read`.** Every token route that manages skills answers
+  with skill or repository content, so issuing refuses `skills.manage` without `skills.read`
+  (`permission_prerequisite_missing`), and narrowing drops a `skills.manage` whose `skills.read` did
+  not survive (`PERSONAL_ACCESS_TOKEN_GRANT_PREREQUISITES` in shared).
+
+Editing, pausing, or deleting automations, bulk skill import, and every session mutation, secret,
+and setting refuse tokens.
+
+The owner's workspace role still decides visibility within a granted permission. For example, an
+administrator's token that holds `sessions.read` sees the sessions the administrator sees.
+Authorization audit rows written for a token request record
+`principal_kind = personal-access-token`, the owner as the actor, and
+`metadata.personalAccessTokenId`. Request logs carry `token_id`. `last_used_at` is updated in the
+background at most once a minute.
 
 ### GitHub App Token Flow
 

@@ -3,13 +3,14 @@
  */
 
 import { nextCronOccurrence } from "@open-inspect/shared/cron";
-import { AutomationStore } from "../db/automation-store";
+import type { Principal } from "../auth/principal";
+import { AutomationStore, type InvocationActorKind } from "../db/automation-store";
 import { UserStore } from "../db/user-store";
+import { createScheduler } from "../scheduler/factory";
 import {
   AutomationExecutionUnauthorizedError,
   AutomationTriggerBlockedError,
-  Scheduler,
-} from "../scheduler/scheduler";
+} from "../scheduler/contracts";
 import { Hono } from "hono";
 import { admit, dispatch } from "../routing/admit";
 import type { ControlPlaneHonoEnv } from "../routing/hono-env";
@@ -75,17 +76,31 @@ async function handleResumeAutomation(
   // For event-driven automations, resume with null next_run_at.
   let nextRunAt: number | null;
   if (existing.trigger_type === "schedule") {
-    if (!existing.schedule_cron) {
+    if (existing.schedule_once_at != null) {
+      if (existing.schedule_once_at <= Date.now()) {
+        return error(
+          "Cannot resume a one-shot whose scheduled time has passed; choose a future time first",
+          400
+        );
+      }
+      nextRunAt = existing.schedule_once_at;
+    } else if (!existing.schedule_cron) {
       return error("Cannot resume: automation has no cron schedule", 400);
+    } else {
+      nextRunAt = nextCronOccurrence(existing.schedule_cron, existing.schedule_tz).getTime();
     }
-    nextRunAt = nextCronOccurrence(existing.schedule_cron, existing.schedule_tz).getTime();
   } else {
     nextRunAt = null;
   }
 
   const result = await ctx.db.batch([store.bindResume(id, nextRunAt)]);
   const resumed = result[0]?.meta.changes === 1;
-  if (!resumed) return error("Automation not found", 404);
+  if (!resumed) {
+    if (existing.schedule_once_at != null && (await store.getById(id))) {
+      return error("Automation schedule changed; reload and retry", 409);
+    }
+    return error("Automation not found", 404);
+  }
 
   logger.info("automation.resumed", {
     event: "automation.resumed",
@@ -103,6 +118,14 @@ async function handleResumeAutomation(
   });
 }
 
+/**
+ * Who authored a manual firing. A browser session is a person at the controls; a personal access
+ * token may be a person's script or an agent, and the credential does not say which.
+ */
+function manualFiringActorKind(principal: Principal | undefined): InvocationActorKind {
+  return principal?.kind === "user" ? "person" : "unknown";
+}
+
 async function handleTriggerAutomation(
   request: Request,
   env: Env,
@@ -111,23 +134,26 @@ async function handleTriggerAutomation(
 ): Promise<Response> {
   const id = params.id;
 
-  const requesterUserId = ctx.authorization?.userId;
-  if (!requesterUserId) return error("Authorization unavailable", 503);
+  const authorization = ctx.authorization;
+  if (!authorization) return error("Authorization unavailable", 503);
 
-  const requesterEnrichment = await resolveGitHubEnrichmentForRequest(
+  const scmEnrichment = await resolveGitHubEnrichmentForRequest(
     new UserStore(ctx.db),
-    requesterUserId,
+    authorization.userId,
     await resolveGitHubCredentialAuthority(ctx, request.headers)
   );
 
   // The scheduler performs the authoritative D1-backed concurrency check.
   let triggerResult;
   try {
-    triggerResult = await new Scheduler(ctx.db, env, ctx.executionCtx).trigger(
-      id,
-      requesterUserId,
-      requesterEnrichment
-    );
+    triggerResult = await createScheduler(ctx.db, env, ctx.executionCtx).trigger(id, {
+      userId: authorization.userId,
+      scmEnrichment,
+      actorKind: manualFiringActorKind(ctx.principal),
+      // What admission let this request do: a browser user's role, or a token's grant within it.
+      // The run may use no permission beyond it, whatever the user's role holds.
+      permissionCeiling: authorization.permissions,
+    });
   } catch (triggerError) {
     logger.error("automation.trigger_failed", {
       event: "automation.trigger_failed",
@@ -176,6 +202,12 @@ automationLifecycleRoutes.post("/automations/:id/resume", AUTOMATION_MANAGE, (c)
 );
 automationLifecycleRoutes.post(
   "/automations/:id/trigger",
-  admit({ ...GITHUB_USER_OR_SERVICE_ROUTE, authorization: requireAutomation("trigger") }),
+  admit({
+    ...GITHUB_USER_OR_SERVICE_ROUTE,
+    authorization: requireAutomation("trigger"),
+    // A token runs the automations its owner may run, within its grant. Pause and resume stay
+    // human-only: they change whether the schedule fires at all.
+    personalAccessTokens: "accept",
+  }),
   (c) => dispatch(c, handleTriggerAutomation)
 );

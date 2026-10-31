@@ -1,7 +1,11 @@
 const PROCESSING_TTL_MS = 5 * 60_000;
 export const PROCESSED_TTL_MS = 7 * 24 * 60 * 60_000;
 
-export type DeliveryClaimResult = "claimed" | "duplicate";
+/**
+ * A duplicate is `processing` while its first attempt has yet to settle (that
+ * attempt may still release its claim) and `processed` once it has.
+ */
+export type DeliveryClaimResult = "claimed" | "processing" | "processed";
 
 export class DeliveryDedupe {
   constructor(
@@ -28,8 +32,15 @@ export class DeliveryDedupe {
       )
       .bind(deliveryId, claimToken, now + PROCESSING_TTL_MS, now)
       .first<{ delivery_id: string }>();
+    if (claimed !== null) return "claimed";
 
-    return claimed === null ? "duplicate" : "claimed";
+    // Only duplicates pay this read. A row gone since the insert was released
+    // by its failed attempt, so it is reported as still settling.
+    const existing = await this.database
+      .prepare("SELECT status FROM github_webhook_deliveries WHERE delivery_id = ?1")
+      .bind(deliveryId)
+      .first<{ status: string }>();
+    return existing?.status === "processed" ? "processed" : "processing";
   }
 
   async markProcessed(deliveryId: string, claimToken: string): Promise<void> {

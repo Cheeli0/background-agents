@@ -33,11 +33,21 @@ describe("DeliveryDedupe", () => {
     expect(db.bind).toHaveBeenCalledWith("delivery-1", "claim-1", nowMs + 5 * 60_000, nowMs);
   });
 
-  it("reports an unexpired delivery as a duplicate", async () => {
+  it("reports an unexpired, unsettled delivery as still processing", async () => {
     const db = createDatabase(null);
+    db.first.mockResolvedValueOnce(null).mockResolvedValueOnce({ status: "processing" });
     const dedupe = new DeliveryDedupe(db.database, () => nowMs);
 
-    await expect(dedupe.claim("delivery-1", "claim-2")).resolves.toBe("duplicate");
+    await expect(dedupe.claim("delivery-1", "claim-2")).resolves.toBe("processing");
+    expect(db.prepare.mock.calls[1]?.[0]).toContain("SELECT status");
+  });
+
+  it("reports an unexpired, settled delivery as processed", async () => {
+    const db = createDatabase(null);
+    db.first.mockResolvedValueOnce(null).mockResolvedValueOnce({ status: "processed" });
+    const dedupe = new DeliveryDedupe(db.database, () => nowMs);
+
+    await expect(dedupe.claim("delivery-1", "claim-2")).resolves.toBe("processed");
   });
 
   it("marks only the matching claim as processed for seven days", async () => {

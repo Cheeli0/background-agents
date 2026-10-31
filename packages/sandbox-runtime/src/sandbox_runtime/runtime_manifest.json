@@ -1,12 +1,12 @@
 {
-  "runtimeVersion": "v77-token-coalescing",
-  "generation": 77,
+  "runtimeVersion": "v81-managed-mcp-token-coalescing",
+  "generation": 81,
   "minimumCompatibleGeneration": 62,
   "minimumPreservationGeneration": 71,
-  "minimumRebuildGeneration": 76,
+  "minimumRebuildGeneration": 80,
   "harnessMinimumGeneration": {
     "claude": 76,
     "opencode": 76,
-    "codex": 76
+    "codex": 79
   }
 }

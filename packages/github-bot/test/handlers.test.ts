@@ -46,8 +46,10 @@ import {
   handleReviewRequested,
   handleIssueComment,
   handleReviewComment,
+  isReviewRequestedForBot,
 } from "../src/handlers";
 import { generateInstallationToken, postReaction, checkSenderPermission } from "../src/github-auth";
+import { reviewCommentPayloadSchema } from "../src/payload-schemas";
 import { getGitHubConfig } from "../src/utils/integration-config";
 
 function createMockLogger(): Logger {
@@ -1050,6 +1052,28 @@ describe("handleReviewRequested", () => {
     expect(generateInstallationToken).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { author: "alice", commentOnly: false },
+    { author: "test-bot[bot]", commentOnly: true },
+    { author: "Test-Bot[bot]", commentOnly: true },
+  ])(
+    "limits the review of a PR authored by $author to COMMENT: $commentOnly",
+    async ({ author, commentOnly }) => {
+      const env = createMockEnv();
+      const payload: ReviewRequestedPayload = {
+        ...reviewRequestedPayload,
+        pull_request: { ...reviewRequestedPayload.pull_request, user: { login: author } },
+      };
+
+      await handleReviewRequested(env, createMockLogger(), payload, "trace-self-review");
+
+      const { content } = promptSendBody(getControlPlaneFetch(env));
+      expect(content.includes("APPROVE")).toBe(!commentOnly);
+      expect(content.includes("REQUEST_CHANGES")).toBe(!commentOnly);
+      expect(content.includes("Use COMMENT because GitHub does not allow")).toBe(commentOnly);
+    }
+  );
+
   it("returns early when repo not in enabledRepos", async () => {
     vi.mocked(getGitHubConfig).mockResolvedValue({
       ...defaultConfig,
@@ -1064,6 +1088,61 @@ describe("handleReviewRequested", () => {
     expect(generateInstallationToken).not.toHaveBeenCalled();
     expect(getControlPlaneFetch(env)).not.toHaveBeenCalled();
     expect(log.debug).toHaveBeenCalledWith("handler.repo_not_enabled", expect.anything());
+  });
+});
+
+describe("bot login matching", () => {
+  const recasedBotLogin = "Test-Bot[bot]";
+  const recasedBotSender = {
+    login: recasedBotLogin,
+    id: 2001,
+    avatar_url: "https://avatars.githubusercontent.com/u/2001",
+  };
+
+  it.each([
+    { login: "test-bot[bot]", forBot: true },
+    { login: recasedBotLogin, forBot: true },
+    { login: "test-bot", forBot: false },
+    { login: "someone-else", forBot: false },
+  ])("routes a review request for $login to the bot: $forBot", ({ login, forBot }) => {
+    expect(isReviewRequestedForBot({ requested_reviewer: { login } }, "test-bot[bot]")).toBe(
+      forBot
+    );
+  });
+
+  it("reviews when the requested reviewer differs from the bot login only in case", async () => {
+    const env = createMockEnv();
+    const payload = { ...reviewRequestedPayload, requested_reviewer: { login: recasedBotLogin } };
+
+    const result = await handleReviewRequested(env, createMockLogger(), payload, "trace-case");
+
+    expect(result).toMatchObject({ outcome: "processed", handler_action: "review" });
+  });
+
+  it("ignores the bot's own PR comment when its login differs only in case", async () => {
+    const payload: IssueCommentPayload = { ...issueCommentPayload, sender: recasedBotSender };
+
+    const result = await handleIssueComment(
+      createMockEnv(),
+      createMockLogger(),
+      payload,
+      "trace-case"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "self_comment" });
+  });
+
+  it("ignores the bot's own review comment when its login differs only in case", async () => {
+    const payload: ReviewCommentPayload = { ...reviewCommentPayload, sender: recasedBotSender };
+
+    const result = await handleReviewComment(
+      createMockEnv(),
+      createMockLogger(),
+      payload,
+      "trace-case"
+    );
+
+    expect(result).toEqual({ outcome: "skipped", skip_reason: "self_comment" });
   });
 });
 
@@ -1218,6 +1297,29 @@ describe("handleReviewComment", () => {
     expect(promptBody.content).toContain("const cache = new Map()");
     expect(promptBody.content).toContain("comments/200/replies");
     expect(promptBody).not.toHaveProperty("authorId");
+  });
+
+  it("replies to the thread's top-level comment when mentioned in a reply", async () => {
+    const env = createMockEnv();
+    // Parse through the webhook schema, as index.ts does, so a field it drops never arrives.
+    // GitHub's replies endpoint only accepts a top-level review comment id.
+    const payload = reviewCommentPayloadSchema.parse({
+      ...reviewCommentPayload,
+      comment: { ...reviewCommentPayload.comment, id: 201, in_reply_to_id: 200 },
+    });
+
+    await handleReviewComment(env, createMockLogger(), payload, "trace-reply");
+
+    // The reaction stays on the comment that mentioned the bot.
+    expect(postReaction).toHaveBeenCalledWith(
+      "test-installation-token",
+      "https://api.github.com/repos/acme/widgets/pulls/comments/201/reactions",
+      "eyes",
+      "Open-Inspect"
+    );
+    const content = promptSendBody(getControlPlaneFetch(env)).content;
+    expect(content).toContain("comments/200/replies");
+    expect(content).not.toContain("comments/201/replies");
   });
 
   it("returns early if no @mention", async () => {

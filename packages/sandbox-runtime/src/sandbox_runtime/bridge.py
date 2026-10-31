@@ -31,6 +31,7 @@ import os
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -43,10 +44,11 @@ from .attachment_processor import (
     AttachmentProcessor,
     parse_session_image_attachments,
 )
-from .boot_attach import RECONNECT_BACKOFF_BASE, RECONNECT_MAX_DELAY_SECONDS, BootAttach
+from .boot_attach import BootAttach
 from .constants import (
     BRIDGE_FATAL_ERROR_FILE_PATH,
     REPO_MANIFEST_FILE_PATH,
+    runtime_state_dir,
 )
 from .diff_capture import ControlPlaneDiffClient, SessionDiffRefreshWorker
 from .event_forwarder import BufferedEventForwarder
@@ -67,6 +69,7 @@ from .harness import (
 from .log_config import configure_logging, get_logger
 from .prompt_budgets import resolve_prompt_limits
 from .push_operation import PushOperation, PushRejected, PushRequest
+from .reconnect_backoff import HEARTBEAT_INTERVAL_SECONDS, ReconnectBackoff
 from .repo_config import load_repo_manifest
 from .shutdown_preparation import ShutdownPreparationCoordinator
 from .token_coalescer import TokenCoalescer
@@ -132,9 +135,6 @@ class AgentBridge:
     - Git identity management per prompt author
     """
 
-    HEARTBEAT_INTERVAL = 30.0
-    RECONNECT_BACKOFF_BASE = RECONNECT_BACKOFF_BASE
-    RECONNECT_MAX_DELAY_SECONDS = RECONNECT_MAX_DELAY_SECONDS
     DIFF_REFRESH_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
     def __init__(
@@ -149,8 +149,10 @@ class AgentBridge:
         *,
         early_connect: bool = False,
         harness_factory: Callable[[], AgentHarness] | None = None,
+        reconnect_backoff: ReconnectBackoff | None = None,
     ):
         self.sandbox_id = sandbox_id
+        self.bridge_instance_id = str(uuid.uuid4())
         self.session_id = session_id
         self.control_plane_url = control_plane_url
         self.auth_token = auth_token
@@ -177,11 +179,13 @@ class AgentBridge:
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
 
-        # Vendor session id persistence. The legacy file name is still read so
-        # snapshots taken before the rename keep their conversation history.
-        temp_dir = Path(tempfile.gettempdir())
-        self.session_id_file = temp_dir / "agent-session-id"
-        self.legacy_session_id_file = temp_dir / "opencode-session-id"
+        # Vendor session id persistence, in the runtime state directory so a
+        # resume that lands on a fresh machine still finds it. The legacy file
+        # name is still read so snapshots taken before the rename keep their
+        # conversation history.
+        state_dir = runtime_state_dir(tempfile.gettempdir())
+        self.session_id_file = state_dir / "agent-session-id"
+        self.legacy_session_id_file = state_dir / "opencode-session-id"
         self.repo_path = Path("/workspace")
         # Supervisor-written canonical repo manifest; push targeting resolves
         # member checkout paths through it rather than joining spec-supplied
@@ -257,6 +261,9 @@ class AgentBridge:
             log=self.log,
         )
 
+        self.reconnect_backoff = (
+            reconnect_backoff if reconnect_backoff is not None else ReconnectBackoff()
+        )
         self._connected_at_monotonic: float | None = None
         self._connection_count = 0
         self._reconnect_attempt_count = 0
@@ -299,8 +306,18 @@ class AgentBridge:
             "type": "ready",
             "sandboxId": self.sandbox_id,
             "opencodeSessionId": harness.session_id,
+            "bridgeInstanceId": self.bridge_instance_id,
             "harness": harness.id.value,
             "preservationProtocolVersion": 1,
+            **(
+                {
+                    "managedMcpVersion": (
+                        1 if harness.id in (HarnessId.OPENCODE, HarnessId.CLAUDE) else 0
+                    )
+                }
+                if getattr(harness, "cleanup_failed", False) is not True
+                else {}
+            ),
             **({"runtimeVersion": runtime_version} if runtime_version else {}),
             "repositories": [
                 {
@@ -325,7 +342,6 @@ class AgentBridge:
             harness=self._harness_id.value,
             early_connect=self.boot_attach.early_connect,
         )
-        reconnect_attempts = 0
         run_outcome = "harness_start_failed"
         # Run-scoped rather than connection-scoped, so delivery pressure stays
         # visible during sustained outages and rapid reconnects.
@@ -344,7 +360,6 @@ class AgentBridge:
                     await self._connect_and_run()
                     if not self.shutdown_event.is_set():
                         run_outcome = "connection_closed"
-                    reconnect_attempts = 0
                 except SessionTerminatedError:
                     run_outcome = "session_terminated"
                     self.shutdown_event.set()
@@ -373,15 +388,11 @@ class AgentBridge:
                 if self.shutdown_event.is_set():
                     break
 
-                reconnect_attempts += 1
                 self._reconnect_attempt_count += 1
-                delay = min(
-                    self.RECONNECT_BACKOFF_BASE**reconnect_attempts,
-                    self.RECONNECT_MAX_DELAY_SECONDS,
-                )
+                delay = self.reconnect_backoff.next_delay_seconds()
                 self.log.info(
                     "bridge.reconnect",
-                    attempt=reconnect_attempts,
+                    attempt=self.reconnect_backoff.attempt,
                     reconnect_attempt_count=self._reconnect_attempt_count,
                     delay_s=round(delay, 1),
                 )
@@ -432,6 +443,10 @@ class AgentBridge:
     def _finalize_connection(
         self, *, now_monotonic: float | None = None
     ) -> dict[str, float | int] | None:
+        """End the active connection: settle its accounting and reconnect backoff.
+
+        Returns the fields for the disconnect log, or None without a connection.
+        """
         if self._connected_at_monotonic is None:
             return None
 
@@ -439,6 +454,8 @@ class AgentBridge:
         connection_duration_seconds = max(0.0, ended_at - self._connected_at_monotonic)
         self._connected_at_monotonic = None
         self._total_connected_duration_seconds += connection_duration_seconds
+        # However the connection ended, a long-lived one resets the backoff.
+        self.reconnect_backoff.connection_ended(connection_duration_seconds)
 
         return {
             "connection_duration_seconds": round(connection_duration_seconds, 3),
@@ -450,16 +467,30 @@ class AgentBridge:
 
     def _log_disconnect(
         self,
+        connection_fields: dict[str, float | int],
         *,
         reason: str,
         level: str = "info",
         **fields: Any,
     ) -> None:
-        connection_fields = self._finalize_connection()
-        if connection_fields is None:
-            return
         log_method = getattr(self.log, level)
         log_method("bridge.disconnect", reason=reason, **connection_fields, **fields)
+
+    def _disconnect_log_fields(
+        self, ws: ClientConnection, closed_error: websockets.ConnectionClosed | None
+    ) -> dict[str, Any]:
+        if closed_error is not None:
+            return {
+                "reason": "connection_closed",
+                "level": "warn",
+                "ws_close_code": closed_error.code,
+            }
+        close_code = getattr(ws, "close_code", None)
+        return {
+            "reason": "shutdown_requested" if self.shutdown_event.is_set() else "connection_closed",
+            "level": "warn" if close_code not in (None, 1000, 1001) else "info",
+            **({"ws_close_code": close_code} if close_code is not None else {}),
+        }
 
     def _is_fatal_connection_error(self, error_str: str) -> bool:
         """Check if a connection error is fatal and shouldn't trigger retry.
@@ -513,6 +544,7 @@ class AgentBridge:
                 self._mark_connected()
                 heartbeat_task: asyncio.Task[None] | None = None
                 background_tasks: set[asyncio.Task[None]] = set()
+                closed_error: websockets.ConnectionClosed | None = None
 
                 try:
                     self.log.info(
@@ -542,11 +574,7 @@ class AgentBridge:
                             self.log.error("bridge.command_error", exc=e)
 
                 except websockets.ConnectionClosed as e:
-                    self._log_disconnect(
-                        reason="connection_closed",
-                        level="warn",
-                        ws_close_code=e.code,
-                    )
+                    closed_error = e
                     raise
 
                 finally:
@@ -556,18 +584,11 @@ class AgentBridge:
                         task.cancel()
                     self.ws = None
                     self.event_forwarder.unbind()
-                    if self._connected_at_monotonic is not None:
-                        close_code = getattr(ws, "close_code", None)
-                        reason = (
-                            "shutdown_requested"
-                            if self.shutdown_event.is_set()
-                            else "connection_closed"
+                    connection_fields = self._finalize_connection()
+                    if connection_fields is not None:
+                        self._log_disconnect(
+                            connection_fields, **self._disconnect_log_fields(ws, closed_error)
                         )
-                        level = "warn" if close_code not in (None, 1000, 1001) else "info"
-                        extra_fields = (
-                            {"ws_close_code": close_code} if close_code is not None else {}
-                        )
-                        self._log_disconnect(reason=reason, level=level, **extra_fields)
 
         except InvalidStatus as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
@@ -590,8 +611,8 @@ class AgentBridge:
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat events."""
         while not self.shutdown_event.is_set():
-            expected_wake = time.monotonic() + self.HEARTBEAT_INTERVAL
-            await asyncio.sleep(self.HEARTBEAT_INTERVAL)
+            expected_wake = time.monotonic() + HEARTBEAT_INTERVAL_SECONDS
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
             woke_at = time.monotonic()
             scheduling_delay_seconds = max(woke_at - expected_wake, 0.0)
             if scheduling_delay_seconds >= HEARTBEAT_DELAY_WARNING_SECONDS:
@@ -810,6 +831,7 @@ class AgentBridge:
                 HarnessPrompt(
                     message_id=message_id,
                     text=content,
+                    managed_mcp=cmd.get("managedMcp"),
                     model=model,
                     reasoning_effort=reasoning_effort,
                     attachments=tuple(attachments or ()),
@@ -896,6 +918,11 @@ class AgentBridge:
             "type": "execution_complete",
             "messageId": message_id,
             "success": not had_error,
+            **(
+                {"managedMcpReady": False}
+                if getattr(self.harness, "cleanup_failed", False) is True
+                else {}
+            ),
             **({"error": error_message} if error_message else {}),
             **({"messageCostUsd": message_cost_usd} if message_cost_usd is not None else {}),
         }

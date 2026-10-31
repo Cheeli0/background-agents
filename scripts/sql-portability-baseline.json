@@ -1,5 +1,11 @@
 {
   "allowed": {
+    "packages/control-plane/src/db/admission-policy-store.ts": {
+      "json-function": {
+        "occurrences": ["json(", "json(", "json_object(", "json_object("],
+        "reason": "Admission-policy audit before/after state and revision must reflect the same transaction's actor and CAS decision, including concurrent rejected writes. A TypeScript pre-read cannot capture that state. This follows authorization-store's guarded audit pattern; the Postgres form is json_build_object."
+      }
+    },
     "packages/control-plane/src/db/authorization-store.ts": {
       "collate-nocase": {
         "occurrences": ["COLLATE NOCASE"],
@@ -34,6 +40,10 @@
     "packages/control-plane/src/db/user-merge.ts": {
       "json-function": {
         "occurrences": [
+          "json(",
+          "json_object(",
+          "json_object(",
+          "json_object(",
           "json_object(",
           "json_object(",
           "json_object(",
@@ -42,13 +52,30 @@
           "json_object(",
           "json_object("
         ],
-        "reason": "Merge audit payload, same constraint as authorization-store: before/after state is read inside the mutating batch. Postgres form is json_build_object."
+        "reason": "Merge audit payload, same constraint as authorization-store: before/after state (and, for a refused merge, the unchanged after state chosen by the in-batch decision) is read inside the mutating batch. Postgres form is json_build_object."
       }
     },
     "terraform/d1/migrations/0076_anthropic_provider_accounts.sql": {
       "create-trigger": {
         "occurrences": ["CREATE TRIGGER"],
         "reason": "sessions_seed_legacy_provider_auth (already in 0064, re-created with a third row) covers sessions the previous worker inserts between the migration and the new worker deploy, which the new worker rejects as incomplete without an anthropic row."
+      }
+    },
+    "terraform/d1/migrations/0096_managed_mcp.sql": {
+      "create-trigger": {
+        "occurrences": ["CREATE TRIGGER", "CREATE TRIGGER", "CREATE TRIGGER", "CREATE TRIGGER"],
+        "reason": "Grant ownership and unresolved-exchange retention must fence existing identity relink, multi-statement canonical merge, and cascading definition deletion at the writer commit. A TypeScript precheck races OAuth/refresh publication; a portable replacement requires changing every writer to a shared transactional conditional-guard protocol. Both deployed engines (D1 and Node SQLite) execute these guards in the real-storage conformance suite. A future Postgres migration must supply equivalent transactional guards."
+      },
+      "unixepoch": {
+        "occurrences": [
+          "unixepoch",
+          "unixepoch",
+          "unixepoch",
+          "unixepoch",
+          "unixepoch",
+          "unixepoch"
+        ],
+        "reason": "The ownership guard triggers above expire abandoned OAuth reservations and consent transactions. Triggers cannot bind Date.now(), so they read the clock at the writer commit. A future Postgres migration supplies the equivalent with extract(epoch from now())."
       }
     },
     "terraform/d1/migrations/0086_team_default_visibility.sql": {

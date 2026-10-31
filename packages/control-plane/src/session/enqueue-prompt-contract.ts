@@ -12,7 +12,13 @@ export const enqueuePromptRequestSchema = z
   .object({
     content: promptContentSchema,
     authorId: z.string(),
+    mcpEligible: z.boolean().optional(),
     canonicalUserId: z.string().nullable().optional(),
+    /**
+     * The account the prompt counts as when it isn't the author participant's: a prompt one session
+     * relays to its child carries the account the parent's prompt was queued under, null included.
+     */
+    promptAccountUserId: z.string().nullable().optional(),
     source: messageSourceSchema,
     model: z.string().optional(),
     reasoningEffort: z.string().optional(),

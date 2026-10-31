@@ -2,6 +2,243 @@
 
 New features, integrations, and notable improvements to Open-Inspect — newest first.
 
+## October 31, 2026
+
+**Kimi Coding Plan models.** Kimi K3.1 Pro, K3, Kimi for Coding, and their Highspeed and 256K
+variants run on the OpenCode harness with a Kimi Code membership API key saved as `KIMI_API_KEY`.
+Enable the opt-in Kimi Coding Plan group under Settings › Models. Requests use Kimi's coding
+endpoint and the membership plan's allowance, separate from OpenCode Go billing. Prebuilt images
+from before runtime generation 79 may not list these models; rebuild one if a Kimi session reports
+the model as not found.
+
+**Personal access tokens and an MCP server.** Issue tokens under **Settings › Access tokens** so
+local tools can call Open-Inspect as you. Each token expires, holds only the permissions you grant,
+and never exceeds your current role. The new `packages/mcp-server` uses a token to let Claude Code
+and other MCP clients work with sessions, automations, and skills. Requires D1 migration 0097. See
+the [MCP server README](packages/mcp-server/README.md).
+
+**Access token policy.** Administrators can turn all tokens off, cap their lifetime, limit the
+permissions they may hold, and revoke any member's tokens under **Settings › Access token policy**.
+Requires the new `workspace.personal_access_tokens.manage` permission and D1 migration 0098.
+
+## October 30, 2026
+
+**Managed MCP routing and personal OAuth.** Remote MCP servers can route through Open-Inspect so
+sandboxes never hold upstream credentials, and can use each user's own OAuth connection, set up
+under **Settings › Connections**. Personal servers work in OpenCode and Claude Agent sessions; Codex
+skips them with a warning. Requires D1 migration 0096; runtime generation 80 rebuilds prebuilt
+images. See [Personal MCP Connections](packages/control-plane/README.md#personal-mcp-connections).
+
+## October 29, 2026
+
+**Saved MCP credentials are listed by name.** Editing an MCP server used to show only that
+credentials existed, and saving a new value silently deleted every saved environment variable or
+header you didn't retype. The edit form now lists each saved name with its value hidden: leave a row
+blank to keep its value, enter a new value to replace it, or remove the row to delete it. Names are
+returned only to people with `mcp_servers.manage`; read-only users see neither names nor values, and
+values are never returned to anyone. API clients can send `keepCredentialKeys` with
+`PUT /mcp-servers/:id` for the same per-name edits; without it, sent credentials still replace the
+saved set.
+
+**Automation pull requests come from the GitHub App.** PRs opened by automation runs, including
+**Run now**, are now created by the GitHub App instead of the owner's account, so the owner can
+review them. The review bot can only comment on these PRs, and event automations matching the
+owner's login no longer fire on them. See
+[Creating Pull Requests](docs/HOW_IT_WORKS.md#creating-pull-requests).
+
+## October 28, 2026
+
+**Sign-in allowlist in Settings.** Owners and Administrators can edit who may sign in under
+**Settings › Workspace access** without redeploying. These rules add to the deployment's `ALLOWED_*`
+rules and can't narrow them. Requires D1 migrations 0094 and 0095. See
+[Sign-In Allowlist](docs/AUTH.md#sign-in-allowlist).
+
+**Session connections recover automatically.** Transient disconnects now retry without an attempt
+limit, with capped backoff and random jitter, rather than waiting for a click on **Reconnect** after
+a long outage. Each retry waits between half and all of its exponential delay, up to 30 seconds, so
+tabs affected by the same outage do not keep retrying in lockstep. Retries pause while the tab is
+hidden or the browser is offline and resume immediately once the tab is visible and online again.
+Existing connections stay open when a tab is hidden, but an expired authorization lease waits for
+visibility before reconnecting; a hidden session page may therefore stop maintaining sandbox
+presence while you use a separate editor or terminal. Session-expired connections fetch a fresh
+credential, and temporary credential-service failures retry instead of showing an authentication
+error. Actual authentication failures and server-overload closes still require user action.
+
+**New bot users must pass sign-in admission.** The Slack, Linear, and GitHub bots no longer create
+accounts for people the sign-in allowlist doesn't admit. Slack needs the `users:read.email` scope,
+and Slack users whose email the bot can't read, such as external Slack Connect users, can't start
+using it. See [Bot enrollment](docs/AUTH.md#bot-enrollment).
+
+## October 27, 2026
+
+**GitHub sign-in diagnostics.** Failed sign-ins, including provider and admission checks and a
+cancelled consent screen, return to the login page with an error and a retry option. If the GitHub
+App lacks **Email addresses: Read-only**, the page names the permission to check and the control
+plane logs GitHub's status. Rate limits show a temporary failure instead.
+
+**Slack automations can trigger on bot messages.** Slack Message automations used to ignore every
+message from a bot or integration, so alerts from monitoring or CI tools could never start a run.
+Turn on **Trigger on bot messages** and add a **Slack User** condition listing the bot IDs (`B…`)
+allowed to trigger the automation; saving is refused without one. That list limits people too, so
+add anyone else who should still trigger it. Only a message's `text` is matched. Bots can start at
+most 10 runs of an automation per hour and never continue an existing session, and Open-Inspect's
+own messages never trigger anything. See [Bot messages](docs/AUTOMATIONS.md#bot-messages).
+
+**Personal memory follows its owner's prompts.** Your personal memories now serve only your own
+prompts, whatever the session's visibility. On someone else's prompt, an Autofix turn, or between
+prompts, the agent can't search, read, or save them, and once someone else has prompted a session it
+stops searching them there for good; the personal directives and catalog loaded when the session
+started still shape it. New team- and workspace-visible sessions you prompt yourself now save the
+personal facts the agent learns right away, until someone else prompts. Automation runs, manual ones
+included, and sessions started from Slack channels, Linear, or GitHub no longer include personal
+memories; Slack DMs work like the web. A child session spawned on someone else's prompt leaves out
+the parent owner's personal memories. Turning off **Use my personal memories in my sessions**, or
+suspending the account, now reaches existing sessions too. Only the owner sees personal items in a
+session's memory sidebar, and reads of personal memories are audited as `memory.personal_read`.
+Sessions prompted earlier keep the personal memories they loaded but stop searching them. See
+[Persistent session memory](docs/MEMORY.md).
+
+## October 26, 2026
+
+**Codex sub-agents appear as tasks.** Most Codex models can spawn sub-agents, but their activity was
+dropped and a prompt could finish while they were still running. Each sub-agent now shows as a task
+with its tool calls grouped beneath it and its final message as the result, as on Claude Agent and
+OpenCode. The prompt finishes only after its sub-agents do, and their usage counts toward the
+prompt's tokens and cost. Sub-agents can use Open-Inspect tools. Nesting is limited to one level,
+and at most four threads, the parent included, run at once.
+
+**Fewer memory proposals.** Agents no longer weigh a memory at the end of every task; saving nothing
+is now the expected outcome. They save when you ask them to remember something, correct them, state
+a standing preference, or confirm a non-obvious approach, or when they verify a hard-won fact the
+repository doesn't record and that would change what the next session does first. Work summaries,
+fixes already in the code, sandbox quirks, and guesses are skipped. See
+[Persistent session memory](docs/MEMORY.md).
+
+**Placement settings for the web app and sessions.** Two optional Terraform inputs let you move
+parts of the request path closer to your users and D1. `web_serverless_region` moves the Vercel web
+functions (default `iad1`) and takes effect after the web app is redeployed.
+`session_do_location_hint` asks Cloudflare to create new session Durable Objects in a chosen region,
+such as `weur` or `apac`; existing sessions stay where they are. Both default to current behavior.
+See [Co-locating the request path](terraform/README.md#co-locating-the-request-path).
+
+## October 25, 2026
+
+**Boat saved snapshot API.** Base builds, prebuilt image builds, and image cleanup now use Boat's
+`/saved-snapshots` endpoints. Existing snapshots work without migration, and snapshot names and
+Terraform bindings are unchanged. The next deployment rebuilds the base snapshot once because its
+build inputs changed.
+
+**Shorter idle time for unattended sandboxes.** Automation runs, GitHub bot runs, and agent-created
+child sessions now default to stopping their sandboxes after 2 minutes of inactivity. User, Slack,
+and Linear sessions keep the 10-minute default. Operators can configure the shorter timeout with
+`SANDBOX_UNATTENDED_INACTIVITY_TIMEOUT_MS`. A connected session page keeps the existing timer
+extensions; direct terminal, VS Code, or VNC connections alone do not. Running turns stay active
+through runtime heartbeats, and follow-up prompts resume the existing stopped session.
+
+**One-shot scheduled automations.** A schedule automation can now **Run once** at a future date and
+time instead of following a cron expression. The automation stays enabled while its runs are active
+or retrying, then disables itself. To run a paused one-shot whose time has passed, give it a new
+future time and resume it. Pause or delete it to cancel a pending start. Requires D1 migration 0092.
+
+**Launch retries for scheduled runs.** Schedule automations can set **Retries** (none by default, up
+to 5) to relaunch a run that failed before its prompt reached a session, for example during a D1
+stall. The first retry waits 2 minutes, and the wait doubles for each later attempt. Runs that fail
+after starting, configuration errors such as a model the harness can't run, and **Trigger Now** runs
+are never retried. A waiting run counts as active, and a run that uses up its retries counts as one
+failure toward auto-pause. Requires D1 migration 0091.
+
+**Review memories in bulk.** **Settings › Memories** and **Settings › Shared memories** can select
+up to 100 records and approve, reject, archive, or restore them in one action. Memories are never
+hard-deleted, so bulk removal archives them or rejects proposals. Shared memories now open on an
+**All** view across every repository and environment you can access. Each record links to its own
+scope, and you pick a concrete scope before creating a memory.
+
+## October 24, 2026
+
+**Codex on every sandbox provider.** The Codex harness is no longer limited to Modal and Modal VM;
+Daytona, E2B, Vercel, and Boat deployments can run Codex sessions, automations, and child sessions
+too. The harness now launches the image's pinned Codex CLI rather than whatever `codex` sits in
+`/usr/local/bin`, which Boat replaces at boot. Rebuild your base image or snapshot if it predates
+the Codex CLI, including a pinned `vercel_base_snapshot_id`. Prebuilt repository images older than
+runtime v77 are rebuilt automatically; until then, Codex sessions start without them while other
+harnesses keep using them.
+
+**Codex sessions report their cost.** Codex turns used to report a cost of zero. Each model request
+is now priced from the models.dev catalog that the image already caches for OpenCode, so session
+totals, analytics, and `maxSessionCostUsd` include Codex spend. A model missing from the image's
+catalog is still reported as zero.
+
+**Mermaid diagrams in assistant messages.** Completed Mermaid code blocks in assistant replies
+render as diagrams that follow the light or dark theme. The source stays available behind a
+disclosure, and a diagram that fails to render falls back to code.
+
+**Duplicate an automation.** A **Duplicate** button on an automation's detail page opens the create
+form filled in from that automation, named `<name> (copy)`. Webhook keys aren't copied, since new
+keys are issued, and the Sentry client secret must be entered again. Environments you can't use are
+left out, with a notice.
+
+## October 23, 2026
+
+**Faster sandbox boots.** The runtime now fetches managed skills and session memory side by side
+instead of one after the other. On Boat, the control plane re-reads a starting sandbox as soon as
+the previous read has answered rather than every two seconds, watches the launcher for one second
+instead of five after starting it, and names the sandbox while it hosts its ports rather than
+before. Together these take a few seconds off every boot. Boat also now starts the runtime from the
+create request itself, as Modal and Daytona do, instead of through a start command issued once the
+control plane notices the machine is up; a resume still uses the start command.
+
+**Boat tunnel URLs reach the runtime again.** With the create-request launch, the tunnel env file
+was written into the workspace before the machine was up, where Boat's snapshot mount hid it, and
+every boot waited 30 seconds for a file it could not see before running `start.sh` without tunnel
+URLs. The create now stages the file under `/tmp` and the setup script copies it into the workspace
+before the launcher starts.
+
+**One runtime per Boat sandbox after a quick resume.** A resume soon after a stop can get the parked
+machine back with its runtime still running. The launcher's single-instance lock lived under the
+home directory, which Boat remounts when a lazy restore finishes, so the resumed launcher did not
+see the lock the first boot held and started a second runtime. The two then took turns on the
+session's connection every few seconds, and a turn could be reported complete twice. The lock now
+lives in `/tmp`, so the resumed launcher finds the runtime running and leaves it be.
+
+**Fewer steps to start a Boat sandbox.** Boat's create request now takes the sandbox's name, its
+visibility and the ports to route, so the control plane sends them with the create instead of
+renaming, unsharing and hosting each port afterwards. A sandbox billed to an organization is private
+before it has a machine, so it is never shared, not even for a moment. Boat also holds a file write
+to a starting sandbox until the sandbox is ready, so the tunnel env file now goes straight into the
+workspace instead of being staged under `/tmp` for the setup script to copy.
+
+## October 22, 2026
+
+**Prebuilt images on Boat.** Repository and environment prebuilds now work on the Boat provider. A
+build runs `setup.sh` once in a sandbox deployed from the base snapshot and its disk is saved as a
+Boat named snapshot; sessions deploy from that image and skip setup. The build sandbox receives the
+scope's secrets only after it is private, through a file no snapshot keeps, so an image never
+carries them. Images count toward the account's named-snapshot allowance. See
+[Pre-Built Images](docs/IMAGE_PREBUILD.md#boat-prebuilds).
+
+**Merge duplicate member accounts.** Owners and Administrators can merge two accounts that belong to
+the same person from **Settings › Workspace access**, for example a Slack-created account alongside
+a GitHub sign-in with a different email. This used to require running
+`scripts/merge-split-users.ts`. A dry-run review lists everything that moves, changes, or is
+discarded before you confirm, and the merge is recorded in the audit log. The new
+`workspace.members.merge` permission can be granted to custom roles, which also need
+`workspace.members.read` to review a merge. Merging Owner accounts requires an Owner.
+
+## October 20, 2026
+
+**Boat sandbox provider.** [Boat](https://boat.dev) joins Modal, Daytona, Vercel, and E2B as a
+selectable sandbox provider (`sandbox_provider = "boat"`). Sessions run in full Ubuntu VMs deployed
+from a Terraform-built named snapshot; idle sessions are stopped (disk snapshotted, machine
+released) and resume on a new machine with their files intact. Sessions pick the smallest Boat
+machine size that fits their CPU and memory settings. See
+[Boat Sandbox Provider](docs/BOAT_SANDBOX_PROVIDER.md).
+
+**OpenComputer sandbox provider removed.** The remaining providers are Modal, Modal VM, Daytona,
+Vercel, E2B, and Boat. A deployment still set to `sandbox_provider = "opencomputer"` fails Terraform
+validation, so switch providers before upgrading. The `opencomputer_*` Terraform variables and the
+control plane's `ANTHROPIC_API_KEY` binding are gone; `anthropic_api_key` still feeds sandboxes and
+the classifier bots. D1 migration 0089 deletes OpenComputer image build records.
+
 ## October 19, 2026
 
 **Autofix acts on approvals with inline comments.** An approved pull request review that starts at
