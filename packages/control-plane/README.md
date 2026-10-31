@@ -98,16 +98,23 @@ applies to the hostname as written: DNS results and connection addresses are not
 administrator-registered hostname that resolves to a private address is still reached. Disabling a
 definition blocks pending callbacks before token exchange as well as new consent.
 
-Personal delegation is supported by the OpenCode and Claude harnesses. Codex reports no personal MCP
-capability and omits managed personal connectors from native configuration; public and service
-connectors remain available. Healthy bridge-process reconnects preserve personal delegation, but
-process replacement during a prepared turn remains fenced until a new sandbox allocation.
+Personal delegation is supported by the OpenCode and Claude harnesses on sandbox runtime generation
+80 and later. A launch on Codex, or on an older image or snapshot, keeps personal servers out of the
+sandbox; each prompt then gets one `mcp` warning that names the servers and the reason. Public and
+service connectors remain available. Healthy bridge-process reconnects preserve personal delegation,
+but process replacement during a prepared turn remains fenced until a new sandbox allocation.
 
 In a session where several people prompt, each turn delegates as its own author. The proxy
 authenticates the shared sandbox, not the process inside it, so a process left running from an
 earlier turn can make personal MCP calls during the active author's turn. That covers another
 person's turn and automated ones (Autofix and other GitHub turns, Linear, automations), which can
 carry text from outside the team. This is a known limitation.
+
+A launch from the provider's base image assumes the current runtime, which holds when Terraform
+builds the base from the deployed commit. An operator-pinned base (for example
+`VERCEL_BASE_SNAPSHOT_ID`) can be older: such a sandbox receives its personal servers, but once it
+reports its runtime at readiness the control plane stops preparing and proxying them and the warning
+explains why.
 
 ### Actors
 

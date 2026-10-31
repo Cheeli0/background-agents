@@ -1,5 +1,4 @@
 import { SessionMcpContext } from "./mcp-context";
-import type { RuntimeMcpServerConfig } from "@open-inspect/shared/types/integrations";
 /**
  * Composition root for one session runtime.
  *
@@ -47,6 +46,7 @@ import {
   type SessionContextReader,
   type IdGenerator,
   type SandboxShutdownLifecycle,
+  type SandboxLifecycleConfig,
 } from "../sandbox/lifecycle/manager";
 import type { ImageBuildLookup } from "../sandbox/lifecycle/image-selection";
 // The composition root supplies launch integration ports, not consumer-facing launch mechanics.
@@ -504,7 +504,7 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
     retireAccess: () => access.retireShutdownAccess(),
   });
   const lifecycleManager = createLifecycleManager({
-    recordMcpServers: (servers) => mcpContext.recordLaunch(servers),
+    recordMcpServers: (servers, withheld) => mcpContext.recordLaunch(servers, withheld),
     provider: sandboxProvider,
     shutdown,
     access,
@@ -570,7 +570,15 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
     getExecutionTimeoutMs,
     () => lifecycleManager.mayProcessQueuedWork(),
     () => sandboxPromptBlockReason(lifecycleManager.shutdownSnapshot()),
-    (messageId) => mcpContext.prepare(messageId)
+    (messageId) => mcpContext.prepare(messageId),
+    (messageId) => {
+      const warning = mcpContext.withheldWarning();
+      if (warning)
+        recordSessionWarning(eventRepository, messenger, warning, `mcp-withheld:${messageId}`, {
+          scope: "mcp",
+          messageId,
+        });
+    }
   );
 
   // Tier 7 — services over the queue and lifecycle.
@@ -660,7 +668,8 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
     messageQueue,
     log,
     lifecycleManager,
-    (version, bridgeInstanceId) => mcpContext.recordRuntimeVersion(version, bridgeInstanceId)
+    (version, bridgeInstanceId, runtimeVersion) =>
+      mcpContext.recordRuntimeVersion(version, bridgeInstanceId, runtimeVersion)
   );
   const pushService = new SandboxPushService(log, wsManager, () =>
     lifecycleManager.pushAdmissionDecision()
@@ -1113,7 +1122,7 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
 }
 
 interface LifecycleManagerDeps {
-  recordMcpServers: (servers: RuntimeMcpServerConfig[]) => void;
+  recordMcpServers: NonNullable<SandboxLifecycleConfig["recordMcpServers"]>;
   recordWarning: (message: string, eventId: string) => void;
   resumeQueuedWork: () => Promise<void>;
   shutdown: SandboxShutdownLifecycle;

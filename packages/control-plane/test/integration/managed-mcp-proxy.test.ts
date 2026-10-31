@@ -3,7 +3,15 @@ import { SessionCoreRepository } from "../../src/session/session-core-repository
 import { runInSessionDO, componentsOf, type SessionDOInternals } from "./session-do-access";
 import { beforeEach, describe, expect, it } from "vitest";
 import { env, SELF } from "cloudflare:test";
-import { serviceFetch, initNamedSession, seedSandboxAuth, queryDO, openSandboxWs } from "./helpers";
+import {
+  serviceFetch,
+  initNamedSession,
+  seedSandboxAuth,
+  queryDO,
+  openSandboxWs,
+  collectMessages,
+  closeWebSocket,
+} from "./helpers";
 import { cleanD1Tables } from "./cleanup";
 import { McpServerStore } from "../../src/db/mcp-servers";
 import { McpConnectionStore, connectionBinding } from "../../src/db/mcp-connections";
@@ -225,6 +233,164 @@ describe("managed MCP actual sandbox route + session authority", () => {
       const automation = await context.prepare("alice-message");
       expect(automation.servers).toEqual([]);
       expect(automation.unavailable).toEqual([{ name: "example", code: "mcp_execution_inactive" }]);
+    });
+  });
+  it("withholds personal servers a launch cannot run and explains them per prompt", async () => {
+    const f = await fixture();
+    const routed = {
+      id: f.server.id,
+      name: f.server.name,
+      type: "remote" as const,
+      url: `https://test.local/sessions/${f.sessionName}/mcp/${f.server.id}`,
+      enabled: true,
+      headers: { Authorization: `Bearer ${token}` },
+      managed_proxy: {
+        version: 1 as const,
+        auth_mode: "user_oauth" as const,
+        auth_revision: f.server.authRevision,
+      },
+    };
+    await runInSessionDO(f.stub, async (instance, state) => {
+      const context = () =>
+        new SessionMcpContext(
+          state.storage.sql,
+          env.DB,
+          (instance as unknown as SessionDOInternals).appEnv,
+          new SessionCoreRepository(state.storage.sql, (run) => state.storage.transactionSync(run)),
+          componentsOf(instance).sandboxRepository
+        );
+      context().recordLaunch([routed], "mcp_runtime_outdated");
+      // Even a runtime that reports support never prepares a withheld server.
+      context().recordRuntimeVersion(1);
+      expect(await context().prepare("alice-message")).toMatchObject({
+        servers: [],
+        unavailable: [],
+      });
+      expect(context().withheldWarning()).toBe(
+        "Personal MCP example needs a newer sandbox image than this session runs. Sessions that start after the image is rebuilt can use it. Other tools remain available."
+      );
+      state.storage.sql.exec("UPDATE session SET harness = 'codex'");
+      context().recordLaunch(
+        [routed, { ...routed, id: "second-server", name: "wiki" }],
+        "mcp_harness_unsupported"
+      );
+      expect(context().withheldWarning()).toBe(
+        "Personal MCP servers example and wiki work only in OpenCode and Claude Agent sessions, so this Codex session can't use them. Other tools remain available."
+      );
+    });
+    const denied = await f.context({});
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ code: "mcp_denied" });
+  });
+  it("files one withheld-server warning under the prompt the sandbox received", async () => {
+    const sessionName = `mcp-withheld-${crypto.randomUUID()}`;
+    const { stub } = await initNamedSession(sessionName);
+    await seedSandboxAuth(stub, { authToken: token, sandboxId: "allocation-1" });
+    await queryDO(
+      stub,
+      "UPDATE sandbox SET mcp_servers = ?",
+      JSON.stringify([
+        {
+          id: "server-1",
+          name: "tracker",
+          authMode: "user_oauth",
+          authRevision: 1,
+          withheld: "mcp_runtime_outdated",
+        },
+        {
+          id: "server-2",
+          name: "wiki",
+          authMode: "user_oauth",
+          authRevision: 1,
+          withheld: "mcp_runtime_outdated",
+        },
+      ])
+    );
+    const { ws } = await openSandboxWs(sessionName, {
+      authToken: token,
+      sandboxId: "allocation-1",
+    });
+    expect(ws).not.toBeNull();
+    ws!.accept();
+    try {
+      const prompt = collectMessages(ws!, { until: (message) => message.type === "prompt" });
+      const response = await stub.fetch("http://internal/internal/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "Read the tracker", authorId: "user-1", source: "web" }),
+      });
+      const { messageId } = await response.json<{ messageId: string }>();
+      const sent = (await prompt).find((message) => message.type === "prompt");
+      expect(sent).toMatchObject({ messageId });
+      expect(sent).not.toHaveProperty("managedMcp");
+
+      const warnings = await queryDO<{ id: string; data: string; message_id: string }>(
+        stub,
+        "SELECT id, data, message_id FROM events WHERE type = 'warning'"
+      );
+      // Two servers share one event: same-millisecond warnings would share a timeline key.
+      expect(warnings).toEqual([
+        { id: `mcp-withheld:${messageId}`, message_id: messageId, data: expect.any(String) },
+      ]);
+      expect(JSON.parse(warnings[0].data)).toMatchObject({
+        type: "warning",
+        scope: "mcp",
+        messageId,
+        message: expect.stringContaining(
+          "Personal MCP servers tracker and wiki need a newer sandbox image"
+        ),
+      });
+    } finally {
+      await closeWebSocket(ws!, { bestEffort: true });
+    }
+  });
+  it("withholds personal servers once the sandbox reports a runtime older than its launch assumed", async () => {
+    const f = await fixture();
+    const launch = async () =>
+      JSON.parse(
+        (await queryDO<{ mcp_servers: string }>(f.stub, "SELECT mcp_servers FROM sandbox"))[0]
+          .mcp_servers
+      ) as { withheld?: string }[];
+    const { ws, response } = await openSandboxWs(f.sessionName, {
+      authToken: token,
+      sandboxId: "allocation-1",
+    });
+    expect(response.status).toBe(101);
+    ws!.accept();
+    try {
+      // A base snapshot pinned to an older runtime reports it at readiness.
+      ws!.send(
+        JSON.stringify({
+          type: "ready",
+          sandboxId: "allocation-1",
+          timestamp: Date.now(),
+          runtimeVersion: "v79-earlier",
+        })
+      );
+      await expect.poll(async () => (await launch())[0].withheld).toBe("mcp_runtime_outdated");
+    } finally {
+      await closeWebSocket(ws!, { bestEffort: true });
+    }
+    const denied = await f.context({});
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ code: "mcp_denied" });
+  });
+  it("keeps personal servers for a sandbox that reports a current or no runtime version", async () => {
+    const f = await fixture();
+    await runInSessionDO(f.stub, async (instance, state) => {
+      const context = new SessionMcpContext(
+        state.storage.sql,
+        env.DB,
+        (instance as unknown as SessionDOInternals).appEnv,
+        new SessionCoreRepository(state.storage.sql, (run) => state.storage.transactionSync(run)),
+        componentsOf(instance).sandboxRepository
+      );
+      // No prepared turn, so an unidentified bridge's readiness does not trip the cleanup fence.
+      state.storage.sql.exec("UPDATE messages SET mcp_context = NULL");
+      context.recordRuntimeVersion(1, undefined, "v80-managed-mcp");
+      context.recordRuntimeVersion(1);
+      expect(context.withheldWarning()).toBeNull();
+      expect((await context.prepare("alice-message")).servers).toEqual(["example"]);
     });
   });
   it("preserves a healthy bridge across transport reconnect and turn cleanup", async () => {

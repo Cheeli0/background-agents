@@ -13,6 +13,13 @@ import { McpServerStore } from "../db/mcp-servers";
 import { McpError, mcpErrorResponse } from "../mcp/errors";
 import { assertMcpUserAccess } from "../mcp/authorization";
 import { MCP_STREAM_TIMEOUT_MS, MCP_UPSTREAM_HEADERS_TIMEOUT_MS } from "../mcp/relay";
+import { personalMcpWithheldReason, type PersonalMcpWithheldCode } from "../mcp/runtime-config";
+import {
+  HARNESS_IDS,
+  getHarnessCapabilities,
+  getHarnessLabel,
+  getValidHarnessOrDefault,
+} from "@open-inspect/shared/harnesses";
 import type { Env } from "../types";
 import { z } from "zod";
 
@@ -21,6 +28,8 @@ interface LaunchBinding {
   name: string;
   authMode: McpAuthMode;
   authRevision: number;
+  /** Kept out of the sandbox, which therefore cannot report it. */
+  withheld?: PersonalMcpWithheldCode;
 }
 interface MessageContext {
   id: string;
@@ -70,7 +79,10 @@ export class SessionMcpContext {
     private readonly sandboxes: SandboxStateReader
   ) {}
 
-  recordLaunch(servers: RuntimeMcpServerConfig[]): void {
+  recordLaunch(
+    servers: RuntimeMcpServerConfig[],
+    withheld: PersonalMcpWithheldCode | null = null
+  ): void {
     const allowed: LaunchBinding[] = servers.flatMap((server) =>
       "managed_proxy" in server
         ? [
@@ -79,6 +91,7 @@ export class SessionMcpContext {
               name: server.name,
               authMode: server.managed_proxy.auth_mode,
               authRevision: server.managed_proxy.auth_revision,
+              ...(withheld && server.managed_proxy.auth_mode === "user_oauth" ? { withheld } : {}),
             },
           ]
         : []
@@ -91,7 +104,7 @@ export class SessionMcpContext {
   disableRuntime(): void {
     this.sql.exec("UPDATE sandbox SET mcp_runtime_version = ?", POISONED_RUNTIME_VERSION);
   }
-  recordRuntimeVersion(version: number, bridgeInstanceId?: string): void {
+  recordRuntimeVersion(version: number, bridgeInstanceId?: string, runtimeVersion?: string): void {
     // A transport reconnect keeps the live bridge and its owned cleanup task.
     // A replacement (or legacy unidentified) bridge cannot attest that the
     // previous process disposed its native clients, even after authority closed.
@@ -110,6 +123,33 @@ export class SessionMcpContext {
       POISONED_RUNTIME_VERSION,
       version,
       bridgeInstanceId ?? null
+    );
+    this.withholdForReportedRuntime(runtimeVersion);
+  }
+  /**
+   * A base-image launch assumes the current runtime. A sandbox that reports an
+   * older one at readiness (an operator-pinned base snapshot, say) still holds its
+   * personal servers, but they are no longer prepared or proxied, and each prompt
+   * says why.
+   */
+  private withholdForReportedRuntime(runtimeVersion: string | undefined): void {
+    if (!runtimeVersion) return;
+    const reason = personalMcpWithheldReason(
+      getValidHarnessOrDefault(this.sessions.getSession()?.harness),
+      runtimeVersion
+    );
+    const launch = this.launch();
+    if (!reason || !launch.some((entry) => entry.authMode === "user_oauth" && !entry.withheld))
+      return;
+    this.sql.exec(
+      "UPDATE sandbox SET mcp_servers = ?",
+      JSON.stringify(
+        launch.map((entry) =>
+          entry.authMode === "user_oauth" && !entry.withheld
+            ? { ...entry, withheld: reason }
+            : entry
+        )
+      )
     );
   }
   private launch(): LaunchBinding[] {
@@ -132,7 +172,9 @@ export class SessionMcpContext {
     const runtime = this.sql
       .exec("SELECT mcp_runtime_version FROM sandbox LIMIT 1")
       .toArray()[0] as { mcp_runtime_version: number } | undefined;
-    const personal = this.launch().filter((entry) => entry.authMode === "user_oauth");
+    const personal = this.launch().filter(
+      (entry) => entry.authMode === "user_oauth" && !entry.withheld
+    );
     const result: ManagedMcpExecution = {
       messageId,
       revision: message.mcp_revision,
@@ -216,6 +258,37 @@ export class SessionMcpContext {
     if (rows.length !== 1) throw new McpError("mcp_context_changed", 409);
     return result;
   }
+  /**
+   * The warning for personal servers this allocation withheld, or null. The sandbox
+   * never ran them, so only the control plane can say why. One warning names them
+   * all, so a prompt never carries several warnings with the same timestamp.
+   */
+  withheldWarning(): string | null {
+    const byReason = new Map<PersonalMcpWithheldCode, string[]>();
+    for (const entry of this.launch())
+      if (entry.withheld)
+        byReason.set(entry.withheld, [...(byReason.get(entry.withheld) ?? []), entry.name]);
+    if (!byReason.size) return null;
+    const list = (names: string[]) =>
+      new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(names);
+    const sentences = [...byReason].map(([reason, names]) => {
+      const one = names.length === 1;
+      const subject = one ? `Personal MCP ${names[0]}` : `Personal MCP servers ${list(names)}`;
+      const object = one ? "it" : "them";
+      if (reason === "mcp_harness_unsupported") {
+        const harness = getHarnessLabel(
+          getValidHarnessOrDefault(this.sessions.getSession()?.harness)
+        );
+        const supported = list(
+          HARNESS_IDS.filter((id) => getHarnessCapabilities(id).personalMcp).map(getHarnessLabel)
+        );
+        return `${subject} ${one ? "works" : "work"} only in ${supported} sessions, so this ${harness} session can't use ${object}.`;
+      }
+      // An outdated prebuilt image can serve new sessions until it is rebuilt.
+      return `${subject} ${one ? "needs" : "need"} a newer sandbox image than this session runs. Sessions that start after the image is rebuilt can use ${object}.`;
+    });
+    return [...sentences, "Other tools remain available."].join(" ");
+  }
   private async authenticate(request: Request) {
     const before = this.sandboxes.getSandbox();
     const header = request.headers.get("Authorization");
@@ -253,7 +326,7 @@ export class SessionMcpContext {
       const session = this.sessions.getSession();
       if (!session || ["archived", "cancelled"].includes(session.status))
         throw new McpError("mcp_execution_inactive");
-      const entry = this.launch().find((entry) => entry.id === input.serverId);
+      const entry = this.launch().find((entry) => entry.id === input.serverId && !entry.withheld);
       if (!entry) throw new McpError("mcp_denied");
       if (!input.expected) {
         const now = Date.now();
