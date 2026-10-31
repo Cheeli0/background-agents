@@ -2,6 +2,26 @@
 
 New features, integrations, and notable improvements to Open-Inspect — newest first.
 
+## October 31, 2026
+
+**Personal access tokens and an MCP server.** Issue tokens under **Settings › Access tokens** so
+local tools can call Open-Inspect as you. Each token expires, holds only the permissions you grant,
+and never exceeds your current role. The new `packages/mcp-server` uses a token to let Claude Code
+and other MCP clients work with sessions, automations, and skills. Requires D1 migration 0096. See
+the [MCP server README](packages/mcp-server/README.md).
+
+**Access token policy.** Administrators can turn all tokens off, cap their lifetime, limit the
+permissions they may hold, and revoke any member's tokens under **Settings › Access token policy**.
+Requires the new `workspace.personal_access_tokens.manage` permission and D1 migration 0097.
+
+## October 30, 2026
+
+**Managed MCP routing and personal OAuth.** Remote MCP servers can route through Open-Inspect so
+sandboxes never hold upstream credentials, and can use each user's own OAuth connection, set up
+under **Settings › Connections**. Personal servers work in OpenCode and Claude Agent sessions; Codex
+skips them with a warning. Requires D1 migration 0095; runtime generation 80 rebuilds prebuilt
+images. See [Personal MCP Connections](packages/control-plane/README.md#personal-mcp-connections).
+
 ## October 29, 2026
 
 **Saved MCP credentials are listed by name.** Editing an MCP server used to show only that
@@ -13,7 +33,18 @@ values are never returned to anyone. API clients can send `keepCredentialKeys` w
 `PUT /mcp-servers/:id` for the same per-name edits; without it, sent credentials still replace the
 saved set.
 
+**Automation pull requests come from the GitHub App.** PRs opened by automation runs, including
+**Run now**, are now created by the GitHub App instead of the owner's account, so the owner can
+review them. The review bot can only comment on these PRs, and event automations matching the
+owner's login no longer fire on them. See
+[Creating Pull Requests](docs/HOW_IT_WORKS.md#creating-pull-requests).
+
 ## October 28, 2026
+
+**Sign-in allowlist in Settings.** Owners and Administrators can edit who may sign in under
+**Settings › Workspace access** without redeploying. These rules add to the deployment's `ALLOWED_*`
+rules and can't narrow them. Requires D1 migrations 0093 and 0094. See
+[Sign-In Allowlist](docs/AUTH.md#sign-in-allowlist).
 
 **Session connections recover automatically.** Transient disconnects now retry without an attempt
 limit, with capped backoff and random jitter, rather than waiting for a click on **Reconnect** after
@@ -25,6 +56,11 @@ visibility before reconnecting; a hidden session page may therefore stop maintai
 presence while you use a separate editor or terminal. Session-expired connections fetch a fresh
 credential, and temporary credential-service failures retry instead of showing an authentication
 error. Actual authentication failures and server-overload closes still require user action.
+
+**New bot users must pass sign-in admission.** The Slack, Linear, and GitHub bots no longer create
+accounts for people the sign-in allowlist doesn't admit. Slack needs the `users:read.email` scope,
+and Slack users whose email the bot can't read, such as external Slack Connect users, can't start
+using it. See [Bot enrollment](docs/AUTH.md#bot-enrollment).
 
 ## October 27, 2026
 
