@@ -330,11 +330,12 @@ invocations this webhook caused, and never exposes session content.
 
 ### Personal Access Tokens
 
-| Endpoint                      | Method | Description                                              |
-| ----------------------------- | ------ | -------------------------------------------------------- |
-| `/personal-access-tokens`     | GET    | The caller's tokens, newest first, without their secrets |
-| `/personal-access-tokens`     | POST   | Issue a token → `201` with the plaintext `token`, once   |
-| `/personal-access-tokens/:id` | DELETE | Revoke one of the caller's tokens                        |
+| Endpoint                         | Method | Description                                              |
+| -------------------------------- | ------ | -------------------------------------------------------- |
+| `/personal-access-tokens`        | GET    | The caller's tokens, newest first, without their secrets |
+| `/personal-access-tokens`        | POST   | Issue a token → `201` with the plaintext `token`, once   |
+| `/personal-access-tokens/:id`    | DELETE | Revoke one of the caller's tokens                        |
+| `/personal-access-tokens/policy` | GET    | The workspace token policy's rules                       |
 
 These routes accept only a human browser session, so a token can never issue or revoke tokens. An
 issue request names the token, its grant (`permissions`, a list of RBAC permission IDs), and its
@@ -344,8 +345,35 @@ caller currently holds (`403 permission_not_held`) and one tokens may hold at al
 `@open-inspect/shared/types/personal-access-tokens`, which withholds workspace administration). A
 user holds at most 50 tokens (`409 personal_access_token_limit_reached`). Issue and revoke write
 `personal_access_token.created` and `personal_access_token.revoked` audit events in the same
-transaction. See [Personal access tokens](#personal-access-tokens-1) under the security model for
-how a token is admitted.
+transaction. Issuing also enforces the workspace token policy
+(`403 personal_access_tokens_disabled`, `400 lifetime_exceeds_policy`,
+`400 permission_not_allowed_by_policy`), and inserts the token only if the policy is still at the
+revision the request was checked against (`409 personal_access_token_policy_changed` otherwise). See
+[Personal access tokens](#personal-access-tokens-1) under the security model for how a token is
+admitted.
+
+Workspace governance requires `workspace.personal_access_tokens.manage` (Owner and Administrator by
+default, delegable to custom roles) and a human browser session:
+
+| Endpoint                                 | Method | Description                                                     |
+| ---------------------------------------- | ------ | --------------------------------------------------------------- |
+| `/settings/personal-access-token-policy` | GET    | The policy with its revision (`ETag: "pat-policy-<rev>"`)       |
+| `/settings/personal-access-token-policy` | PUT    | Replace the policy; requires `If-Match` with the revision       |
+| `/settings/personal-access-tokens`       | GET    | Every member's tokens with owners, newest first, `cursor`-paged |
+| `/settings/personal-access-tokens/:id`   | DELETE | Revoke any member's token                                       |
+| `/members/:id/personal-access-tokens`    | DELETE | Revoke every token one member holds → `{ revoked }`             |
+
+Revoke-all repeats until a pass finds no token, so a token the member issues before that last pass
+is revoked too. One issued after it is not: only suspension stops a member issuing. If the member
+keeps issuing through every pass, it answers `409 revoke_all_incomplete` with the count revoked;
+suspend the member and revoke again.
+
+The policy (`enabled`, `maxLifetimeDays`, `allowedPermissions`) is checked at authentication, so it
+applies to existing tokens at once: disabled refuses every token with `401`, a lower lifetime cap
+ends tokens older than it, and a permission ceiling narrows every grant. A ceiling that allows a
+permission must also allow its prerequisites (`skills.manage` needs `skills.read`), or the update is
+refused with `400 permission_prerequisite_missing`. A policy change writes
+`workspace.personal_access_token_policy_updated` in the same transaction as the change.
 
 ### Audit Events
 
@@ -510,6 +538,8 @@ Personal access tokens:
   cleartext `display_prefix`, `expires_at` (required), and minute-resolution `last_used_at`.
   Deleting the owner deletes their tokens.
 - `personal_access_token_permissions`: a token's grant, one row per RBAC permission.
+- `workspace_personal_access_token_policy`: the single policy row (`enabled`, `max_lifetime_days`,
+  `allowed_permissions_json`, `revision`); a `NULL` limit means the system's own.
 
 ## Browser Authentication
 

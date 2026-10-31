@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { PERSONAL_ACCESS_TOKEN_PREFIX } from "@open-inspect/shared/types/personal-access-tokens";
+import {
+  PERSONAL_ACCESS_TOKEN_PREFIX,
+  type PersonalAccessTokenPolicy,
+} from "@open-inspect/shared/types/personal-access-tokens";
 import type { PersonalAccessTokenCredential } from "../db/personal-access-tokens";
 import {
   authenticatePersonalAccessToken,
@@ -40,30 +43,107 @@ describe("personalAccessTokenDisplayPrefix", () => {
 });
 
 describe("authenticatePersonalAccessToken", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
   const credential: PersonalAccessTokenCredential = {
     id: "token-1",
     userId: "user-1",
     displayPrefix: personalAccessTokenDisplayPrefix(TOKEN),
+    createdAt: NOW - DAY_MS,
     expiresAt: NOW + 1,
-    grant: ["sessions.read"],
+    grant: ["sessions.read", "automations.create"],
+  };
+  const open: PersonalAccessTokenPolicy = {
+    enabled: true,
+    maxLifetimeDays: null,
+    allowedPermissions: null,
   };
   const lookup = (found: PersonalAccessTokenCredential | null) => ({
     findByToken: async (token: string) => (token === TOKEN ? found : null),
   });
+  const policy = (rules: Partial<PersonalAccessTokenPolicy> = {}) => ({
+    get: async () => ({ ...open, ...rules }),
+  });
 
   it("resolves a live token to its credential", async () => {
-    await expect(authenticatePersonalAccessToken(lookup(credential), TOKEN, NOW)).resolves.toBe(
-      credential
-    );
+    await expect(
+      authenticatePersonalAccessToken(lookup(credential), policy(), TOKEN, NOW)
+    ).resolves.toEqual({ kind: "authenticated", credential });
   });
 
   it("refuses an unknown token", async () => {
-    await expect(authenticatePersonalAccessToken(lookup(null), TOKEN, NOW)).resolves.toBeNull();
+    await expect(
+      authenticatePersonalAccessToken(lookup(null), policy(), TOKEN, NOW)
+    ).resolves.toEqual({ kind: "rejected" });
   });
 
   it("refuses a token at its expiry instant", async () => {
     await expect(
-      authenticatePersonalAccessToken(lookup(credential), TOKEN, NOW + 1)
-    ).resolves.toBeNull();
+      authenticatePersonalAccessToken(lookup(credential), policy(), TOKEN, NOW + 1)
+    ).resolves.toEqual({ kind: "rejected" });
+  });
+
+  it("refuses a live token while the policy disables tokens", async () => {
+    await expect(
+      authenticatePersonalAccessToken(lookup(credential), policy({ enabled: false }), TOKEN, NOW)
+    ).resolves.toEqual({ kind: "disabled" });
+  });
+
+  it("reports unknown and expired tokens alike while the policy disables tokens", async () => {
+    for (const [found, now] of [
+      [null, NOW],
+      [credential, NOW + 1],
+    ] as const) {
+      await expect(
+        authenticatePersonalAccessToken(lookup(found), policy({ enabled: false }), TOKEN, now)
+      ).resolves.toEqual({ kind: "rejected" });
+    }
+  });
+
+  it("reads no policy for an unknown token, so a forged one costs a single lookup", async () => {
+    let policyReads = 0;
+    const counted = {
+      get: async () => {
+        policyReads++;
+        return { ...open, enabled: false };
+      },
+    };
+    await expect(
+      authenticatePersonalAccessToken(lookup(null), counted, TOKEN, NOW)
+    ).resolves.toEqual({ kind: "rejected" });
+    expect(policyReads).toBe(0);
+  });
+
+  it("ends an existing token early when the policy lowers the lifetime cap", async () => {
+    const issuedLongAgo = { ...credential, createdAt: NOW - 40 * DAY_MS, expiresAt: NOW + DAY_MS };
+    await expect(
+      authenticatePersonalAccessToken(
+        lookup(issuedLongAgo),
+        policy({ maxLifetimeDays: 30 }),
+        TOKEN,
+        NOW
+      )
+    ).resolves.toEqual({ kind: "rejected" });
+    await expect(
+      authenticatePersonalAccessToken(
+        lookup(issuedLongAgo),
+        policy({ maxLifetimeDays: 90 }),
+        TOKEN,
+        NOW
+      )
+    ).resolves.toMatchObject({ kind: "authenticated" });
+  });
+
+  it("narrows an existing grant to the policy's permission ceiling", async () => {
+    await expect(
+      authenticatePersonalAccessToken(
+        lookup(credential),
+        policy({ allowedPermissions: ["sessions.read"] }),
+        TOKEN,
+        NOW
+      )
+    ).resolves.toEqual({
+      kind: "authenticated",
+      credential: { ...credential, grant: ["sessions.read"] },
+    });
   });
 });

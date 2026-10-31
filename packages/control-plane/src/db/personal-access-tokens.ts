@@ -18,6 +18,7 @@ import {
   PERSONAL_ACCESS_TOKEN_RANDOM_BYTES,
   type CreatedPersonalAccessToken,
   type PersonalAccessToken,
+  type WorkspacePersonalAccessToken,
 } from "@open-inspect/shared/types/personal-access-tokens";
 import { generateId, hashToken } from "../auth/crypto";
 import { personalAccessTokenDisplayPrefix } from "../auth/personal-access-token";
@@ -34,6 +35,7 @@ export interface PersonalAccessTokenCredential {
   readonly id: string;
   readonly userId: string;
   readonly displayPrefix: string;
+  readonly createdAt: number;
   readonly expiresAt: number;
   /** Registered permissions only; a grant naming a since-removed permission ignores it. */
   readonly grant: readonly PermissionId[];
@@ -46,10 +48,18 @@ export interface IssuePersonalAccessTokenInput {
   readonly expiresAt: number;
   readonly now: number;
   readonly requestId: string;
+  /**
+   * The workspace token policy revision the request was checked against. When set, the token is
+   * issued only if the policy is still at it, so a concurrent policy change cannot let through a
+   * token the new policy forbids.
+   */
+  readonly policyRevision?: number;
 }
 
 export type IssuePersonalAccessTokenResult =
-  { kind: "issued"; token: CreatedPersonalAccessToken } | { kind: "limit_reached" };
+  | { kind: "issued"; token: CreatedPersonalAccessToken }
+  | { kind: "limit_reached" }
+  | { kind: "policy_changed" };
 
 export interface RevokePersonalAccessTokenInput {
   /** The token's owner; a token id alone never selects another user's token. */
@@ -68,6 +78,22 @@ interface TokenRow {
   created_at: number;
   last_used_at: number | null;
   expires_at: number;
+}
+
+interface WorkspaceTokenRow extends TokenRow {
+  user_id: string;
+  display_name: string | null;
+  email: string | null;
+}
+
+/** A page position in the workspace listing: the last row's creation time and id. */
+function encodeCursor(row: { created_at: number; id: string }): string {
+  return `${row.created_at}:${row.id}`;
+}
+
+function decodeCursor(cursor: string): { createdAt: number; id: string } | null {
+  const match = /^(\d+):([0-9a-f]+)$/.exec(cursor);
+  return match ? { createdAt: Number(match[1]), id: match[2] } : null;
 }
 
 interface GrantRow {
@@ -113,12 +139,16 @@ function auditSnapshot(token: PersonalAccessToken) {
   };
 }
 
+/** Passes revoke-all makes before reporting that the member is still issuing tokens. */
+const REVOKE_ALL_MAX_PASSES = 5;
+
 export class PersonalAccessTokenStore {
   constructor(private readonly db: SqlDatabase) {}
 
   /**
-   * Issues a token unless its owner already holds PERSONAL_ACCESS_TOKEN_MAX_PER_USER. The limit,
-   * the token, its grant, and its audit event commit together or not at all.
+   * Issues a token unless its owner already holds PERSONAL_ACCESS_TOKEN_MAX_PER_USER, or the policy
+   * has moved past `policyRevision`. Those checks, the token, its grant, and its audit event commit
+   * together or not at all.
    */
   async issue(input: IssuePersonalAccessTokenInput): Promise<IssuePersonalAccessTokenResult> {
     const plaintext = `${PERSONAL_ACCESS_TOKEN_PREFIX}${generateId(PERSONAL_ACCESS_TOKEN_RANDOM_BYTES)}`;
@@ -133,13 +163,20 @@ export class PersonalAccessTokenStore {
       token: plaintext,
     };
 
-    const [inserted] = await this.db.batch([
+    const policyGuard =
+      input.policyRevision === undefined
+        ? ""
+        : `
+             AND EXISTS (
+               SELECT 1 FROM workspace_personal_access_token_policy WHERE id = 1 AND revision = ?
+             )`;
+    const statements = await this.db.batch([
       this.db
         .prepare(
           `INSERT INTO personal_access_tokens
              (id, user_id, name, token_hash, display_prefix, created_at, last_used_at, expires_at)
            SELECT ?, ?, ?, ?, ?, ?, NULL, ?
-           WHERE (SELECT COUNT(*) FROM personal_access_tokens WHERE user_id = ?) < ?`
+           WHERE (SELECT COUNT(*) FROM personal_access_tokens WHERE user_id = ?) < ?${policyGuard}`
         )
         .bind(
           token.id,
@@ -150,7 +187,8 @@ export class PersonalAccessTokenStore {
           token.createdAt,
           token.expiresAt,
           input.userId,
-          PERSONAL_ACCESS_TOKEN_MAX_PER_USER
+          PERSONAL_ACCESS_TOKEN_MAX_PER_USER,
+          ...(input.policyRevision === undefined ? [] : [input.policyRevision])
         ),
       ...token.permissions.map((permission) =>
         this.db
@@ -170,9 +208,15 @@ export class PersonalAccessTokenStore {
         before: {},
         after: auditSnapshot(token),
       }),
+      // Read in the same transaction, to tell a moved policy from the limit when nothing inserts.
+      this.db.prepare("SELECT revision FROM workspace_personal_access_token_policy WHERE id = 1"),
     ]);
-    if (inserted.meta.changes === 0) return { kind: "limit_reached" };
-    return { kind: "issued", token };
+    const [inserted] = statements;
+    if (inserted.meta.changes === 1) return { kind: "issued", token };
+    const [policy] = statements[statements.length - 1].results as { revision: number }[];
+    return input.policyRevision !== undefined && policy?.revision !== input.policyRevision
+      ? { kind: "policy_changed" }
+      : { kind: "limit_reached" };
   }
 
   /** One user's tokens, newest first, with their grants. Never includes a secret. */
@@ -199,6 +243,108 @@ export class PersonalAccessTokenStore {
     return (tokens.results as TokenRow[]).map((row) =>
       toPersonalAccessToken(row, grantsById.get(row.id) ?? [])
     );
+  }
+
+  /**
+   * Every token in the workspace with its owner, newest first, for administrators. Pages by
+   * keyset, so a revocation between pages neither repeats nor skips a token.
+   */
+  async listAll(options: {
+    limit: number;
+    cursor?: string;
+  }): Promise<{ tokens: WorkspacePersonalAccessToken[]; nextCursor: string | null } | null> {
+    const after = options.cursor === undefined ? undefined : decodeCursor(options.cursor);
+    if (after === null) return null;
+    const { results } = await this.db
+      .prepare(
+        `SELECT token.id, token.user_id, token.name, token.display_prefix, token.created_at,
+                token.last_used_at, token.expires_at, users.display_name, users.email
+           FROM personal_access_tokens token
+           JOIN users ON users.id = token.user_id
+          WHERE ? IS NULL OR token.created_at < ? OR (token.created_at = ? AND token.id > ?)
+          ORDER BY token.created_at DESC, token.id
+          LIMIT ?`
+      )
+      .bind(
+        after?.createdAt ?? null,
+        after?.createdAt ?? null,
+        after?.createdAt ?? null,
+        after?.id ?? null,
+        options.limit + 1
+      )
+      .all<WorkspaceTokenRow>();
+    const page = results.slice(0, options.limit);
+    const grants =
+      page.length === 0
+        ? new Map<string, PermissionId[]>()
+        : grantsByToken(
+            (
+              await this.db
+                .prepare(
+                  `SELECT token_id, permission_id FROM personal_access_token_permissions
+                    WHERE token_id IN (${page.map(() => "?").join(", ")})`
+                )
+                .bind(...page.map((row) => row.id))
+                .all<GrantRow>()
+            ).results
+          );
+    return {
+      tokens: page.map((row) => ({
+        ...toPersonalAccessToken(row, grants.get(row.id) ?? []),
+        owner: { userId: row.user_id, displayName: row.display_name, email: row.email },
+      })),
+      nextCursor: results.length > options.limit ? encodeCursor(page[page.length - 1]) : null,
+    };
+  }
+
+  /** Whose token this is, or null when there is no such token. */
+  async ownerOf(tokenId: string): Promise<string | null> {
+    const row = await this.db
+      .prepare("SELECT user_id FROM personal_access_tokens WHERE id = ?")
+      .bind(tokenId)
+      .first<{ user_id: string }>();
+    return row?.user_id ?? null;
+  }
+
+  /**
+   * Revokes every token `userId` holds, recording each revocation and who made it. Each pass
+   * audits and deletes the tokens it listed in one transaction, and passes repeat until one finds
+   * none, so a token issued before that last pass is revoked too; one issued after it is not.
+   * `complete` is false only when the member kept issuing tokens through every pass; suspending the
+   * member stops that.
+   */
+  async revokeAll(
+    input: Omit<RevokePersonalAccessTokenInput, "tokenId">
+  ): Promise<{ revoked: number; complete: boolean }> {
+    let revoked = 0;
+    for (let pass = 0; pass < REVOKE_ALL_MAX_PASSES; pass++) {
+      const tokens = await this.list(input.userId);
+      if (tokens.length === 0) return { revoked, complete: true };
+      const results = await this.db.batch([
+        ...tokens.map((token) =>
+          this.bindAudit({
+            action: "personal_access_token.revoked",
+            tokenId: token.id,
+            ownerUserId: input.userId,
+            actorUserId: input.actorUserId,
+            requestId: input.requestId,
+            now: input.now,
+            before: auditSnapshot(token),
+            after: {},
+          })
+        ),
+        this.db
+          .prepare(
+            `DELETE FROM personal_access_tokens
+              WHERE user_id = ? AND id IN (${tokens.map(() => "?").join(", ")})
+              RETURNING id`
+          )
+          .bind(input.userId, ...tokens.map((token) => token.id)),
+      ]);
+      // Counted from the returned rows: an engine may include the cascaded grant rows in `changes`.
+      revoked += results[results.length - 1].results.length;
+    }
+    return { revoked, complete: (await this.list(input.userId)).length === 0 };
   }
 
   /**
@@ -233,7 +379,7 @@ export class PersonalAccessTokenStore {
   async findByToken(token: string): Promise<PersonalAccessTokenCredential | null> {
     const { results } = await this.db
       .prepare(
-        `SELECT token.id, token.user_id, token.display_prefix, token.expires_at,
+        `SELECT token.id, token.user_id, token.display_prefix, token.created_at, token.expires_at,
                 grant_row.permission_id
            FROM personal_access_tokens token
            LEFT JOIN personal_access_token_permissions grant_row ON grant_row.token_id = token.id
@@ -244,6 +390,7 @@ export class PersonalAccessTokenStore {
         id: string;
         user_id: string;
         display_prefix: string;
+        created_at: number;
         expires_at: number;
         permission_id: string | null;
       }>();
@@ -253,6 +400,7 @@ export class PersonalAccessTokenStore {
       id: row.id,
       userId: row.user_id,
       displayPrefix: row.display_prefix,
+      createdAt: row.created_at,
       expiresAt: row.expires_at,
       grant: canonicalGrant(
         results.flatMap(({ permission_id }) =>
