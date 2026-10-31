@@ -4,7 +4,7 @@ description: The vocabulary the rest of the documentation uses, one short sectio
 audience: user
 owner: platform
 status: published
-lastReviewed: "2026-10-08"
+lastReviewed: "2026-10-31"
 relatedCode:
   - packages/shared/src/types/session-access.ts
   - packages/control-plane/src/session/session-target-secrets.ts
@@ -15,6 +15,7 @@ relatedCode:
   - packages/shared/src/triggers/types.ts
   - docs/HOW_IT_WORKS.md
   - docs/AUTH.md
+  - docs/MEMORY.md
 ---
 
 This page defines the terms you will meet everywhere else in these docs.
@@ -51,7 +52,7 @@ Learn more: [Follow-ups and stopping](/sessions/follow-ups-and-stopping).
 
 ## Harness
 
-The harness is the agent program that runs inside the sandbox. **OpenCode** is the default and runs every enabled model. **Claude Agent** runs Anthropic models only and can use a connected Claude account instead of an API key. Every session runs on exactly one harness, chosen at creation and fixed for its life; child sessions inherit it. Slack, GitHub, and Linear launches use the harness chosen in their integration settings (OpenCode by default; Slack users can pick their own in App Home), and automations let you choose OpenCode or Claude Agent.
+The harness is the agent program that runs inside the sandbox. **OpenCode** is the default and runs every enabled model. **Claude Agent** runs Anthropic models only and can use a connected Claude account instead of an API key. **Codex** runs OpenAI models that support it, with an OpenAI API key or a connected ChatGPT account. Every session runs on exactly one harness, chosen at creation and fixed for its life; child sessions inherit it. Slack, GitHub, and Linear launches use the harness chosen in their integration settings (OpenCode by default; Slack users can pick their own in App Home), and automations let you choose any of the three.
 
 Learn more: [Agent harnesses](/models/agent-harnesses).
 
@@ -67,6 +68,12 @@ A managed skill is a reusable instruction file, with optional supporting files, 
 
 Learn more: [Managed skills](/configure/managed-skills).
 
+## Memory
+
+A memory is a fact or a directive that carries knowledge between sessions without changing repository files. Memories belong to you personally, to a repository, or to an environment. Directives are given to the agent in full; facts appear as a catalog the agent reads from when relevant. Active memories that apply are pinned when a session is created. Agents can propose new memories, which usually wait for your approval, or for approval by someone who manages the repository or environment.
+
+Learn more: [Memories](/configure/memories).
+
 ## Automation
 
 An automation starts a new session without a person typing a prompt. Its trigger is a cron schedule or an event: an inbound webhook, a GitHub event, a Slack message, or a Sentry alert. The automation carries the target, harness, model, and instructions for the sessions it creates. It has workspace or team ownership and a separate executor identity. Run history links to sessions only when you can read them.
@@ -75,7 +82,7 @@ Learn more: [Automations](/automations).
 
 ## Integration
 
-Integrations connect OpenInspect to the tools where work already happens. Slack starts sessions from mentions and messages and posts results back. GitHub reviews pull requests, answers @mentions, and can feed pull request feedback back into the session that opened it. Linear starts sessions from issue activity. Sessions created this way are the same sessions you see on the web.
+Integrations connect OpenInspect to the tools where work already happens. Slack starts sessions from mentions and messages and posts results back. GitHub reviews pull requests, answers @mentions, and can feed pull request feedback back into the session that opened it. Linear starts sessions from issue activity. Sessions created this way are the same sessions you see on the web. The [MCP server](/integrations/mcp-server) works the other way: it lets your own MCP client read sessions and automation runs through a [personal access token](/integrations/personal-access-tokens).
 
 Learn more: [Integrations](/integrations).
 
@@ -87,7 +94,7 @@ Learn more: [Reviewing changes](/sessions/reviewing-changes).
 
 ## Participant and attribution
 
-A participant is anyone who has joined a session. Every prompt is tagged with its author. Commits use that person's source-control identity when available; otherwise they use the configured git user, or the signing account if commit signing is enabled. With signing enabled, the signing account is the committer. A GitHub pull request is created as the prompting user when their OAuth token is resolved, or as the App when no token is returned. Participation records who contributed; it does not grant or remove access.
+A participant is anyone who has joined a session. Every prompt is tagged with its author. Commits use that person's source-control identity when available; otherwise they use the configured git user, or the signing account if commit signing is enabled. With signing enabled, the signing account is the committer. A GitHub pull request is created as the prompting user when their OAuth token is resolved, or as the App when no token is returned. A pull request opened by an automation run's own prompt is always created as the App. Participation records who contributed; it does not grant or remove access.
 
 Learn more: [Multiplayer and sharing](/sessions/multiplayer-and-sharing).
 

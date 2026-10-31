@@ -24,6 +24,7 @@ const finalSnapshotBufferMsSchema = z
 const promptAuthorSchema = z.object({
   userId: z.string(),
   canonicalUserId: z.string().nullable().optional(),
+  mcpEligible: z.boolean().optional(),
   scmUserId: z.string().nullable(),
   scmLogin: z.string().nullable(),
   scmName: z.string().nullable(),
@@ -42,6 +43,12 @@ export const spawnContextSchema = z.object({
   sandboxTimeoutMs: sandboxTimeoutMsSchema.optional(),
   finalSnapshotBufferMs: finalSnapshotBufferMsSchema.optional(),
   promptAuthor: promptAuthorSchema,
+  /**
+   * The account the spawning prompt was queued under; null for an Autofix turn or an author
+   * without an account, and absent from a parent that predates it. Only this account's personal
+   * memory may carry over to the child.
+   */
+  promptAccountUserId: z.string().nullable().optional(),
 });
 
 export type SpawnContext = z.infer<typeof spawnContextSchema>;

@@ -57,12 +57,17 @@ app.post("/webhooks/github", async (c) => {
   if (deliveryId) {
     claimToken = crypto.randomUUID();
     const claimResult = await deliveryDedupe.claim(deliveryId, claimToken);
-    if (claimResult === "duplicate") {
+    if (claimResult !== "claimed") {
       log.info("webhook.duplicate_delivery", {
         delivery_id: deliveryId,
         event_type: event,
         dedupe_backend: "d1",
+        dedupe_status: claimResult,
       });
+      // The first attempt may still release its claim, so don't acknowledge this one yet.
+      if (claimResult === "processing") {
+        return c.json({ error: "Delivery still processing" }, 503);
+      }
       return c.json({ ok: true, duplicate: true });
     }
   } else {
@@ -93,10 +98,12 @@ app.post("/webhooks/github", async (c) => {
     botUsername: c.env.GITHUB_BOT_USERNAME,
     receivedAt: new Date(),
   });
+  let autofixEnqueueFailed = false;
   if (autofixEnvelope) {
     try {
       await c.env.AUTOFIX_QUEUE.send(autofixEnvelope);
     } catch (err) {
+      autofixEnqueueFailed = true;
       log.error("webhook.autofix_queue_failed", {
         trace_id: traceId,
         delivery_id: deliveryId,
@@ -105,10 +112,27 @@ app.post("/webhooks/github", async (c) => {
     }
   }
 
+  const clearDedupeMarker = async () => {
+    if (!deliveryId || !claimToken) return;
+    try {
+      await deliveryDedupe.release(deliveryId, claimToken);
+    } catch (err) {
+      log.warn("webhook.dedupe_clear_failed", {
+        trace_id: traceId,
+        delivery_id: deliveryId,
+        dedupe_backend: "d1",
+        error: err instanceof Error ? err : new Error(String(err)),
+      });
+    }
+  };
+
   c.executionCtx.waitUntil(
     handleWebhook(c.env, log, event, payload, traceId, deliveryId)
       .then(async () => {
         if (!deliveryId || !claimToken) return;
+        // Keep the in-flight lease until dispatch settles, then leave the delivery
+        // redeliverable; its dispatch checkpoint prevents a second session.
+        if (autofixEnqueueFailed) return clearDedupeMarker();
 
         try {
           await deliveryDedupe.markProcessed(deliveryId, claimToken);
@@ -122,18 +146,7 @@ app.post("/webhooks/github", async (c) => {
         }
       })
       .catch(async (err) => {
-        if (deliveryId && claimToken) {
-          try {
-            await deliveryDedupe.release(deliveryId, claimToken);
-          } catch (deleteErr) {
-            log.warn("webhook.dedupe_clear_failed", {
-              trace_id: traceId,
-              delivery_id: deliveryId,
-              dedupe_backend: "d1",
-              error: deleteErr instanceof Error ? deleteErr : new Error(String(deleteErr)),
-            });
-          }
-        }
+        await clearDedupeMarker();
 
         log.error("webhook.processing_error", {
           trace_id: traceId,
@@ -143,6 +156,8 @@ app.post("/webhooks/github", async (c) => {
       })
   );
 
+  // GitHub does not retry failed deliveries; a 5xx marks this one for manual redelivery.
+  if (autofixEnqueueFailed) return c.json({ error: "Autofix enqueue failed" }, 503);
   return c.json({ ok: true });
 });
 

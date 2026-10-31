@@ -11,6 +11,7 @@ import type { PermissionId } from "@open-inspect/shared/rbac";
 import type { ServiceName } from "@open-inspect/shared/service-auth";
 import type { TeamAdmissionNeed, TeamAdmissionRequirement } from "../routing/team-admission";
 import type { SessionAction } from "@open-inspect/shared";
+import type { ActorProfileClaims } from "@open-inspect/shared/types/actors";
 import {
   createSourceControlProviderFromEnv,
   SourceControlProviderError,
@@ -22,13 +23,6 @@ import {
 export type { AutomationRouteAdmission, RequestContext } from "../http/request-context";
 export { error, HttpError, json } from "../http/responses";
 
-/** Profile data a route can extract from an already verified service request. */
-export interface ServiceActorProfileClaims {
-  displayName?: string;
-  email?: string;
-  avatarUrl?: string;
-}
-
 /**
  * Outcome of preparing a route's actor claims. For an unknown actor a rejected
  * body ends admission with the route's own response, so no user, identity, or
@@ -36,7 +30,7 @@ export interface ServiceActorProfileClaims {
  * actor's request continues to the handler with nothing written.
  */
 export type ServiceActorClaimsResult =
-  { kind: "claims"; claims: ServiceActorProfileClaims } | { kind: "rejected"; response: Response };
+  { kind: "claims"; claims: ActorProfileClaims } | { kind: "rejected"; response: Response };
 
 /** One permission or resource-admission requirement for an active user. */
 export type RouteAuthorizationRequirement =
@@ -141,6 +135,8 @@ const AUDITED_ALLOWED_PERMISSIONS = new Set<PermissionId>([
   "memories.manage_own",
   "skills.manage",
   "workspace.members.manage",
+  "workspace.members.merge",
+  "workspace.personal_access_tokens.manage",
   "workspace.transfer_ownership",
 ]);
 
@@ -297,7 +293,10 @@ type UserPrincipal = Extract<Principal, { kind: "user" }>;
 type SandboxPrincipal = Extract<Principal, { kind: "sandbox" }>;
 type ServicePrincipal = Extract<Principal, { kind: "service" }>;
 type WebServicePrincipal = Omit<ServicePrincipal, "service"> & { service: "web" };
-type UserOrServicePrincipal = Exclude<Principal, SandboxPrincipal>;
+export type PersonalAccessTokenPrincipal = Extract<Principal, { kind: "personal-access-token" }>;
+/** Principals a route admits by its authentication kind alone; tokens are admitted only by opt-in. */
+type AuthenticatedPrincipal = Exclude<Principal, PersonalAccessTokenPrincipal>;
+type UserOrServicePrincipal = Exclude<AuthenticatedPrincipal, SandboxPrincipal>;
 
 /** Raw path parameters of the selected route, keyed by parameter name. */
 export type RouteParams = Readonly<Record<string, string>>;
@@ -316,28 +315,52 @@ export type RouteAuthentication =
   | ({ kind: "sandbox" } & SandboxSessionBinding)
   | ({ kind: "user-or-service-with-sandbox-fallback" } & SandboxSessionBinding);
 
-export type RouteContext<Authentication extends RouteAuthentication> = RequestContext & {
-  principal: Authentication extends { kind: "user" }
-    ? UserPrincipal
-    : Authentication extends { kind: "sandbox" }
-      ? SandboxPrincipal
-      : Authentication extends { kind: "web-service" }
-        ? WebServicePrincipal
-        : Authentication extends { kind: "service" }
-          ? ServicePrincipal
-          : Authentication extends { kind: "user-or-service" }
-            ? UserOrServicePrincipal
-            : Authentication extends { kind: "user-or-service-with-sandbox-fallback" }
-              ? Principal
-              : Principal | undefined;
+type RoutePrincipal<Authentication extends RouteAuthentication> = Authentication extends {
+  kind: "user";
+}
+  ? UserPrincipal
+  : Authentication extends { kind: "sandbox" }
+    ? SandboxPrincipal
+    : Authentication extends { kind: "web-service" }
+      ? WebServicePrincipal
+      : Authentication extends { kind: "service" }
+        ? ServicePrincipal
+        : Authentication extends { kind: "user-or-service" }
+          ? UserOrServicePrincipal
+          : Authentication extends { kind: "user-or-service-with-sandbox-fallback" }
+            ? AuthenticatedPrincipal
+            : AuthenticatedPrincipal | undefined;
+
+/**
+ * The context a handler sees behind a route policy. A route that accepts personal access tokens
+ * widens its principal to include them, so its handlers cannot compile against a browser user
+ * they might not have.
+ */
+export type RouteContext<
+  Authentication extends RouteAuthentication,
+  PersonalAccessTokens extends PersonalAccessTokenAdmission | undefined = undefined,
+> = RequestContext & {
+  principal: PersonalAccessTokens extends "accept"
+    ? RoutePrincipal<Authentication> | PersonalAccessTokenPrincipal
+    : RoutePrincipal<Authentication>;
 };
 
 export type UserRouteContext = RouteContext<{ kind: "user" }>;
 export type SandboxRouteContext = RouteContext<{ kind: "sandbox" } & SandboxSessionBinding>;
 
+/** Whether a route admits personal access tokens. Omitted, it refuses them. */
+export type PersonalAccessTokenAdmission = "accept";
+
 export interface RoutePolicy {
   authentication: RouteAuthentication;
   supportedScmProviders: "all" | readonly SourceControlProviderName[];
+  /**
+   * Admit personal access tokens, which then act with their owner's permissions narrowed to the
+   * token's grant. Only an active-user route gated by a permission a token can be granted may
+   * declare it; `admit()` refuses any other policy when the app is built. Omitted, the route
+   * refuses tokens whatever else it accepts.
+   */
+  personalAccessTokens?: PersonalAccessTokenAdmission;
 }
 
 /** Framework-neutral policy consumed by request admission. */

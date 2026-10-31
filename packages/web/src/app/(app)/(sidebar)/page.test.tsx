@@ -429,6 +429,24 @@ describe("Home", () => {
     expect(localStorage.getItem("open-inspect-last-provider-selections:v1")).toBe("{}");
   });
 
+  it("keeps Send disabled until model preferences load", async () => {
+    mocks.enabledModelsLoadingValue = true;
+    const user = userEvent.setup();
+    const view = render(<Home />);
+
+    await user.type(screen.getByPlaceholderText("What do you want to build?"), "Continue work");
+    const send = screen.getByRole("button", { name: /send/i });
+    expect(send).toBeDisabled();
+    fireEvent.click(send);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalledWith("/api/sessions", expect.anything());
+
+    mocks.enabledModelsLoadingValue = false;
+    view.rerender(<Home />);
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(sessionCreateBody()).toMatchObject({ model: DEFAULT_MODEL }));
+  });
+
   it("waits for environments to load before restoring a stored environment", async () => {
     localStorage.setItem("open-inspect-last-selected-repo", "env:env-1");
     mocks.environmentsLoadingValue = true;
@@ -493,6 +511,26 @@ describe("Home", () => {
     render(<Home />);
 
     await screen.findByRole("button", { name: /docs/i });
+  });
+
+  it("requests the skill preview for the stored target before showing its count", async () => {
+    localStorage.setItem("open-inspect-last-selected-repo", "open-inspect/background-agents");
+    mocks.reposValue = [];
+    mocks.loadingReposValue = true;
+    const { rerender } = render(<Home />);
+
+    expect(mocks.skillResolutionPreview).toHaveBeenLastCalledWith(
+      { repoOwner: "open-inspect", repoName: "background-agents" },
+      { mode: "all" }
+    );
+    expect(screen.getByRole("button", { name: /all skills/i })).not.toHaveTextContent("(1)");
+
+    mocks.reposValue = [repo];
+    mocks.loadingReposValue = false;
+    rerender(<Home />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /all skills/i })).toHaveTextContent("(1)")
+    );
   });
 
   it("surfaces the error and stays put when the initial prompt fails", async () => {

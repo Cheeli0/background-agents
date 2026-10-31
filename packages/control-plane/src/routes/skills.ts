@@ -1,6 +1,8 @@
 import { parseBody } from "./body";
 import { Hono } from "hono";
 import {
+  bulkImportSkillsInputSchema,
+  bulkSkillImportPreviewInputSchema,
   createSkillInputSchema,
   createSkillProfileInputSchema,
   importSkillInputSchema,
@@ -23,6 +25,7 @@ import {
   SkillProfileValidationError,
 } from "../db/skill-profiles";
 import { SkillConflictError, SkillStore, SkillValidationError } from "../db/skills";
+import { canonicalUserIdOf } from "../auth/principal";
 import {
   evaluateEnvironmentAdmission,
   ownedResourceAdmissionResponse,
@@ -36,10 +39,13 @@ import {
   SkillRevisionValidationError,
 } from "../skills/content-addressing";
 import {
+  fetchBulkSkillImport,
+  fetchSelectedBulkSkillImport,
   fetchSkillImport,
   resolveSkillImportRepository,
   SkillImportError,
   type SkillImportResult,
+  sourceMovedError,
 } from "../skills/git-import";
 import { admit, dispatch } from "../routing/admit";
 import type { ControlPlaneHonoEnv } from "../routing/hono-env";
@@ -89,17 +95,11 @@ type SkillAuditEvent =
 function audit(ctx: RequestContext, event: SkillAuditEvent): void {
   log.info("managed_skills.audit", {
     event: "managed_skills.audit",
-    actor_user_id: canonicalUserId(ctx),
+    actor_user_id: canonicalUserIdOf(ctx.principal),
     request_id: ctx.request_id,
     trace_id: ctx.trace_id,
     ...event,
   });
-}
-
-function canonicalUserId(ctx: RequestContext): string | null {
-  if (ctx.principal?.kind === "user") return ctx.principal.userId;
-  if (ctx.principal?.kind === "service") return ctx.principal.actor?.canonicalUserId ?? null;
-  return null;
 }
 
 const skillListQuerySchema = z.object({
@@ -151,7 +151,7 @@ async function handleCreateSkill(
   _params: object,
   ctx: RequestContext
 ): Promise<Response> {
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   const parsed = await parseBody(request, createSkillInputSchema, "Invalid skill");
   if (parsed instanceof Response) return parsed;
@@ -200,19 +200,29 @@ async function authorizeSkillRepositories(
   return authorizeWorkspaceRepositories(ctx, { repositories: resolved });
 }
 
-async function fetchAuthorizedSkillImport(
+async function authorizedImportRepository(
   env: Env,
   ctx: RequestContext,
-  source: SkillImportSourceInput,
-  name?: string | null
-): Promise<SkillImportResult | Response> {
+  source: SkillImportSourceInput
+) {
   const provider = createRouteSourceControlProvider(env);
   const resolved = await resolveSkillImportRepository(provider, source);
   const denied = await authorizeWorkspaceRepositories(ctx, {
     repositories: [{ owner: resolved.repoOwner, name: resolved.repoName, repoId: resolved.repoId }],
   });
-  if (denied) return denied;
-  return fetchSkillImport(provider, source, name, resolved);
+  return denied ?? { provider, resolved };
+}
+
+async function fetchAuthorizedSkillImport(
+  env: Env,
+  ctx: RequestContext,
+  source: SkillImportSourceInput,
+  name?: string | null,
+  expectedCommitSha?: string
+): Promise<SkillImportResult | Response> {
+  const access = await authorizedImportRepository(env, ctx, source);
+  if (access instanceof Response) return access;
+  return fetchSkillImport(access.provider, source, name, access.resolved, expectedCommitSha);
 }
 
 async function handlePreviewSkill(
@@ -242,15 +252,11 @@ async function handlePreviewSkill(
 /**
  * Shape one fetched import as its preview, including whether the canonical
  * name is still free so the importer can override it before confirming.
- *
- * @param heldByName - Name the target skill already holds, on a re-import;
- *   that name is available to it even though the catalog has it taken.
  */
-async function importPreviewResponse(
-  ctx: RequestContext,
+function importPreviewResponse(
   result: SkillImportResult,
-  heldByName?: string
-): Promise<SkillImportPreviewResponse> {
+  nameAvailable: boolean
+): SkillImportPreviewResponse {
   return {
     name: result.name,
     source: result.source,
@@ -263,8 +269,7 @@ async function importPreviewResponse(
     totalBytes: result.totalBytes,
     files: result.files,
     warnings: result.warnings,
-    nameAvailable:
-      result.name === heldByName || (await new SkillStore(ctx.db).nameAvailable(result.name)),
+    nameAvailable,
   };
 }
 
@@ -282,10 +287,7 @@ function confirmedImport(
   }
 ): Response | null {
   if (result.source.commitSha !== expected.expectedCommitSha) {
-    return error(
-      `The source moved to commit ${result.source.commitSha} since it was previewed. Preview the import again.`,
-      409
-    );
+    return skillImportWriteError(sourceMovedError(result.source.commitSha));
   }
   if (result.source.sourceSha256 !== expected.expectedSourceSha256) {
     return error("The source content changed since it was previewed. Preview again.", 409);
@@ -311,7 +313,9 @@ async function handlePreviewSkillImport(
   try {
     const result = await fetchAuthorizedSkillImport(env, ctx, parsed.source, parsed.name);
     if (result instanceof Response) return result;
-    return json(await importPreviewResponse(ctx, result));
+    return json(
+      importPreviewResponse(result, await new SkillStore(ctx.db).nameAvailable(result.name))
+    );
   } catch (e) {
     return skillImportWriteError(e);
   }
@@ -323,7 +327,7 @@ async function handleImportSkill(
   _params: object,
   ctx: RequestContext
 ): Promise<Response> {
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   const parsed = await parseBody(request, importSkillInputSchema, "Invalid skill import");
   if (parsed instanceof Response) return parsed;
@@ -336,7 +340,14 @@ async function handleImportSkill(
   );
   if (denied) return denied;
   try {
-    const result = await fetchAuthorizedSkillImport(env, ctx, parsed.source, parsed.name);
+    // A moved ref fails before the skill is listed or read, as in the collection confirm.
+    const result = await fetchAuthorizedSkillImport(
+      env,
+      ctx,
+      parsed.source,
+      parsed.name,
+      parsed.expectedCommitSha
+    );
     if (result instanceof Response) return result;
     const stale = confirmedImport(result, parsed);
     if (stale) return stale;
@@ -353,6 +364,117 @@ async function handleImportSkill(
       ...sourceAuditFields(result.source),
     });
     return json({ skill }, 201);
+  } catch (e) {
+    return skillImportWriteError(e);
+  }
+}
+
+async function handlePreviewBulkSkillImport(
+  request: Request,
+  env: Env,
+  _params: object,
+  ctx: RequestContext
+): Promise<Response> {
+  const parsed = await parseBody(
+    request,
+    bulkSkillImportPreviewInputSchema,
+    "Invalid bulk skill import source"
+  );
+  if (parsed instanceof Response) return parsed;
+  try {
+    const access = await authorizedImportRepository(env, ctx, parsed.source);
+    if (access instanceof Response) return access;
+    const result = await fetchBulkSkillImport(access.provider, parsed.source, access.resolved);
+    const nameCounts = new Map<string, number>();
+    for (const skill of result.skills) {
+      nameCounts.set(skill.name, (nameCounts.get(skill.name) ?? 0) + 1);
+    }
+    const unavailableNames = await new SkillStore(ctx.db).unavailableNames(
+      result.skills.map((skill) => skill.name)
+    );
+    const skills = result.skills.map((skill) =>
+      importPreviewResponse(
+        skill,
+        nameCounts.get(skill.name) === 1 && !unavailableNames.has(skill.name)
+      )
+    );
+    return json({
+      skills,
+      commitSha: result.commitSha,
+      totalFiles: result.totalFiles,
+      totalBytes: result.totalBytes,
+    });
+  } catch (e) {
+    return skillImportWriteError(e);
+  }
+}
+
+async function handleBulkSkillImport(
+  request: Request,
+  env: Env,
+  _params: object,
+  ctx: RequestContext
+): Promise<Response> {
+  const userId = canonicalUserIdOf(ctx.principal);
+  if (!userId) return error("Canonical user required", 403);
+  const parsed = await parseBody(request, bulkImportSkillsInputSchema, "Invalid bulk skill import");
+  if (parsed instanceof Response) return parsed;
+  const denied = await authorizeSkillRepositories(
+    env,
+    ctx,
+    parsed.assignments.flatMap((assignment) =>
+      assignment.type === "repository" ? [assignment.repository] : []
+    )
+  );
+  if (denied) return denied;
+  try {
+    const access = await authorizedImportRepository(env, ctx, parsed.source);
+    if (access instanceof Response) return access;
+    // Only the selected roots are read, in request order, after the commit is confirmed.
+    const { skills: selected } = await fetchSelectedBulkSkillImport(
+      access.provider,
+      parsed.source,
+      {
+        expectedCommitSha: parsed.expectedCommitSha,
+        subdirectories: parsed.skills.map((skill) => skill.subdirectory),
+      },
+      access.resolved
+    );
+    for (const [index, reviewed] of parsed.skills.entries()) {
+      const fetched = selected[index];
+      if (fetched.name !== reviewed.name) {
+        return error(
+          `The reviewed skill at ${reviewed.subdirectory ?? "repository root"} is now named ${fetched.name}. Preview again.`,
+          409
+        );
+      }
+      const stale = confirmedImport(fetched, {
+        expectedCommitSha: parsed.expectedCommitSha,
+        expectedSourceSha256: reviewed.expectedSourceSha256,
+        expectedRevisionSha256: reviewed.expectedRevisionSha256,
+      });
+      if (stale) return stale;
+    }
+
+    const skills = await new SkillStore(ctx.db).createImportedSkills(
+      selected.map((skill) => ({
+        name: skill.name,
+        content: skill.content,
+        source: skill.source,
+      })),
+      parsed.assignments,
+      userId
+    );
+    for (const [index, skill] of skills.entries()) {
+      audit(ctx, {
+        action: "skill.imported",
+        skill_id: skill.id,
+        revision_id: skill.currentRevisionId,
+        revision_created: true,
+        ...sourceAuditFields(selected[index].source),
+      });
+    }
+    return json({ skills }, 201);
   } catch (e) {
     return skillImportWriteError(e);
   }
@@ -407,7 +529,10 @@ async function handlePreviewSkillReimport(
     if (source instanceof Response) return source;
     const result = await fetchAuthorizedSkillImport(env, ctx, source, skill.name);
     if (result instanceof Response) return result;
-    return json(await importPreviewResponse(ctx, result, skill.name));
+    // The target already holds its own name, so that name stays available to it.
+    const nameAvailable =
+      result.name === skill.name || (await new SkillStore(ctx.db).nameAvailable(result.name));
+    return json(importPreviewResponse(result, nameAvailable));
   } catch (e) {
     return skillImportWriteError(e);
   }
@@ -420,7 +545,7 @@ async function handleReimportSkill(
   ctx: RequestContext
 ): Promise<Response> {
   const { id } = params;
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   const ifMatch = request.headers.get("If-Match")?.replace(/^"|"$/g, "");
   if (!ifMatch) return error("If-Match revision is required", 428);
@@ -479,7 +604,7 @@ async function handleSetSkillEnabled(
   ctx: RequestContext
 ): Promise<Response> {
   const { id } = params;
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   const parsed = await parseBody(request, setSkillEnabledInputSchema, "Invalid skill update");
   if (parsed instanceof Response) return parsed;
@@ -499,7 +624,7 @@ async function handleReplaceSkillContentAndAssignments(
   ctx: RequestContext
 ): Promise<Response> {
   const { id } = params;
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   const ifMatch = request.headers.get("If-Match")?.replace(/^"|"$/g, "");
   if (!ifMatch) return error("If-Match revision is required", 428);
@@ -543,7 +668,7 @@ async function handleDeleteSkill(
   ctx: RequestContext
 ): Promise<Response> {
   const { id } = params;
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   const deleted = await new SkillStore(ctx.db).delete(id, userId);
   if (deleted) audit(ctx, { action: "skill.deleted", skill_id: id });
@@ -556,7 +681,7 @@ async function handleListProfiles(
   _params: object,
   ctx: RequestContext
 ): Promise<Response> {
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   return json({ profiles: await new SkillProfileStore(ctx.db).list(userId) });
 }
@@ -567,7 +692,7 @@ async function handleCreateProfile(
   _params: object,
   ctx: RequestContext
 ): Promise<Response> {
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   const parsed = await parseBody(request, createSkillProfileInputSchema, "Invalid skill profile");
   if (parsed instanceof Response) return parsed;
@@ -592,7 +717,7 @@ async function handleUpdateProfile(
   ctx: RequestContext
 ): Promise<Response> {
   const { id } = params;
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   const parsed = await parseBody(request, updateSkillProfileInputSchema, "Invalid skill profile");
   if (parsed instanceof Response) return parsed;
@@ -612,7 +737,7 @@ async function handleDeleteProfile(
   ctx: RequestContext
 ): Promise<Response> {
   const { id } = params;
-  const userId = canonicalUserId(ctx);
+  const userId = canonicalUserIdOf(ctx.principal);
   if (!userId) return error("Canonical user required", 403);
   const deleted = await new SkillProfileStore(ctx.db).delete(id, userId);
   if (deleted) audit(ctx, { action: "profile.deleted", profile_id: id });
@@ -652,7 +777,7 @@ async function handleResolvePreview(
       ctx.db,
       { repositories, environmentId: parsed.environmentId ?? null },
       parsed.selection,
-      canonicalUserId(ctx)
+      canonicalUserIdOf(ctx.principal)
     );
     return json({
       skills: manifest.skills,
@@ -688,9 +813,24 @@ const SKILLS_READ = admit({
   ...SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   authorization: requirePermission("skills.read"),
 });
+/** Reading the catalog, which a personal access token granted `skills.read` may also do. */
+const SKILLS_READ_FOR_TOKENS = admit({
+  ...SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
+  authorization: requirePermission("skills.read"),
+  personalAccessTokens: "accept",
+});
 const SKILLS_MANAGE = admit({
   ...SCM_AGNOSTIC_HUMAN_USER_ROUTE,
   authorization: requirePermission("skills.manage"),
+});
+/**
+ * Importing a skill from Git and re-importing it, which a personal access token granted
+ * `skills.manage` may also do. Bulk import, hand edits, enablement, and deletion stay human-only.
+ */
+const SKILLS_IMPORT = admit({
+  ...SCM_AGNOSTIC_HUMAN_USER_ROUTE,
+  authorization: requirePermission("skills.manage"),
+  personalAccessTokens: "accept",
 });
 const PROFILES_MANAGE_OWN = admit({
   ...SCM_AGNOSTIC_HUMAN_USER_ROUTE,
@@ -706,20 +846,24 @@ export const skillRoutes = new Hono<ControlPlaneHonoEnv>();
 
 // Read routes register ahead of administration so `/skills/preview` and
 // `/skills/resolve-preview` take precedence over the parameterized paths.
-skillRoutes.get("/skills", SKILLS_READ, (c) => dispatch(c, handleListSkills));
+skillRoutes.get("/skills", SKILLS_READ_FOR_TOKENS, (c) => dispatch(c, handleListSkills));
 skillRoutes.post("/skills/preview", SKILLS_READ, (c) => dispatch(c, handlePreviewSkill));
 skillRoutes.post("/skills/resolve-preview", SKILLS_READ, (c) => dispatch(c, handleResolvePreview));
-skillRoutes.get("/skills/:id", SKILLS_READ, (c) => dispatch(c, handleGetSkill));
+skillRoutes.get("/skills/:id", SKILLS_READ_FOR_TOKENS, (c) => dispatch(c, handleGetSkill));
 
 skillRoutes.post("/skills", SKILLS_MANAGE, (c) => dispatch(c, handleCreateSkill));
-skillRoutes.post("/skills/import/preview", SKILLS_MANAGE, (c) =>
+skillRoutes.post("/skills/import/bulk/preview", SKILLS_MANAGE, (c) =>
+  dispatch(c, handlePreviewBulkSkillImport)
+);
+skillRoutes.post("/skills/import/bulk", SKILLS_MANAGE, (c) => dispatch(c, handleBulkSkillImport));
+skillRoutes.post("/skills/import/preview", SKILLS_IMPORT, (c) =>
   dispatch(c, handlePreviewSkillImport)
 );
-skillRoutes.post("/skills/import", SKILLS_MANAGE, (c) => dispatch(c, handleImportSkill));
-skillRoutes.post("/skills/:id/reimport/preview", SKILLS_MANAGE, (c) =>
+skillRoutes.post("/skills/import", SKILLS_IMPORT, (c) => dispatch(c, handleImportSkill));
+skillRoutes.post("/skills/:id/reimport/preview", SKILLS_IMPORT, (c) =>
   dispatch(c, handlePreviewSkillReimport)
 );
-skillRoutes.post("/skills/:id/reimport", SKILLS_MANAGE, (c) => dispatch(c, handleReimportSkill));
+skillRoutes.post("/skills/:id/reimport", SKILLS_IMPORT, (c) => dispatch(c, handleReimportSkill));
 skillRoutes.patch("/skills/:id", SKILLS_MANAGE, (c) => dispatch(c, handleSetSkillEnabled));
 skillRoutes.put("/skills/:id", SKILLS_MANAGE, (c) =>
   dispatch(c, handleReplaceSkillContentAndAssignments)

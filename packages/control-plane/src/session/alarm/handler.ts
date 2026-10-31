@@ -6,6 +6,7 @@ import type { SessionMessageQueue } from "../message-queue";
 import type { ExecutionStopCoordinator } from "../execution-stop-coordinator";
 import type { MessageRepository } from "../message-repository";
 import type { SessionTerminalMessageProjection } from "../terminal-message-projection";
+import { applySandboxRecovery } from "../sandbox-recovery";
 
 /** A prompt the lifecycle alarm interrupted; the watchdog names the cause when it has one. */
 const SANDBOX_INTERRUPTED_ERROR =
@@ -13,7 +14,10 @@ const SANDBOX_INTERRUPTED_ERROR =
 
 export interface AlarmHandlerDeps {
   preserveBeforeWatchdogs?: (allowCaptureRetry: boolean) => Promise<"continue" | "hold_watchdogs">;
-  repository: MessageRepository;
+  repository: Pick<
+    MessageRepository,
+    "getProcessingMessageWithStartedAt" | "getNextPendingMessage"
+  >;
   messageQueue: Pick<SessionMessageQueue, "failStuckProcessingMessage" | "failPendingMessage">;
   executionStop: Pick<
     ExecutionStopCoordinator,
@@ -107,17 +111,8 @@ export function createAlarmHandler(deps: AlarmHandlerDeps): AlarmHandler {
           heartbeatLost?.reason ?? SANDBOX_INTERRUPTED_ERROR
         );
       }
-      // A lost heartbeat whose save holds the source fails the prompt but wakes
-      // nothing: the hold parks the queue until recovery, and a pending stop
-      // confirmation times out on its own.
-      if (lifecycleResult === "sandbox_terminated") {
-        await deps.executionStop.resumeAfterSandboxTermination();
-      }
-      if (bootPrompt && typeof lifecycleResult === "object" && !heartbeatLost) {
-        // The boot was for that prompt; it fails with the same words the user
-        // sees, and nothing re-drives it onto a fresh sandbox.
-        await deps.messageQueue.failPendingMessage(bootPrompt.id, lifecycleResult.reason);
-      } else if (bootPrompt && lifecycleResult === "no_action") {
+      await applySandboxRecovery(deps, bootPrompt, lifecycleResult);
+      if (bootPrompt && lifecycleResult === "no_action") {
         // Fork-only: a launch whose provider create failed, or that the
         // circuit breaker refused, leaves a failed row the alarm reads as
         // terminal, and the prompt waits for a socket that never opens. Fail

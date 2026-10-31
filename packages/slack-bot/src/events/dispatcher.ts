@@ -2,7 +2,11 @@ import { publishAppHome } from "../app-home";
 import { handleChannelTrigger } from "../channel-trigger";
 import { isDmDispatchable } from "../dm-utils";
 import type { BackgroundTaskScheduler, Env } from "../types";
-import { handleAppMention, handleDirectMessage } from "./message-handler";
+import {
+  handleAppMention,
+  handleDirectMessage,
+  handleUntaggedThreadReply,
+} from "./message-handler";
 import type { SlackEventPayload } from "./payload";
 
 /**
@@ -19,7 +23,13 @@ export async function handleSlackEvent(
 ): Promise<void> {
   if (payload.type !== "event_callback" || !payload.event) return;
   const event = payload.event;
-  if (event.bot_id) return;
+  if (event.bot_id) {
+    // Bots never reach the DM, mention or App Home paths. A bot's channel message
+    // may still trigger an automation that opted in to bot messages; the channel
+    // trigger excludes this bot's own posts.
+    if (event.type === "message") await handleChannelTrigger(event, env, traceId);
+    return;
+  }
   if (event.type === "app_home_opened" && event.tab === "home" && event.user) {
     await publishAppHome(env, event.user);
     return;
@@ -62,5 +72,7 @@ export async function handleSlackEvent(
     );
     return;
   }
-  if (event.type === "message") await handleChannelTrigger(event, env, traceId);
+  if (event.type !== "message") return;
+  if (await handleUntaggedThreadReply(event, env, traceId, scheduleBackground)) return;
+  await handleChannelTrigger(event, env, traceId);
 }

@@ -4,7 +4,7 @@ description: Symptom-keyed fixes for starting sessions, running them, reviewing 
 audience: user
 owner: platform
 status: published
-lastReviewed: "2026-09-28"
+lastReviewed: "2026-10-31"
 relatedCode:
   - docs/HOW_IT_WORKS.md
   - docs/SECRETS.md
@@ -28,7 +28,7 @@ Cause: your account is outside the workspace allowlist, or your membership was s
 
 Check, in order:
 
-1. Ask a workspace Owner or Administrator whether your user, email, email domain, or GitHub organization is allowed.
+1. Ask a workspace Owner or Administrator whether your user, email, email domain, or GitHub organization is allowed. They can add it under Settings › Workspace access › **Who can sign in**.
 2. If the deployment allows by GitHub organization, the operator must also grant the GitHub App the organization Members read permission and approve it on the installation.
 3. Ask whether your membership was suspended. Existing sessions and authorship remain intact; only access is removed.
 
@@ -52,7 +52,7 @@ Cause: the model is not enabled in saved model preferences or is not available o
 
 Check, in order:
 
-1. The Claude Agent harness lists Anthropic models only; OpenCode lists every family. See [Agent harnesses](/models/agent-harnesses).
+1. The Claude Agent harness lists Anthropic models only, Codex lists only the OpenAI models that support it, and OpenCode lists every family. See [Agent harnesses](/models/agent-harnesses).
 2. Enable the model or its opt-in group under Settings › Models if it appears in the shared catalog.
 3. Check account or API-key availability separately under Settings › Accounts and Settings › Secrets; rebuilding the image does not change the picker.
 
@@ -64,8 +64,9 @@ Cause: the selected model has no working credential in the session's scope.
 Check, in order:
 
 1. Confirm the provider authentication mode. For provider-account mode, verify the account under Settings › Accounts and its model entitlement.
-2. For API-key mode, add the key under Settings › Secrets in the session's scope: `OPENAI_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `ZHIPU_API_KEY`, or `OPENCODE_API_KEY` (an `opencode-go/*` model also needs an active Go subscription on that key).
+2. For API-key mode, add the key under Settings › Secrets in the session's scope: `OPENAI_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `ZHIPU_API_KEY`, or `OPENCODE_API_KEY` (an `opencode-go/*` model also needs an active Go subscription on that key).
 3. New secrets reach new sandboxes only; start a new session or wait for the current sandbox to stop before retrying.
+4. For a Kimi Coding Plan model, an older prebuilt image may not list it. Rebuild the image (see [Prebuilt images](/configure/prebuilt-images)), then start a new session; an existing session keeps its sandbox's model list.
 
 See [Secrets](/configure/secrets).
 
@@ -98,7 +99,7 @@ Check, in order:
 
 <Accordions>
 <Accordion title="A follow-up was ignored">
-Cause: follow-ups are queued, not injected. Both harnesses hold a follow-up until the running turn completes, and a parent's follow-up never interrupts a child's running turn.
+Cause: follow-ups are queued, not injected. Every harness holds a follow-up until the running turn completes, and a parent's follow-up never interrupts a child's running turn.
 
 Check, in order:
 
@@ -149,13 +150,14 @@ See [Managed skills](/configure/managed-skills).
 </Accordion>
 
 <Accordion title="MCP server tools are missing">
-Cause: the server is disabled, scoped to other repositories, or its local package could not be prepared.
+Cause: the server is disabled or scoped to other repositories, its local package could not be prepared, or a personal server cannot be used in this session.
 
 Check, in order:
 
 1. Under Settings › MCP Servers, confirm the server is **Enabled** and its scope is "All repositories" or includes this session's repository.
 2. For local servers started with `npx`, unversioned packages are refreshed on every sandbox boot; a failed install is retried on the next boot. Pin an exact version in the command and in `.openinspect/setup.sh`, then rebuild the image to preinstall it.
 3. MCP settings are not baked into prebuilt images; a changed pinned version installs at boot until the image is rebuilt.
+4. For a server that uses each user's OAuth connection, connect your account under Settings › Connections, and prompt from the web or Slack in an OpenCode or Claude Agent session on a current image. Turns started by automations, GitHub, or Linear cannot use it. A session that cannot use it shows an `mcp` warning naming the server.
 
 See [MCP servers](/configure/mcp-servers).
 
@@ -179,7 +181,7 @@ See [Reviewing changes](/sessions/reviewing-changes).
 </Accordion>
 
 <Accordion title="The pull request was not created as expected">
-Cause: the PR is created with your GitHub OAuth identity when you signed in with GitHub; otherwise it is created as the GitHub App. A second call from the same branch updates the existing PR instead of opening another.
+Cause: the PR is created with your GitHub OAuth identity when you signed in with GitHub; otherwise it is created as the GitHub App. A pull request an automation run opens from its own prompt is always created as the App. A second call from the same branch updates the existing PR instead of opening another.
 
 Check, in order:
 

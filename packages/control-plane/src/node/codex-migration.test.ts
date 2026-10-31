@@ -50,7 +50,12 @@ it("upgrades a full populated pre-Codex database without rebuilding FK parent ta
     ).toEqual(before);
     expect(db.prepare("SELECT * FROM _schema_migrations WHERE version='0088'").all()).toEqual([]);
     expect(() => db.exec("UPDATE sessions SET harness='codex'")).toThrow();
-    expect(applyMigrations(db, directory)).toContain("0088_codex_harness.sql");
+    // Apply the real 0088 alone: later migrations may add columns to these tables.
+    copyFileSync(
+      join(directory, "0088_codex_harness.sql"),
+      join(baseline, "0088_codex_harness.sql")
+    );
+    expect(applyMigrations(db, baseline)).toContain("0088_codex_harness.sql");
     expect(
       CODEX_MIGRATION_TABLES.map((table) => db.prepare(`SELECT * FROM ${table}`).all())
     ).toEqual(before);

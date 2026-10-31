@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /// <reference types="@testing-library/jest-dom" />
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
@@ -9,6 +9,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsNav } from "./settings-nav";
 import { SettingsViewportProvider } from "./settings-viewport-context";
 import { resolveSettingsCategory } from "./settings-registry";
+import { RouterContext } from "next/dist/shared/lib/router-context.shared-runtime";
+import { SettingsMobileHeader } from "./settings-mobile-header";
+import {
+  SettingsNavigationGuardProvider,
+  useSettingsUnsavedChanges,
+} from "./settings-navigation-guard";
 
 expect.extend(matchers);
 
@@ -38,10 +44,89 @@ vi.mock("@/hooks/use-teams", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   mocks.isMobile = false;
   mocks.repoImagesEnabled = true;
   mocks.allowedPermissions = null;
   mocks.canEditTeam = false;
+});
+
+describe("Settings exit links", () => {
+  it.each(["Back to app", "Close settings"])(
+    "guards %s without blocking modifier or new-tab clicks",
+    (label) => {
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      const router = {
+        route: "/settings",
+        pathname: "/settings",
+        query: {},
+        asPath: "/settings?tab=workspace",
+        basePath: "",
+        isLocaleDomain: false,
+        isReady: true,
+        isPreview: false,
+        isFallback: false,
+        push: vi.fn().mockResolvedValue(true),
+        replace: vi.fn().mockResolvedValue(true),
+        prefetch: vi.fn().mockResolvedValue(undefined),
+        reload: vi.fn(),
+        back: vi.fn(),
+        forward: vi.fn(),
+        beforePopState: vi.fn(),
+        events: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
+      };
+      function Editor() {
+        useSettingsUnsavedChanges(true);
+        return <input aria-label="Draft rule" defaultValue="unfinished@example.com" />;
+      }
+      render(
+        <RouterContext.Provider value={router}>
+          <SettingsNavigationGuardProvider>
+            <Editor />
+            <SettingsViewportProvider value={false}>
+              {label === "Back to app" ? (
+                <SettingsNav activeCategory="workspace" onSelect={vi.fn()} />
+              ) : (
+                <SettingsMobileHeader title="Workspace access" />
+              )}
+            </SettingsViewportProvider>
+          </SettingsNavigationGuardProvider>
+        </RouterContext.Provider>
+      );
+      const link = screen.getByRole("link", { name: label });
+      const prevented: boolean[] = [];
+      const observeBrowserClick = (event: MouseEvent) => {
+        prevented.push(event.defaultPrevented);
+        // Record default handling after React, then suppress jsdom's unsupported navigation.
+        event.preventDefault();
+      };
+      window.addEventListener("click", observeBrowserClick);
+      try {
+        for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey"]) {
+          fireEvent.click(link, { [modifier]: true });
+        }
+        link.setAttribute("target", "_blank");
+        fireEvent.click(link);
+        link.removeAttribute("target");
+      } finally {
+        window.removeEventListener("click", observeBrowserClick);
+      }
+      expect(prevented).toEqual([false, false, false, false, false]);
+      expect(confirm).not.toHaveBeenCalled();
+      expect(router.push).not.toHaveBeenCalled();
+
+      fireEvent.click(link);
+      expect(confirm).toHaveBeenCalledWith("Discard unsaved changes?");
+      expect(router.push).not.toHaveBeenCalled();
+      expect(screen.getByRole("textbox", { name: "Draft rule" })).toHaveValue(
+        "unfinished@example.com"
+      );
+
+      confirm.mockReturnValue(true);
+      fireEvent.click(link);
+      expect(router.push).toHaveBeenCalledOnce();
+    }
+  );
 });
 
 function renderSettingsNav(
@@ -62,6 +147,9 @@ describe("SettingsNav", () => {
 
     expect(resolveSettingsCategory(null, true, hasNoWorkspacePermissions)).toBe("appearance");
     expect(resolveSettingsCategory("secrets", true, hasNoWorkspacePermissions)).toBe("appearance");
+    expect(resolveSettingsCategory("mcp-connections", true, hasNoWorkspacePermissions)).toBe(
+      "mcp-connections"
+    );
     expect(
       resolveSettingsCategory(
         "environments",
@@ -124,6 +212,8 @@ describe("SettingsNav", () => {
     renderSettingsNav({ activeCategory: "appearance" });
 
     expect(screen.getByRole("button", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Keyboard" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connections" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Secrets" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Workspace access" })).not.toBeInTheDocument();
   });

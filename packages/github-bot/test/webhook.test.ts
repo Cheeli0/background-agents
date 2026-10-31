@@ -49,6 +49,11 @@ function createMockD1() {
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...params: unknown[]) => ({
       first: vi.fn(async () => {
+        if (sql.includes("SELECT status FROM github_webhook_deliveries")) {
+          const [deliveryId] = params as [string];
+          const existing = rows.get(deliveryId);
+          return existing ? { status: existing.status } : null;
+        }
         if (!sql.includes("INSERT INTO github_webhook_deliveries")) return null;
 
         const [deliveryId, claimToken, expiresAt, now] = params as [string, string, number, number];
@@ -165,6 +170,7 @@ describe("POST /webhooks/github", () => {
     );
 
     expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
     expect(env.AUTOFIX_QUEUE.send).toHaveBeenCalledOnce();
     expect(env.AUTOFIX_QUEUE.send).toHaveBeenCalledWith({
       version: 1,
@@ -181,6 +187,7 @@ describe("POST /webhooks/github", () => {
       "https://internal/internal/github-event",
       expect.any(Object)
     );
+    expect(env.githubD1.rows.get("delivery-comment-1234")?.status).toBe("processed");
   });
 
   it("does not queue explicit bot mentions for Autofix", async () => {
@@ -330,7 +337,7 @@ describe("POST /webhooks/github", () => {
     expect(env.AUTOFIX_QUEUE.send).not.toHaveBeenCalled();
   });
 
-  it("continues normal webhook handling when Autofix queueing fails", async () => {
+  it("fails a delivery whose Autofix enqueue fails so it can be redelivered", async () => {
     const body = JSON.stringify({
       action: "created",
       issue: {
@@ -362,8 +369,13 @@ describe("POST /webhooks/github", () => {
     const env = makeEnv();
     const ctx = makeCtx();
     vi.mocked(env.AUTOFIX_QUEUE.send).mockRejectedValueOnce(new Error("queue unavailable"));
-
-    const res = await app.fetch(
+    let finishForwarding!: (res: Response) => void;
+    vi.mocked(env.CONTROL_PLANE.fetch).mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        finishForwarding = resolve;
+      })
+    );
+    const request = () =>
       new Request("http://localhost/webhooks/github", {
         method: "POST",
         body,
@@ -372,19 +384,41 @@ describe("POST /webhooks/github", () => {
           "X-GitHub-Event": "issue_comment",
           "X-GitHub-Delivery": "delivery-comment-1236",
         },
-      }),
-      env,
-      ctx
-    );
+      });
+    const forwardedEvents = () =>
+      vi
+        .mocked(env.CONTROL_PLANE.fetch)
+        .mock.calls.filter(([url]) => url === "https://internal/internal/github-event");
 
-    expect(res.status).toBe(200);
+    const failedRes = await app.fetch(request(), env, ctx);
+
+    expect(failedRes.status).toBe(503);
     expect(ctx.waitUntil).toHaveBeenCalledOnce();
-    await flushWaitUntil(ctx);
-    expect(env.CONTROL_PLANE.fetch).toHaveBeenCalledWith(
-      "https://internal/internal/github-event",
-      expect.any(Object)
+    await vi.waitFor(() => expect(forwardedEvents()).toHaveLength(1));
+
+    const inFlightRes = await app.fetch(request(), env, ctx);
+
+    expect(inFlightRes.status).toBe(503);
+    expect(env.AUTOFIX_QUEUE.send).toHaveBeenCalledOnce();
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    finishForwarding(new Response(null, { status: 204 }));
+    await flushWaitUntil(ctx, 0);
+    expect(env.githubD1.rows.has("delivery-comment-1236")).toBe(false);
+
+    const redeliveredRes = await app.fetch(request(), env, ctx);
+
+    expect(redeliveredRes.status).toBe(200);
+    expect(await redeliveredRes.json()).toEqual({ ok: true });
+    expect(env.AUTOFIX_QUEUE.send).toHaveBeenCalledTimes(2);
+    expect(env.AUTOFIX_QUEUE.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        deliveryId: "delivery-comment-1236",
+        providerObject: { kind: "pr_comment", id: "1236" },
+      })
     );
-    expect(env.GITHUB_KV.delete).not.toHaveBeenCalled();
+    await flushWaitUntil(ctx, 1);
+    expect(forwardedEvents()).toHaveLength(2);
+    expect(env.githubD1.rows.get("delivery-comment-1236")?.status).toBe("processed");
   });
 
   it("keys forwarded ready_for_review events by delivery id", async () => {
@@ -419,6 +453,41 @@ describe("POST /webhooks/github", () => {
     expect(JSON.parse(String(forwarded?.[1]?.body)).triggerKey).toBe(
       "pr:42:ready_for_review:abc123:delivery-ready-1"
     );
+  });
+
+  it("forwards whether the sender is a bot", async () => {
+    const body = JSON.stringify({
+      action: "opened",
+      pull_request: { number: 42, draft: false, head: { ref: "feature", sha: "abc123" } },
+      repository: { id: 99, name: "repo", private: false, owner: { login: "test" } },
+      sender: { id: 8, login: "open-inspect[bot]", type: "Bot" },
+    });
+    const env = makeEnv();
+    const ctx = makeCtx();
+
+    const res = await app.fetch(
+      new Request("http://localhost/webhooks/github", {
+        method: "POST",
+        body,
+        headers: {
+          "X-Hub-Signature-256": await sign(SECRET, body),
+          "X-GitHub-Event": "pull_request",
+          "X-GitHub-Delivery": "delivery-bot-1",
+        },
+      }),
+      env,
+      ctx
+    );
+
+    expect(res.status).toBe(200);
+    await flushWaitUntil(ctx);
+    const forwarded = vi
+      .mocked(env.CONTROL_PLANE.fetch)
+      .mock.calls.find(([url]) => url === "https://internal/internal/github-event");
+    expect(JSON.parse(String(forwarded?.[1]?.body))).toMatchObject({
+      actor: "open-inspect[bot]",
+      actorKind: "bot",
+    });
   });
 
   it("returns 401 for invalid signature", async () => {

@@ -4,6 +4,14 @@ import { harnessIdSchema } from "../harnesses";
 import { escapeRegExp } from "../regex";
 import { z } from "zod";
 import { teamSettingsSchema } from "./teams";
+import {
+  mcpAuthModeSchema,
+  mcpOAuthProfileSchema,
+  type McpAuthMode,
+  type McpOAuthProfile,
+  type ManagedMcpServerConfig,
+} from "./managed-mcp";
+export * from "./managed-mcp";
 
 export type IntegrationId = "github" | "linear" | "code-server" | "vnc" | "sandbox" | "slack";
 
@@ -309,7 +317,14 @@ export const sandboxSettingsSchema = z.strictObject({
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
 
 /** Every supported sandbox backend. Keep provider policy exhaustive over this union. */
-export const SANDBOX_PROVIDER_NAMES = ["modal", "modal-vm", "daytona", "vercel", "e2b"] as const;
+export const SANDBOX_PROVIDER_NAMES = [
+  "modal",
+  "modal-vm",
+  "daytona",
+  "vercel",
+  "e2b",
+  "boat",
+] as const;
 
 export type SandboxProviderName = (typeof SANDBOX_PROVIDER_NAMES)[number];
 
@@ -324,6 +339,8 @@ const SANDBOX_SETTING_CAPABILITIES = {
   daytona: { resources: false, resourceLimits: false, timeout: false },
   vercel: DEFAULT_SANDBOX_SETTING_CAPABILITIES,
   e2b: { resources: false, resourceLimits: false, timeout: true },
+  // Resource requests select the smallest Boat machine type that fits them.
+  boat: { resources: true, resourceLimits: false, timeout: true },
 } satisfies Record<
   SandboxProviderName,
   { resources: boolean; resourceLimits: boolean; timeout: boolean }
@@ -694,7 +711,14 @@ export interface McpServerConfig {
   headers?: Record<string, string>;
   repoScopes?: string[] | null;
   enabled: boolean;
+  authMode?: McpAuthMode;
+  authRevision?: number;
+  managedRouting?: boolean;
+  oauth?: McpOAuthProfile | null;
 }
+
+/** Managed entries are constructed by allowlisting, never by spreading a registry object. */
+export type RuntimeMcpServerConfig = McpServerConfig | ManagedMcpServerConfig;
 
 export const DEFAULT_MCP_SERVER_ENABLED = true;
 export const mcpServerTypeSchema = z.enum(["local", "remote"]);
@@ -723,6 +747,9 @@ export const createMcpServerInputSchema = z.discriminatedUnion("type", [
       type: z.literal("remote"),
       url: z.url(),
       headers: mcpServerCredentialMapSchema.optional(),
+      authMode: mcpAuthModeSchema.optional(),
+      managedRouting: z.boolean().optional(),
+      oauth: mcpOAuthProfileSchema.nullable().optional(),
       enabled: mcpServerCommonFields.enabled.default(DEFAULT_MCP_SERVER_ENABLED),
     })
     .strict(),
@@ -737,6 +764,16 @@ export const updateMcpServerInputSchema = z
     url: z.url(),
     env: mcpServerCredentialMapSchema,
     headers: mcpServerCredentialMapSchema,
+    authMode: mcpAuthModeSchema,
+    managedRouting: z.boolean(),
+    oauth: mcpOAuthProfileSchema.nullable(),
+    /**
+     * Stored credential names to keep, values unchanged, beside the `env` or
+     * `headers` sent. A sent name replaces a kept one, and stored names neither
+     * kept nor sent are deleted. Header names match case-insensitively, env var
+     * names exactly. Without it, sent credentials replace the stored set.
+     */
+    keepCredentialKeys: z.array(z.string()),
   })
   .partial()
   .strict();
@@ -762,8 +799,18 @@ export interface McpServerMetadata {
   url?: string;
   hasEnv: boolean;
   hasHeaders: boolean;
+  /**
+   * Names of the stored env vars (local) or headers (remote), returned only to
+   * callers who can manage MCP servers. Absent for readers and from control
+   * planes that predate it. Values never leave the server.
+   */
+  credentialKeys?: string[];
   repoScopes?: string[] | null;
   enabled: boolean;
+  authMode?: McpAuthMode;
+  authRevision?: number;
+  managedRouting?: boolean;
+  oauth?: McpOAuthProfile | null;
 }
 
 export const INTEGRATION_DEFINITIONS: {

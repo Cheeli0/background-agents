@@ -28,7 +28,8 @@ events back through the same WebSocket chain.
 ### Package Dependency Graph
 
 ```
-@open-inspect/shared  ←  control-plane, web, slack-bot, github-bot, linear-bot
+@open-inspect/shared  ←  control-plane, web, slack-bot, github-bot, linear-bot, mcp-server
+@open-inspect/control-plane  ←  preview
 ```
 
 **Build `@open-inspect/shared` first** whenever you change shared types. Other packages import from
@@ -45,6 +46,8 @@ it at build time.
 | `slack-bot`     | TypeScript / CF Workers + Hono     | Slack event handler, session creation                       |
 | `github-bot`    | TypeScript / CF Workers + Hono     | PR review and @mention webhook handler                      |
 | `linear-bot`    | TypeScript / CF Workers + Hono     | Linear agent webhook handler                                |
+| `mcp-server`    | TypeScript / Node + MCP SDK        | Local stdio MCP server over personal access tokens          |
+| `preview`       | TypeScript / Node + Playwright     | Authenticated local preview of web + control plane (dev)    |
 | `modal-infra`   | Python 3.12 / Modal + FastAPI      | Sandbox lifecycle, WebSocket bridge to control plane        |
 
 ## Common Commands
@@ -69,6 +72,7 @@ npm run build -w @open-inspect/docs
 npm test -w @open-inspect/github-bot
 npm test -w @open-inspect/slack-bot
 npm test -w @open-inspect/linear-bot
+npm test -w @open-inspect/mcp-server
 
 # Tests — Python (pytest)
 cd packages/modal-infra && pytest tests/ -v
@@ -79,6 +83,15 @@ cd packages/modal-infra && ruff check --fix && ruff format
 
 ## Testing
 
+For frontend verification without OAuth or production credentials, use the
+[authenticated local preview](docs/verification/authenticated-preview.md):
+`npm run preview -- --browser agent-browser`. Keep its foreground process alive through your
+terminal's persistent session handle, use its named browser context, and stop that owned process
+when finished. Any browser, including a person's own or another agent-browser session, signs in with
+the per-persona sign-in links it prints. `npm run test:preview` runs the preview's contract tests
+and its real-stack browser regressions. Do not invent a login bypass, copy production cookies, or
+mock first-party APIs.
+
 All TypeScript packages use **Vitest**; Python uses **pytest** + pytest-asyncio.
 
 ### Test file locations
@@ -86,7 +99,7 @@ All TypeScript packages use **Vitest**; Python uses **pytest** + pytest-asyncio.
 - **control-plane unit**: co-located as `src/**/*.test.ts` — run in Node environment
 - **control-plane integration**: separate `test/integration/*.test.ts` — run in workerd via
   `@cloudflare/vitest-pool-workers` with real D1 bindings
-- **web, slack-bot, linear-bot**: co-located `src/**/*.test.ts`
+- **web, slack-bot, linear-bot, mcp-server**: co-located `src/**/*.test.ts`
 - **github-bot**: separate `test/*.test.ts`
 - **modal-infra**: `tests/test_*.py`
 

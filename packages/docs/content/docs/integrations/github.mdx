@@ -4,7 +4,7 @@ description: Automatic pull request reviews, @mention actions, PR Feedback Autof
 audience: team-owner
 owner: integrations
 status: published
-lastReviewed: "2026-10-08"
+lastReviewed: "2026-10-31"
 relatedCode:
   - docs/integrations/GITHUB.md
   - packages/shared/src/types/integrations.ts
@@ -74,7 +74,7 @@ flowchart TB
 
 **When it runs.** With **Auto-review new PRs** enabled, OpenInspect starts a review session for each newly opened, non-draft PR in an in-scope repository. The agent inspects the diff and posts a GitHub review.
 
-**When it skips.** Auto-review does not run when the PR is a draft, the repository is outside the bot's scope, the opener is not an allowed trigger user, or auto-review is disabled globally or for that repository. A PR opened by the App bot itself can be reviewed if that bot login is explicitly allowed under **Allowed Trigger Users**; in that case the review uses a comment rather than an approval or change request. Converting a draft to ready for review does not trigger it; mention the bot in a comment instead.
+**When it skips.** Auto-review does not run when the PR is a draft, the repository is outside the bot's scope, the opener is not an allowed trigger user, or auto-review is disabled globally or for that repository. A PR opened by the App bot itself can be reviewed if that bot login is explicitly allowed under **Allowed Trigger Users** and OpenInspect already knows the bot account or unsafe allow-all is in effect; allowing the login alone does not admit it, because the bot cannot sign in on the web. In that case the review uses a comment rather than an approval or change request. Converting a draft to ready for review does not trigger it; mention the bot in a comment instead.
 
 **What it posts.** A general review comment, an approval, a request for changes, or inline review comments, depending on what the agent finds.
 
@@ -131,7 +131,7 @@ Once a session starts, its output is written by the agent from inside the sessio
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Default model            | Model for GitHub-started sessions when a repository does not override it ("Use system default" leaves the deployment default)         |
 | Default reasoning effort | Reasoning depth for the selected model ("Use model default")                                                                          |
-| Agent harness            | **OpenCode** (default) or **Claude Agent** for new GitHub-started sessions                                                            |
+| Agent harness            | **OpenCode** (default), **Claude Agent**, or **Codex** for new GitHub-started sessions                                                |
 | Auto-review new PRs      | "Automatically review non-draft PRs when opened"                                                                                      |
 | Repository Scope         | **All repositories** (the bot responds in every accessible repository) or **Selected repositories** (only the allowlisted ones)       |
 | Allowed Trigger Users    | **All users with write access** (anyone with write permission on the repository) or **Only specific users** (listed GitHub usernames) |
@@ -155,7 +155,7 @@ Event automations match the numeric repository ID and retain their saved owning 
 
 Add an override for a repository to replace the global defaults for that repository. Each field can be left on **Use global default** or switched to **Override for this repo**: agent harness, default model and effort, Auto-review new PRs, PR Feedback Autofix, Allowed Trigger Users, Code Review Instructions, and Comment Action Instructions. Omitted harness and model fields inherit individually from the global settings. If neither level sets a harness, it is OpenCode; if neither sets a model, sessions use the deployment default model. A [`!model` or `!reasoning` flag](#mention-actions) at the start of a mention overrides the corresponding model or effort setting for that one session, not the harness.
 
-Explicitly choosing a restricted harness such as **Claude Agent** requires a compatible default model at that same settings level (global or repository), not an inherited model. The settings form and control plane reject a missing model or an incompatible pair at that level; **Use system default** is not offered when explicitly choosing Claude Agent. Save validation does not check the merged global/repository pair: a model-only repository override can inherit an incompatible global harness, in which case the bot refuses the launch.
+Explicitly choosing a restricted harness such as **Claude Agent** requires a compatible default model at that same settings level (global or repository), not an inherited model. The settings form and control plane reject a missing model or an incompatible pair at that level; **Use system default** is not offered when explicitly choosing Claude Agent or Codex. Save validation does not check the merged global/repository pair: a model-only repository override can inherit an incompatible global harness, in which case the bot refuses the launch.
 
 ## PR Feedback Autofix
 
@@ -242,7 +242,7 @@ OpenInspect can sign agent-created commits with one deployment-wide OpenSSH Ed25
 - **Commit author:** the prompting user, or OpenInspect when unavailable.
 - **Committer and signer:** a dedicated signing account.
 - **Branch push:** the GitHub App.
-- **PR author:** the prompting user's OAuth identity when available.
+- **PR author:** the GitHub App for an automation run's own prompts; otherwise the prompting user's OAuth identity when available, else the App.
 - **What the signature proves:** it attests to the deployment, not to the attributed user, so GitHub vigilant mode shows such commits as **Partially verified**.
 - **Key handling:** private keys never reach a sandbox.
 
@@ -250,13 +250,14 @@ Setup, rotation, and limitations are covered in [Source control](/configure/sour
 
 ## Admin and safety notes
 
-| Area              | What to know                                                                                                                                                                                                                                                                                    |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Access boundaries | Repository access is deployment-scoped through the GitHub App installation. Install the App only on intended repositories and use **Repository Scope** as an extra filter. The same App handles OAuth and repository access, and its credentials and webhook secrets stay server-side.          |
-| Trigger access    | By default, trigger access requires write, maintain, or admin permission. **Only specific users** replaces that check with the list.                                                                                                                                                            |
-| Bot behavior      | Auto-review skips drafts; an explicitly allowed App bot login can trigger a comment-only self-review. Mentions ignore the App bot's own comments, ordinary issue comments, and unmentioned comments. Settings load or parse failures stop work; no configured settings use permissive defaults. |
-| Prompt safety     | Code-review prompts wrap the PR title, author, branches, and description as untrusted; comment prompts wrap the triggering comment. Review-thread file and diff context, and anything the agent reads from GitHub later, are not separately transformed.                                        |
-| Webhooks          | Webhooks are verified, and duplicate deliveries are deduplicated so retries do not create duplicate sessions.                                                                                                                                                                                   |
+| Area              | What to know                                                                                                                                                                                                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Access boundaries | Repository access is deployment-scoped through the GitHub App installation. Install the App only on intended repositories and use **Repository Scope** as an extra filter. The same App handles OAuth and repository access, and its credentials and webhook secrets stay server-side.                              |
+| Trigger access    | By default, trigger access requires write, maintain, or admin permission. **Only specific users** replaces that check with the list.                                                                                                                                                                                |
+| Bot behavior      | Auto-review skips drafts; an explicitly allowed App bot login can trigger a comment-only self-review. Mentions ignore the App bot's own comments, ordinary issue comments, and unmentioned comments. Settings load or parse failures stop work; no configured settings use permissive defaults.                     |
+| Prompt safety     | Code-review prompts wrap the PR title, author, branches, and description as untrusted; comment prompts wrap the triggering comment. Review-thread file and diff context, and anything the agent reads from GitHub later, are not separately transformed.                                                            |
+| Webhooks          | Webhooks are verified, and duplicate deliveries are deduplicated so retries do not create duplicate sessions.                                                                                                                                                                                                       |
+| Personal memories | Review and @mention sessions never use anyone's personal memories, because their replies post where others read them. An Autofix turn is not the session owner's prompt, so it cannot read or save the owner's personal memories, and the session stops searching them afterwards. Repository memories still apply. |
 
 ## Troubleshooting
 
@@ -270,8 +271,9 @@ Setup, rotation, and limitations are covered in [Source control](/configure/sour
   <Accordion title="Auto-review did not run">
     Auto-review only runs for newly opened, non-draft PRs. Drafts, out-of-scope repositories, and
     non-allowed users are skipped. A PR opened by the App needs its bot login explicitly allowed as
-    a trigger user; its self-review can only comment. For a PR converted from draft, mention the bot
-    in a comment.
+    a trigger user, and its bot account must already be known to OpenInspect unless unsafe
+    allow-all is in effect; its self-review can only comment. For a PR converted from draft,
+    mention the bot in a comment.
 
 </Accordion>
   <Accordion title="A mention did not start a session">
@@ -280,9 +282,12 @@ Setup, rotation, and limitations are covered in [Source control](/configure/sour
 
 </Accordion>
   <Accordion title="I see an eyes reaction but no follow-up">
-    The reaction means the request was accepted. Output is posted by the agent, not by a callback,
-    so the session may still be running or may have failed after acceptance. Open the web app to
-    inspect it.
+    The reaction acknowledges the request; it is posted before OpenInspect admits the request and
+    creates a session. Output is posted by the agent, not by a callback, so the session may still be
+    running or may have failed after it started. Open the web app to inspect it. If no session
+    exists, the person who triggered the bot may be unknown to OpenInspect: unless unsafe allow-all
+    is in effect, the bot acts only for people who have already signed in on the web with GitHub, so
+    sign in once, then mention the bot again.
 
 </Accordion>
   <Accordion title="Review feedback did not resume the session">

@@ -380,12 +380,17 @@ describe("browser authentication", () => {
           clientSecret: "google-client-secret",
           getUserInfo: async () => ({
             user: {
-              id: "direct-id-token-subject",
               name: "Direct ID Token User",
               email: "direct-id-token@example.com",
               emailVerified: true,
             },
-            data: null,
+            data: {
+              provider: "google",
+              issuer: "https://accounts.google.com",
+              subject: "direct-id-token-subject",
+              verifiedEmails: ["direct-id-token@example.com"],
+              primaryEmail: "direct-id-token@example.com",
+            },
           }),
         },
       });
@@ -406,7 +411,8 @@ describe("browser authentication", () => {
         })
       );
 
-      expect(response.status).toBe(401);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ code: "ID_TOKEN_NOT_SUPPORTED" });
       expect(response.headers.get("set-cookie")).toBeNull();
       const sessionCount = await env.DB.prepare(
         "SELECT COUNT(*) AS count FROM auth_sessions"

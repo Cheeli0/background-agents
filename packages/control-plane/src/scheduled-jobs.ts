@@ -25,7 +25,7 @@ import type { SqlDatabase } from "./db/sql-database";
 import { IMAGE_BUILD_SCHEDULER_CRON, runImageBuildScheduler } from "./image-builds/scheduler";
 import type { CorrelationContext, Logger } from "./logger";
 import type { BackgroundTasks } from "./platform-ports";
-import { Scheduler } from "./scheduler/scheduler";
+import { createScheduler } from "./scheduler/factory";
 import {
   ABANDONED_DRAFT_SWEEP_CRON,
   AbandonedDraftSweep,
@@ -89,7 +89,7 @@ export const SCHEDULED_JOBS: readonly ScheduledJob[] = [
       // The tick runs both the recovery sweep (orphaned/timed-out runs) and
       // processes overdue automations. The slot time decides whether this
       // tick also runs the finalization sweep.
-      await new Scheduler(db, env, backgroundTasks).tick(nowMs);
+      await createScheduler(db, env, backgroundTasks).tick(nowMs);
     },
   },
   {

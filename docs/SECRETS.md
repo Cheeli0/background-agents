@@ -79,6 +79,7 @@ The most common example:
 | ---------------------- | ----------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`    | Required for Claude models, unless the deployment configured a fleet-wide key (see below) |
 | `DEEPSEEK_API_KEY`     | Required for DeepSeek models with any sandbox provider                                    |
+| `KIMI_API_KEY`         | Required for Kimi Coding Plan models with any sandbox provider                            |
 | `ZHIPU_API_KEY`        | Required for Z.AI Coding Plan GLM models with any sandbox provider                        |
 | `OPENCODE_API_KEY`     | Required for OpenCode Zen and OpenCode Go models with any sandbox provider                |
 | `MINIMAX_API_KEY`      | Required for MiniMax Coding Plan models                                                   |
@@ -188,6 +189,18 @@ Provider-account mode removes that provider's canonical API key from the sandbox
 runtime cannot bypass the selected subscription. API-key mode continues to use ordinary global,
 team, repository, or environment secrets.
 
+MCP server environment variables and headers (**Settings > MCP Servers**) are encrypted with
+`REPO_SECRETS_ENCRYPTION_KEY` and are not returned after saving. A local server's environment
+variables and an unrouted remote server's headers are injected into the sandbox; a remote server
+routed through Open-Inspect keeps its headers in the control plane, which adds them to each request
+it forwards. Personal MCP OAuth connections (**Settings > Connections**) are encrypted with a key
+derived from `TOKEN_ENCRYPTION_KEY` and never reach the sandbox.
+
+MCP server credentials saved before this encryption existed can still be stored as plaintext. The
+control plane reads them (logging `mcp_server.env_decrypt_fallback`) but does not rewrite them, and
+saving the same values again leaves them as they are. To store them encrypted, change the credential
+values or recreate the server.
+
 ### Legacy managed OAuth coexistence
 
 Legacy scoped OpenAI/xAI OAuth remains supported for sessions pinned to it. Provider-account
@@ -253,6 +266,7 @@ image as no less sensitive than the scope's secrets.
 | `OPENAI_API_KEY`             | Global                  | OpenAI API access when a session selects API-key mode                          |
 | `XAI_API_KEY`                | Global                  | xAI API access when a session selects API-key mode                             |
 | `DEEPSEEK_API_KEY`           | Global                  | DeepSeek API access                                                            |
+| `KIMI_API_KEY`               | Global                  | Kimi Coding Plan membership access                                             |
 | `ZHIPU_API_KEY`              | Global                  | Z.AI Coding Plan GLM access                                                    |
 | `OPENCODE_API_KEY`           | Global                  | OpenCode Zen and OpenCode Go access                                            |
 | `OPENAI_OAUTH_REFRESH_TOKEN` | Global/repo/environment | Legacy OpenAI Codex via ChatGPT subscription ([setup guide](OPENAI_MODELS.md)) |
@@ -274,12 +288,12 @@ image as no less sensitive than the scope's secrets.
 If you see "Model not found" errors, verify the selected provider authentication mode first. For
 provider-account mode, verify the account and model entitlement. For API-key mode, add the required
 key to the session's secret scope. OpenAI uses `OPENAI_API_KEY`; xAI uses `XAI_API_KEY`; Claude uses
-`ANTHROPIC_API_KEY`; DeepSeek uses `DEEPSEEK_API_KEY`; Z.AI Coding Plan uses `ZHIPU_API_KEY`;
-OpenCode Zen and OpenCode Go both use `OPENCODE_API_KEY`, and an `opencode-go/*` model additionally
-needs an active Go subscription on that key. MiniMax Coding Plan uses `MINIMAX_API_KEY`; Fireworks
-uses `FIREWORKS_API_KEY`; and Ollama Cloud uses `OLLAMA_CLOUD_API_KEY`. For subscription
-authentication, follow the provider-account setup guidance in [OpenAI models](OPENAI_MODELS.md) or
-[Grok models](GROK_MODELS.md).
+`ANTHROPIC_API_KEY`; DeepSeek uses `DEEPSEEK_API_KEY`; Kimi Coding Plan uses `KIMI_API_KEY`; Z.AI
+Coding Plan uses `ZHIPU_API_KEY`; OpenCode Zen and OpenCode Go both use `OPENCODE_API_KEY`, and an
+`opencode-go/*` model additionally needs an active Go subscription on that key. MiniMax Coding Plan
+uses `MINIMAX_API_KEY`; Fireworks uses `FIREWORKS_API_KEY`; and Ollama Cloud uses
+`OLLAMA_CLOUD_API_KEY`. For subscription authentication, follow the provider-account setup guidance
+in [OpenAI models](OPENAI_MODELS.md) or [Grok models](GROK_MODELS.md).
 
 ### Secret not appearing in sandbox
 
