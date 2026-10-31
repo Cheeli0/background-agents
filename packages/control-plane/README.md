@@ -682,20 +682,45 @@ revoking a token deletes its row.
 Two independent checks bound what a token can do, and both must pass:
 
 - **The route accepts tokens.** A route admits tokens only when its policy declares
-  `personalAccessTokens: "accept"`, and no route does yet, so an issued token cannot authorize an
-  API call until one opts in. Any other route that authenticates the bearer refuses a valid token
-  with `403 personal_access_token_not_accepted`, whatever other principals it accepts. Public and
-  handler-authenticated routes never resolve a token, and sandbox routes verify the bearer as a
-  sandbox token, so none of them returns that code. `admit()` refuses to build an opted-in route
-  unless it authorizes an active user and every one of its requirements is decided by permissions a
-  token may be granted. Each requirement is checked on its own, so a requirement decided by
-  ownership (collaborator or visibility management) or by team membership is refused even beside a
-  grantable permission. A grant can therefore always narrow what an opted-in route allows.
+  `personalAccessTokens: "accept"`; the routes that do are listed below. Any other route that
+  authenticates the bearer refuses a valid token with `403 personal_access_token_not_accepted`,
+  whatever other principals it accepts. Public and handler-authenticated routes never resolve a
+  token, and sandbox routes verify the bearer as a sandbox token, so none of them returns that code.
+  `admit()` refuses to build an opted-in route unless it authorizes an active user and every one of
+  its requirements is decided by permissions a token may be granted. Each requirement is checked on
+  its own, so a requirement decided by ownership (collaborator or visibility management) or by team
+  membership is refused even beside a grantable permission. A grant can therefore always narrow what
+  an opted-in route allows.
 - **The token holds the permission.** Admission loads the owner's effective authorization as usual,
   then narrows its permissions to the intersection with the token's grant. Every downstream
   permission, scoped-permission, and resource check reads the narrowed set, so a token never exceeds
   its grant or its owner, and loses a permission as soon as its owner does. A suspended owner's
   tokens are refused.
+
+Routes that accept tokens today are the ones the MCP server's tools use. `router.policy.test.ts`
+pins this list, so adding to it is a visible change:
+
+- reading sessions: `GET /sessions` and `/sessions/:id/{events,messages,diff}`
+- reading automations: `GET /automations` and `/automations/:id{,/invocations,/runs/:runId}`
+- reading skills: `GET /skills` and `/skills/:id`
+- creating an automation (`POST /automations`) and triggering one (`POST /automations/:id/trigger`)
+- skill import and re-import, with their previews
+- reading one file of a session diff: `GET /sessions/:id/diff/:revisionId/files/:fileId`
+
+Two rules reach past route admission:
+
+- **A manual run stays within the token's grant.** The trigger route passes the admitted permissions
+  to the scheduler as a ceiling, and the execution check requires `sessions.create`, and
+  `repositories.use` or `environments.use` for the selected targets, to be in that ceiling as well
+  as in the owner's live role. This holds at admission and again at each child launch. The
+  invocation records `actor_kind = 'unknown'`, since a token does not establish who fired it.
+- **A token's `skills.manage` needs `skills.read`.** Every token route that manages skills answers
+  with skill or repository content, so issuing refuses `skills.manage` without `skills.read`
+  (`permission_prerequisite_missing`), and narrowing drops a `skills.manage` whose `skills.read` did
+  not survive (`PERSONAL_ACCESS_TOKEN_GRANT_PREREQUISITES` in shared).
+
+Editing, pausing, or deleting automations, bulk skill import, and every session mutation, secret,
+and setting refuse tokens.
 
 The owner's workspace role still decides visibility within a granted permission. For example, an
 administrator's token that holds `sessions.read` sees the sessions the administrator sees.
