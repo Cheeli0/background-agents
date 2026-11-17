@@ -78,6 +78,7 @@ import { SessionCoreRepository } from "./session-core-repository";
 // The composition root grants each consumer only its declared sandbox port.
 // eslint-disable-next-line no-restricted-imports
 import { SandboxRepository } from "./sandbox-repository";
+import { SandboxBootstrapRepository } from "./sandbox-bootstrap-repository";
 import { SessionAttachmentRepository } from "./session-attachment-repository";
 import { ArtifactRepository } from "./artifact-repository";
 import { EventRepository } from "./event-repository";
@@ -131,6 +132,7 @@ import { MemoryPromptContextHandler } from "./http/handlers/memory-prompt-contex
 import { ChildSummaryHandler } from "./http/handlers/child-summary.handler";
 import { SessionInitHandler } from "./http/handlers/session-init.handler";
 import { SandboxHandler } from "./http/handlers/sandbox.handler";
+import { SandboxBootstrapHandler } from "./http/handlers/sandbox-bootstrap.handler";
 import { AttachmentsHandler } from "./http/handlers/attachments.handler";
 import { WsTokenHandler } from "./http/handlers/ws-token.handler";
 import { SessionLifecycleHandler } from "./http/handlers/session-lifecycle.handler";
@@ -307,6 +309,7 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
   // unmodelled, so it needs the session logger — and it owns encrypt-at-rest
   // for access secrets, so it takes the key.
   const sandboxRepository = new SandboxRepository(sql, log, repoSecretsEncryptionKey);
+  const sandboxBootstrapStore = new SandboxBootstrapRepository(sql, repoSecretsEncryptionKey);
 
   const mcpContext = new SessionMcpContext(sql, db, env, sessionCoreRepository, sandboxRepository);
 
@@ -459,7 +462,7 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
 
   // Tier 5: access precedes shutdown and the lifecycle manager, so retirement has no manager cycle.
   const sandboxBackend = resolveSandboxBackendName(env.SANDBOX_PROVIDER);
-  const sandboxProvider = createSandboxProviderFromEnv(env, sandboxBackend);
+  const sandboxProvider = createSandboxProviderFromEnv(env, sandboxBackend, sandboxBootstrapStore);
   const lifecycleSockets = new LifecycleSocketAdapter(wsManager);
   const accessLog = createSessionScopedLogger(
     createLogger("lifecycle-manager"),
@@ -801,6 +804,11 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
     generateId
   );
 
+  const sandboxBootstrapHandler = new SandboxBootstrapHandler(
+    sandboxBootstrapStore,
+    sandboxRepository
+  );
+
   const attachmentsHandler = new AttachmentsHandler(attachmentRepository, log);
 
   const wsTokenHandler = new WsTokenHandler(participantRepository, generateId, hashToken);
@@ -993,6 +1001,8 @@ export function createSessionRuntime(platform: SessionPlatform, env: Env): Sessi
     mcpClose: (request) => mcpContext.close(request),
     verifySandboxToken: (request, _url, requestLog) =>
       sandboxHandler.verifySandboxToken(request, requestLog),
+    sandboxBootstrap: (request, _url, requestLog) =>
+      sandboxBootstrapHandler.redeem(request, requestLog),
     openaiTokenRefresh: (_request, _url, requestLog) =>
       sandboxHandler.openaiTokenRefresh(requestLog),
     xaiTokenRefresh: (_request, _url, requestLog) => sandboxHandler.xaiTokenRefresh(requestLog),

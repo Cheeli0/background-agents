@@ -8,6 +8,7 @@
 # - observability.tf  Log group and instance alarms
 # - schedule.tf       Optional out-of-hours stop and start
 # - dns.tf            Optional Route 53 record
+# - sandboxes.tf      Optional EC2 sandboxes: their network, profile and the launch grant
 
 data "aws_region" "current" {}
 

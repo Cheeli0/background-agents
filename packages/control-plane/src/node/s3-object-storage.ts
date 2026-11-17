@@ -4,7 +4,8 @@
  * artifacts (screenshots, uploads, session media) go through it, as they go
  * through R2 on Cloudflare.
  *
- * This is the one module that imports `@aws-sdk/*`. The contract mirrors
+ * The `@aws-sdk/*` imports stay in Node-host adapters (here and
+ * `ec2-sandbox-api.ts`), never in code the worker bundles. The contract mirrors
  * `R2ObjectStorage`: a missing key is `null` from `head` and `get`, and only
  * a missing key; a missing bucket, a wrong endpoint, or a response without
  * the fields the port promises is an error, so a deployment fault never

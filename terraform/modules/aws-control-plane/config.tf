@@ -66,6 +66,7 @@ locals {
   # is absent because it is its own resource below, owned differently.
   env_config = merge(
     local.derived_config,
+    local.ec2_sandbox_config,
     { for key, value in var.config : key => value if value != "" },
   )
 }

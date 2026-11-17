@@ -16,7 +16,7 @@ from .configuration import IMAGE_PACKAGE, RUNTIME_PACKAGE, read_json, runtime_en
 from .locks import export_requirements, update_locks
 
 DOCKER_PACKAGES = ("engine", "cli", "containerd", "buildx", "compose")
-PROVIDERS = ("modal", "daytona", "e2b", "vercel", "boat")
+PROVIDERS = ("modal", "daytona", "e2b", "vercel", "boat", "ec2")
 EXCLUDED = {
     ".terraform",
     ".git",
@@ -44,6 +44,9 @@ INFRA_MODULES = {
     "e2b": "e2b-infra",
     "vercel": "vercel-sandbox-infra",
     "boat": "boat-infra",
+    # The AMI is built by hand and selected with a Terraform variable, so no
+    # module's inputs feed its build.
+    "ec2": None,
 }
 
 
@@ -159,8 +162,9 @@ def plan_image(root: Path, provider: str) -> ImagePlan:
         IMAGE_PACKAGE / "uv.lock",
         IMAGE_PACKAGE / "targets.json",
         Path(f"packages/{provider}-infra"),
-        Path(f"terraform/modules/{INFRA_MODULES[provider]}"),
     )
+    if INFRA_MODULES[provider] is not None:
+        paths += (Path(f"terraform/modules/{INFRA_MODULES[provider]}"),)
     if provider == "vercel":
         paths += (
             Path("package-lock.json"),

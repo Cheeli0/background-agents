@@ -50,6 +50,7 @@ export interface SessionInternalRouteHandlers {
   mcpContext: SessionInternalRouteHandler;
   mcpClose: SessionInternalRouteHandler;
   verifySandboxToken: SessionInternalRouteHandler;
+  sandboxBootstrap: SessionInternalRouteHandler;
   openaiTokenRefresh: SessionInternalRouteHandler;
   xaiTokenRefresh: SessionInternalRouteHandler;
   scmCredentials: SessionInternalRouteHandler;
@@ -128,6 +129,11 @@ export function createSessionInternalRoutes(
       method: "POST",
       path: SessionInternalPaths.verifySandboxToken,
       handler: handlers.verifySandboxToken,
+    },
+    {
+      method: "POST",
+      path: SessionInternalPaths.sandboxBootstrap,
+      handler: handlers.sandboxBootstrap,
     },
     {
       method: "POST",

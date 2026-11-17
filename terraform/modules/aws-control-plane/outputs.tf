@@ -72,3 +72,13 @@ output "github_oidc_provider_arn" {
   description = "The account's GitHub OIDC provider, when this module created it. Pass it as `github_deploy.oidc_provider_arn` in any other environment in the same account: the provider is an account-wide singleton and a second one cannot be created."
   value       = one(aws_iam_openid_connect_provider.github[*].arn)
 }
+
+output "ec2_sandbox_image_build_env" {
+  description = "Environment for `npm run sandbox:images -- build --provider ec2`: the sandbox network the build instances launch into and the bucket the bundle is staged in. Null unless ec2_sandboxes is set."
+  value = local.ec2_sandboxes_enabled ? {
+    AWS_REGION                    = data.aws_region.current.region
+    EC2_SANDBOX_SUBNET_ID         = aws_subnet.sandboxes[0].id
+    EC2_SANDBOX_SECURITY_GROUP_ID = aws_security_group.sandboxes[0].id
+    EC2_IMAGE_BUILD_BUCKET        = aws_s3_bucket.media.bucket
+  } : null
+}

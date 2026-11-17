@@ -151,18 +151,23 @@ def test_vercel_transitive_build_inputs_are_covered(checkout, source):
 
 
 @pytest.mark.parametrize(
-    "source",
+    ("provider", "source"),
     [
-        "packages/boat-infra/launcher.sh",
-        "packages/boat-infra/build-template.py",
-        "terraform/modules/boat-infra/scripts/build-snapshot.sh",
+        ("boat", "packages/boat-infra/launcher.sh"),
+        ("boat", "packages/boat-infra/build-template.py"),
+        ("boat", "terraform/modules/boat-infra/scripts/build-snapshot.sh"),
+        ("ec2", "packages/ec2-infra/launcher.sh"),
+        ("ec2", "packages/ec2-infra/exec-runtime.py"),
+        ("ec2", "packages/ec2-infra/openinspect-sandbox.service"),
+        ("ec2", "packages/ec2-infra/build-ami.py"),
+        ("ec2", "packages/ec2-infra/image_scripts.py"),
     ],
 )
-def test_boat_hash_covers_launcher_builder_and_deployment(checkout, source):
-    before = plan_image(checkout, "boat")["buildHash"]
+def test_vm_provider_hash_covers_launcher_builder_and_deployment(checkout, provider, source):
+    before = plan_image(checkout, provider)["buildHash"]
     path = checkout / source
     path.write_text(path.read_text() + "\n")
-    assert plan_image(checkout, "boat")["buildHash"] != before
+    assert plan_image(checkout, provider)["buildHash"] != before
 
 
 def test_pack_exports_runtime_requirements_from_uv_lock(checkout, tmp_path):

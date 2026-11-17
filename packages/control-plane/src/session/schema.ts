@@ -81,6 +81,13 @@ CREATE TABLE IF NOT EXISTS sandbox_preservation (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   state TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sandbox_bootstrap (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  sandbox_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  env TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
 -- Core session state
 CREATE TABLE IF NOT EXISTS session (
   id TEXT PRIMARY KEY,                              -- Same as DO ID
@@ -804,6 +811,17 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     id: 59,
     description: "Distinguish bridge process replacement from transport reconnect",
     run: "ALTER TABLE sandbox ADD COLUMN mcp_bridge_instance_id TEXT",
+  },
+  {
+    id: 60,
+    description: "Hold the environment a bootstrapping sandbox redeems once",
+    run: `CREATE TABLE IF NOT EXISTS sandbox_bootstrap (
+      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+      sandbox_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      env TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    )`,
   },
 ];
 

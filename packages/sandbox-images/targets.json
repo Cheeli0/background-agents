@@ -33,5 +33,12 @@
     "node": "24",
     "user": "user",
     "home": "/home/user"
+  },
+  "ec2": {
+    "os": "debian",
+    "base": "ubuntu:24.04",
+    "node": "24",
+    "user": "user",
+    "home": "/home/user"
   }
 }

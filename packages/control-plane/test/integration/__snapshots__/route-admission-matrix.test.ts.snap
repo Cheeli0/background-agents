@@ -327,6 +327,7 @@ exports[`route admission matrix > rejects every credentialed route anonymously b
   "GET /sessions/:id anonymous=401",
   "POST /sessions/:id/stop anonymous=401",
   "POST /sessions/:id/sandbox-error anonymous=401",
+  "POST /sessions/:id/sandbox-bootstrap anonymous=401",
   "GET /sessions/:id/events anonymous=401",
   "GET /sessions/:id/artifacts anonymous=401",
   "GET /sessions/:id/participants anonymous=401",

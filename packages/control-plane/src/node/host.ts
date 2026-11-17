@@ -60,6 +60,7 @@ import { SessionRuntimeRegistry } from "./session-runtime-registry";
 import { createFileSessionStoreProvider } from "./session-store";
 import { openNodeSqlDatabase } from "./sqlite-database";
 import { createSessionUpgradeHandler, MAX_MESSAGE_BYTES } from "./websocket-upgrade";
+import type { Ec2SandboxApi } from "../sandbox/ec2-api";
 
 /** The global store's file inside the data directory. */
 export const GLOBAL_STORE_FILE = "global.db";
@@ -68,6 +69,8 @@ export interface NodeHostOptions {
   config: EnvConfig;
   settings: NodeHostSettings;
   objectStorage: ObjectStorage;
+  /** EC2 control for the `ec2` sandbox provider, when it is selected. */
+  ec2Sandboxes?: Ec2SandboxApi;
   /** The route modules to serve: the production catalog unless a test supplies its own. */
   routes?: readonly RouteModule[];
 }
@@ -192,6 +195,7 @@ async function boot(
     SESSION: createNodeSessionRuntimeDispatch(registry),
     REPOS_CACHE: new SqlCacheStore(cacheDb),
     MEDIA_BUCKET: options.objectStorage,
+    EC2_SANDBOXES: options.ec2Sandboxes,
     JOBS: jobs,
   };
   const env: Env = { ...config, ...platform };

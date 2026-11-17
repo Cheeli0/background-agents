@@ -108,6 +108,7 @@ export const SessionInternalPaths = {
   mcpContext: "/internal/mcp-context",
   mcpClose: "/internal/mcp-close",
   verifySandboxToken: "/internal/verify-sandbox-token",
+  sandboxBootstrap: "/internal/sandbox-bootstrap",
   openaiTokenRefresh: "/internal/openai-token-refresh",
   xaiTokenRefresh: "/internal/xai-token-refresh",
   scmCredentials: "/internal/scm-credentials",

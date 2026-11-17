@@ -324,6 +324,7 @@ export const SANDBOX_PROVIDER_NAMES = [
   "vercel",
   "e2b",
   "boat",
+  "ec2",
 ] as const;
 
 export type SandboxProviderName = (typeof SANDBOX_PROVIDER_NAMES)[number];
@@ -341,6 +342,8 @@ const SANDBOX_SETTING_CAPABILITIES = {
   e2b: { resources: false, resourceLimits: false, timeout: true },
   // Resource requests select the smallest Boat machine type that fits them.
   boat: { resources: true, resourceLimits: false, timeout: true },
+  // One instance type per deployment; the lifetime is enforced on the instance.
+  ec2: { resources: false, resourceLimits: false, timeout: true },
 } satisfies Record<
   SandboxProviderName,
   { resources: boolean; resourceLimits: boolean; timeout: boolean }

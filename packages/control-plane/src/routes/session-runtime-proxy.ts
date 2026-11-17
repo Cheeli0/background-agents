@@ -133,6 +133,20 @@ async function handleSandboxError(
   });
 }
 
+async function handleSandboxBootstrap(
+  request: Request,
+  _env: Env,
+  params: SessionParams,
+  ctx: SessionRouteContext
+): Promise<Response> {
+  const authorization = request.headers.get("Authorization");
+  if (!authorization) return error("Unauthorized", 401);
+  return ctx.sessionRuntime.fetch(params.id, SessionInternalPaths.sandboxBootstrap, {
+    method: "POST",
+    headers: { Authorization: authorization },
+  });
+}
+
 async function handleParticipantProfiles(
   _request: Request,
   _env: Env,
@@ -375,6 +389,11 @@ sessionRuntimeProxyRoutes.post(
   "/sessions/:id/sandbox-error",
   admit({ ...SCM_AGNOSTIC_HANDLER_AUTHENTICATED_ROUTE, authorization: NO_AUTHORIZATION }),
   (c) => dispatchSession(c, handleSandboxError)
+);
+sessionRuntimeProxyRoutes.post(
+  "/sessions/:id/sandbox-bootstrap",
+  admit({ ...SCM_AGNOSTIC_HANDLER_AUTHENTICATED_ROUTE, authorization: NO_AUTHORIZATION }),
+  (c) => dispatchSession(c, handleSandboxBootstrap)
 );
 sessionRuntimeProxyRoutes.get(
   "/sessions/:id/events",
