@@ -19,10 +19,10 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.1.12",
+    "@vitest/coverage-v8": "^5.1.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.7.2",
-    "vitest": "^4.1.12",
+    "vitest": "^5.1.0",
     "wrangler": "^4.160.0"
   }
 }

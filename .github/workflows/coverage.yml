@@ -133,7 +133,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: control-plane-coverage-shard-${{ strategy.job-index }}
-          path: packages/control-plane/.vitest-reports/
+          path: packages/control-plane/.vitest/blob/
           include-hidden-files: true
           if-no-files-found: error
 
@@ -155,12 +155,12 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           pattern: control-plane-coverage-shard-*
-          path: packages/control-plane/.vitest-reports/
+          path: packages/control-plane/.vitest/blob/
           merge-multiple: true
       - name: Merge and enforce control-plane coverage
         working-directory: packages/control-plane
         run: |
-          npx vitest run --merge-reports=.vitest-reports --config vitest.coverage.config.ts --coverage
+          npx vitest run --merge-reports=.vitest/blob --config vitest.coverage.config.ts --coverage
           node ../../scripts/check-coverage.mjs control-plane coverage/coverage-summary.json
       - name: Upload control-plane coverage
         if: always()

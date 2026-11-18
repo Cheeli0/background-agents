@@ -89,7 +89,7 @@ jobs:
             ':(exclude)ruff.toml'
             ':(exclude).prettierrc'
             ':(exclude).prettierignore'
-            ':(exclude)vitest.workspace.ts'
+            ':(exclude)vitest.config.ts'
             ':(exclude,glob)scripts/lint-*.mjs'
             ':(exclude)scripts/sql-portability-baseline.json'
             ':(exclude,glob)scripts/bootstrap-workspace-owner*.ts'
