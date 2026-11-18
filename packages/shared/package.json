@@ -280,7 +280,7 @@
   },
   "dependencies": {
     "@octokit/webhooks-types": "^7.6.1",
-    "cron-parser": "^5.10.2",
+    "cron-parser": "^5.10.4",
     "zod": "^4.6.7"
   }
 }
