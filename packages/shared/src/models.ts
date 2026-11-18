@@ -252,6 +252,26 @@ export const MODEL_CATALOG = [
         },
       },
       {
+        id: "openai/gpt-6.2-astra",
+        codex: { default: "low" },
+        name: "GPT-6.2 Astra",
+        description: "Most capable model for your hardest projects",
+        reasoning: {
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+          default: "medium",
+        },
+      },
+      {
+        id: "openai/gpt-6.2-sol",
+        codex: { default: "low" },
+        name: "GPT-6.2 Sol",
+        description: "Efficient everyday model for coding and agents",
+        reasoning: {
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+          default: "medium",
+        },
+      },
+      {
         id: "openai/gpt-6-luna",
         codex: {},
         name: "GPT-6 Luna",

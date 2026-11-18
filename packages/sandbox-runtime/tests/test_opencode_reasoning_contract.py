@@ -17,7 +17,9 @@ GPT-6.1 Terra added from the 2026-11-04 retrieval.
 Source SHA-256: 3c98c4ea4ce2fc866e8f7cf858f7c79ce96d12aa190b6f26b9af77b448519b02
 OpenCode Zen and Go models with efforts, and their Gemini models, added from the 2026-11-10 retrieval.
 Source SHA-256: 4f9cc07fff594ef0745e8c243fc0c5a0b68b2279b0d062cca5c8a3df6382e0ed
-Subset SHA-256: f12f327e696beaaba07bed4123c2c9ab330e7c83bd422cde26e61d3e99822136
+GPT-6.2 Astra and GPT-6.2 Sol added from the 2026-11-17 retrieval.
+Source SHA-256: d5d6ff2fff92fcfe45566f38f9c559c71ecc63a1b400b2e305ef7545b70a5c3a
+Subset SHA-256: 4625f538690cc7df8d4625660803b229979a03a234de6cfd0e660d170a8f7c5c
 Reconcile this frozen fixture with shared model/effort definitions when changing
 models or the binary. Mocks verify serialization, not live provider acceptance.
 """

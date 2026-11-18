@@ -84,7 +84,15 @@ test("preserves API-key requests if OpenAI authentication switches away from OAu
 });
 
 test("restores known prices and filters retired Codex models after the built-in OAuth hook", async () => {
-  const gpt6Ids = ["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"];
+  const gpt6Ids = [
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+    "gpt-6.2-astra",
+    "gpt-6.2-sol",
+    "gpt-6-luna",
+  ];
   const gpt6Models = gpt6Ids.map((id) => [id, { name: id, cost: { input: 0, output: 0 } }]);
   // OpenCode's built-in hook has zeroed OAuth prices; it may still expose retired models.
   const provider = {
@@ -110,6 +118,7 @@ test("restores known prices and filters retired Codex models after the built-in 
       assert.equal(apiKeyModels, provider.models);
 
       const priced = await plugin.provider.models(provider, { auth: { type: "oauth" } });
+      for (const id of gpt6Ids) assert.ok(priced[id], `${id} should stay available with OAuth`);
       assert.equal(priced["gpt-6-astra"].cost.input, 12);
       assert.equal(priced["gpt-6-sol"].cost.cache.read, 0.3);
       assert.equal(priced["gpt-6-luna"].cost.output, 0.6);
