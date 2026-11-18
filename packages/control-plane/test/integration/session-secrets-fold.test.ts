@@ -116,11 +116,19 @@ describe("getUserEnvVars session-target fold", () => {
   it.each([
     {
       modes: { openai: "provider_account", xai: "api_key", anthropic: "api_key" } as const,
-      expected: { OPENAI_OAUTH_MANAGED: "1", XAI_API_KEY: "xai-key" },
+      expected: {
+        OPENAI_OAUTH_MANAGED: "1",
+        OPENINSPECT_USER_OPENAI_API_KEY: "openai-key",
+        XAI_API_KEY: "xai-key",
+      },
     },
     {
       modes: { openai: "api_key", xai: "provider_account", anthropic: "api_key" } as const,
-      expected: { OPENAI_API_KEY: "openai-key", XAI_OAUTH_MANAGED: "1" },
+      expected: {
+        OPENAI_API_KEY: "openai-key",
+        XAI_OAUTH_MANAGED: "1",
+        OPENINSPECT_USER_XAI_API_KEY: "xai-key",
+      },
     },
   ])("uses authoritative D1 provider auth modes for $modes", async ({ modes, expected }) => {
     await new GlobalSecretsStore(env.DB, KEY()).setSecrets({
@@ -144,6 +152,7 @@ describe("getUserEnvVars session-target fold", () => {
 
     await expect(getUserEnvVars(stub)).resolves.toEqual({
       OPENAI_OAUTH_MANAGED: "1",
+      OPENINSPECT_USER_OPENAI_API_KEY: "openai-key",
       XAI_API_KEY: "xai-key",
     });
   });

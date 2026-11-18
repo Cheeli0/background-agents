@@ -443,7 +443,10 @@ describe("UserEnvResolver", () => {
             XAI_OAUTH_REFRESH_TOKEN: "unreadable-team-token",
           })
         );
-        expect(await h.resolver.getUserEnvVars()).toEqual({ XAI_OAUTH_MANAGED: "1" });
+        expect(await h.resolver.getUserEnvVars()).toEqual({
+          XAI_OAUTH_MANAGED: "1",
+          OPENINSPECT_USER_XAI_API_KEY: "team-key",
+        });
       }
     );
 

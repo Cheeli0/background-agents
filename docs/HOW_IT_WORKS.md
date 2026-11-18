@@ -776,8 +776,10 @@ provider policy, select an active account, or choose API-key mode. Automations c
 choices or resolve current defaults each run. Child sessions copy their parent's D1 auth rows, and
 later default changes do not move existing sessions between accounts.
 
-In account mode, the sandbox receives only a managed marker. Provider API keys and legacy OAuth
-fields for that provider are suppressed. The runtime plugin calls the sandbox-authenticated
+In account mode, the sandbox receives a managed marker in place of the provider's credentials.
+Provider API keys and legacy OAuth fields for that provider are suppressed, except that a
+user-supplied API key stays readable by sandbox processes under `OPENINSPECT_USER_<KEY>`, a name no
+harness authenticates with. The runtime plugin calls the sandbox-authenticated
 `POST /sessions/:id/provider-auth/:provider/access-token` endpoint; the control plane reads the
 trusted D1 session binding using the sandbox-authenticated session ID, refreshes the encrypted
 account credential, and returns short-lived access with `Cache-Control: no-store`. Sandbox startup

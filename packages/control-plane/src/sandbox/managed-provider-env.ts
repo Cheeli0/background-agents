@@ -19,6 +19,13 @@ const CONTROL_PLANE_OAUTH_KEYS = new Set([
   "CLAUDE_CODE_OAUTH_TOKEN",
 ]);
 
+/**
+ * A user-supplied provider API key removed for managed auth stays reachable under this prefix, so
+ * an application the sandbox runs can still be given it while the harness never sees the name it
+ * would treat as a competing credential.
+ */
+export const WITHHELD_PROVIDER_API_KEY_PREFIX = "OPENINSPECT_USER_";
+
 interface ManagedProviderEnvOptions {
   harness?: HarnessId;
   exposedSecrets: Record<string, string>;
@@ -129,7 +136,12 @@ export function prepareManagedProviderEnv({
         config.legacyRefreshToken !== null &&
         Boolean(brokerSecrets[config.legacyRefreshToken]));
     if (managed) {
+      const withheldApiKey = env[config.apiKey];
       delete env[config.apiKey];
+      if (withheldApiKey) {
+        // A secret the user stored under the prefixed name is their explicit choice and wins.
+        env[`${WITHHELD_PROVIDER_API_KEY_PREFIX}${config.apiKey}`] ??= withheldApiKey;
+      }
       for (const key of config.strip) delete env[key];
       for (const key of Object.keys(env)) {
         if (key.startsWith("CLAUDE_CODE_OAUTH_") && provider === "anthropic") delete env[key];
