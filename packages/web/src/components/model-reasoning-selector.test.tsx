@@ -264,9 +264,9 @@ describe("ModelReasoningSelector", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: /model/i }));
 
     expect(await screen.findByRole("menuitem", { name: "Back" })).toBeInTheDocument();
-    expect(screen.getByRole("menu")).toHaveStyle({
-      maxHeight: "min(14rem, var(--radix-dropdown-menu-content-available-height))",
-    });
+    expect(screen.getByRole("menu").style.maxHeight).toBe(
+      "min(14rem, var(--radix-dropdown-menu-content-available-height))"
+    );
     expect(screen.getByRole("menuitemradio", { name: /claude sonnet 4.6/i })).toHaveAttribute(
       "aria-checked",
       "true"
