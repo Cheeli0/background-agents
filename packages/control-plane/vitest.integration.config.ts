@@ -220,6 +220,14 @@ export default defineConfig({
   ],
   test: {
     include: ["test/integration/**/*.test.ts"],
+    // vitest 5 hands each new worker a "warm modules" snapshot of the file's
+    // import graph. With the fs module cache on, every entry points at a cached
+    // file on disk, and @cloudflare/vitest-plugin inlines each file's code into
+    // one websocket message. For this package that message is about 34 MB, over
+    // workerd's 32 MiB limit, so every test file after a worker's first fails
+    // with "WebSocket protocol error 1009: Message is too large". Without the
+    // fs cache the snapshot carries no inlined code and stays small.
+    fsModuleCache: false,
     setupFiles: ["test/integration/apply-migrations.ts"],
     onUnhandledError(error) {
       // Better Auth implements redirects and invalid-token responses as thrown

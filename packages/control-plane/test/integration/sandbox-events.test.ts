@@ -450,6 +450,10 @@ describe("POST /internal/sandbox-event", () => {
 
   it("disables failed native MCP cleanup before advancing the queue", async () => {
     const { stub } = await initSession();
+    // Session init warms a sandbox in the background, and that spawn records a
+    // fresh MCP launch (runtime version 0). Let it settle so it cannot reset the
+    // runtime version set below while the event is processed.
+    await waitForSandboxStatus(stub, "failed");
     const [{ id: authorId }] = await queryDO<{ id: string }>(
       stub,
       "SELECT id FROM participants LIMIT 1"
