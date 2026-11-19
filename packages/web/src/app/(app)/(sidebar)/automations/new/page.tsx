@@ -60,7 +60,7 @@ function NewAutomationContent() {
   if (authorizationLoading || !canCreate) return null;
 
   const collapsedHeader = !isOpen && (
-    <header className="border-b border-border-muted flex-shrink-0">
+    <header className="border-b border-border-muted shrink-0">
       <div className="px-4 py-3 flex items-center gap-2">
         <CollapsedSidebarControls />
         <Link
@@ -151,7 +151,7 @@ function NewAutomationContent() {
     return (
       <div className="h-full flex flex-col">
         {!isOpen && (
-          <header className="border-b border-border-muted flex-shrink-0">
+          <header className="border-b border-border-muted shrink-0">
             <div className="px-4 py-3 flex items-center gap-2">
               <CollapsedSidebarControls />
             </div>
@@ -265,7 +265,7 @@ function NewAutomationFallback() {
       mode="create"
       header={
         !isOpen && (
-          <header className="border-b border-border-muted flex-shrink-0">
+          <header className="border-b border-border-muted shrink-0">
             <div className="px-4 py-3 flex items-center gap-2">
               <CollapsedSidebarControls />
             </div>

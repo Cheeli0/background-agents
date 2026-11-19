@@ -68,7 +68,7 @@ export default function PierreDiffRenderer({
     return (
       <pre
         aria-label="Raw diff"
-        className={`overflow-auto p-4 font-mono text-xs leading-5 ${wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}
+        className={`overflow-auto p-4 font-mono text-xs leading-5 ${wrap ? "whitespace-pre-wrap wrap-break-word" : "whitespace-pre"}`}
       >
         {patch}
       </pre>

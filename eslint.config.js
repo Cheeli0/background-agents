@@ -410,6 +410,15 @@ export default tseslint.config(
     rules: {
       ...reactPlugin.configs.recommended.rules,
       ...reactHooksPlugin.configs.recommended.rules,
+      // eslint-plugin-react-hooks 7 folds the React Compiler checks into
+      // `recommended`. These apps do not run the compiler, and the three rules
+      // below flag established patterns (fetch-and-sync effects, latest-value
+      // refs, hand-written memoization) across dozens of components. Rewriting
+      // them would change render timing for no runtime gain, so they stay off
+      // until the compiler is adopted. The other compiler rules stay on.
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/refs": "off",
+      "react-hooks/preserve-manual-memoization": "off",
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
     },

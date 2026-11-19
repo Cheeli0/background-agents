@@ -45,7 +45,7 @@ export function AnalyticsOverviewTab({
       <button
         type="button"
         onClick={() => onSelectTab(tab)}
-        className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-medium text-accent hover:bg-accent-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+        className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-medium text-accent hover:bg-accent-muted focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
       >
         {ANALYTICS_TAB_LABELS[tab]}
         <ChevronRightIcon className="h-3 w-3" />

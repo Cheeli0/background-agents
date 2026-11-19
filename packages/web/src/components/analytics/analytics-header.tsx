@@ -57,7 +57,7 @@ export function AnalyticsHeader({
 }) {
   const { isOpen } = useSidebarContext();
   return (
-    <header className="sticky top-0 z-20 border-b border-border-muted bg-[color-mix(in_srgb,var(--background)_88%,transparent)] backdrop-blur">
+    <header className="sticky top-0 z-20 border-b border-border-muted bg-[color-mix(in_srgb,var(--background)_88%,transparent)] backdrop-blur-sm">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 pt-2.5 sm:px-6 lg:px-8">
         {!isOpen && <CollapsedSidebarControls />}
         <div className="flex min-w-0 flex-1 items-baseline gap-3">
@@ -162,7 +162,7 @@ function ScopeHelp() {
     <Popover>
       <PopoverTrigger
         aria-label="What each session scope includes"
-        className="rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+        className="rounded p-1 text-muted-foreground hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
       >
         <InfoIcon />
       </PopoverTrigger>
@@ -189,7 +189,7 @@ function AboutThisData() {
     <Popover>
       <PopoverTrigger
         aria-label="About this data"
-        className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+        className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
       >
         <InfoIcon />
         {/* Icon only on phones, where the tabs need the width. */}

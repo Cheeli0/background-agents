@@ -62,7 +62,7 @@ export function ExecutionActivity({
         aria-label={`No runs for ${automationName}`}
         draggable={false}
         onClick={onClick}
-        className="rounded-sm text-[10px] text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="rounded-sm text-[10px] text-muted-foreground outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
       >
         No runs
       </Link>
@@ -91,7 +91,7 @@ export function ExecutionActivity({
               aria-label={`${presentation.label}, ${occurredAt}, ${automationName}`}
               draggable={false}
               onClick={onClick}
-              className="flex h-4 w-2 items-center justify-center rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex h-4 w-2 items-center justify-center rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
             >
               <StatusShape status={execution.status} />
             </Link>

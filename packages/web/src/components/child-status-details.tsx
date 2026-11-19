@@ -27,7 +27,7 @@ function ChildSummary({ session }: { session: ChildSession }) {
         <div className="min-w-0">
           <Link
             href={`/session/${encodeURIComponent(session.id)}`}
-            className="break-words text-sm font-medium text-accent hover:underline [overflow-wrap:anywhere]"
+            className="wrap-break-word text-sm font-medium text-accent hover:underline wrap-anywhere"
           >
             {session.title || session.id}
           </Link>
@@ -51,7 +51,7 @@ function ChildSummary({ session }: { session: ChildSession }) {
           value ? (
             <div key={label} className="contents">
               <dt className="text-muted-foreground">{label}</dt>
-              <dd className="break-words [overflow-wrap:anywhere]">{value}</dd>
+              <dd className="wrap-break-word wrap-anywhere">{value}</dd>
             </div>
           ) : null
         )}
@@ -111,7 +111,9 @@ function ChildStatusDetails({
                 </p>
               )}
               {result.finalResponse.error && (
-                <p className="mb-2 break-words text-destructive">{result.finalResponse.error}</p>
+                <p className="mb-2 wrap-break-word text-destructive">
+                  {result.finalResponse.error}
+                </p>
               )}
               <SafeMarkdown
                 content={result.finalResponse.textContent || "(empty)"}
@@ -125,7 +127,7 @@ function ChildStatusDetails({
       )}
       <details className="min-w-0 border border-border-muted bg-card p-3 text-xs">
         <summary className="cursor-pointer text-muted-foreground">Full tool output</summary>
-        <pre className="mt-2 max-h-64 max-w-full overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+        <pre className="mt-2 max-h-64 max-w-full overflow-auto whitespace-pre-wrap wrap-break-word wrap-anywhere">
           {result.kind === "detail" && result.finalResponse
             ? `${result.agentMessage}\n\nfinalResponse.textContent:\n${result.finalResponse.textContent}`
             : result.agentMessage}

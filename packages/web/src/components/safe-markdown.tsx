@@ -199,7 +199,7 @@ export function SafeMarkdown({
 }: SafeMarkdownProps) {
   return (
     <div
-      className={`prose prose-sm dark:prose-invert min-w-0 max-w-none break-words [overflow-wrap:anywhere] ${className}`}
+      className={`prose prose-sm dark:prose-invert min-w-0 max-w-none wrap-anywhere ${className}`}
     >
       <MermaidMarkdownContext.Provider value={renderMermaid}>
         <ReactMarkdown
@@ -273,11 +273,11 @@ export function SafeMarkdown({
             ol: MarkdownOrderedList,
             // Blockquotes
             blockquote: MarkdownBlockquote,
-            // Tables: break-words resets the inherited overflow-wrap:anywhere, which would
+            // Tables: wrap-break-word resets the inherited overflow-wrap:anywhere, which would
             // let auto layout shrink columns to one character; wide tables scroll instead.
             table: ({ children, ...props }: ComponentPropsWithoutRef<"table">) => (
               <div className="max-w-full overflow-x-auto">
-                <table className="min-w-full border-collapse text-sm break-words" {...props}>
+                <table className="min-w-full border-collapse text-sm wrap-break-word" {...props}>
                   {children}
                 </table>
               </div>

@@ -356,7 +356,7 @@ function EnvironmentRepositoryRow({
         triggerClassName="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
       >
         <BranchIcon className="w-3.5 h-3.5" />
-        <span className="truncate max-w-[9rem]">
+        <span className="truncate max-w-36">
           {loadingBranches ? "Loading..." : branch || "branch"}
         </span>
         <ChevronDownIcon className="w-3 h-3" />

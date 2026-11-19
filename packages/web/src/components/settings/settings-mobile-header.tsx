@@ -53,7 +53,7 @@ export function SettingsMobileHeader({
       <h1
         ref={headingRef}
         tabIndex={headingRef ? -1 : undefined}
-        className="truncate px-2 text-center text-sm font-medium text-foreground outline-none"
+        className="truncate px-2 text-center text-sm font-medium text-foreground outline-hidden"
       >
         {title}
       </h1>

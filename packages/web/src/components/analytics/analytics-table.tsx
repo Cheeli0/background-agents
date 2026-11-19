@@ -123,7 +123,7 @@ export function AnalyticsTable<Row>({
                         type="button"
                         onClick={() => toggleSort(column)}
                         className={cn(
-                          "inline-flex items-center gap-1 rounded hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring",
+                          "inline-flex items-center gap-1 rounded hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring",
                           active && "text-foreground"
                         )}
                       >
@@ -166,7 +166,7 @@ export function AnalyticsTable<Row>({
                           value={column.barValue(row)}
                           max={barMaxima.get(column.id) ?? 0}
                         />
-                        <span className="min-w-[3.25rem]">{column.cell(row)}</span>
+                        <span className="min-w-13">{column.cell(row)}</span>
                       </span>
                     ) : (
                       column.cell(row)

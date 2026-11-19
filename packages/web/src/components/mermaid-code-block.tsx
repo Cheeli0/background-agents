@@ -68,7 +68,7 @@ function MermaidDiagram({
   return (
     <figure className="not-prose my-3 min-w-0 max-w-full">
       <div
-        className="max-h-[32rem] max-w-full overflow-auto rounded border border-border p-3"
+        className="max-h-128 max-w-full overflow-auto rounded border border-border p-3"
         tabIndex={0}
       >
         {/* SVG is an inert image, not inline DOM. Source remains available below. */}

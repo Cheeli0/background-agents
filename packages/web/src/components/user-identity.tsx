@@ -34,7 +34,7 @@ export function UserIdentity(user: UserIdentityProps) {
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium">{name}</span>
         {user.email && (
-          <span className="block truncate text-xs text-muted-foreground group-data-[highlighted]:text-foreground">
+          <span className="block truncate text-xs text-muted-foreground group-data-highlighted:text-foreground">
             {user.email}
           </span>
         )}

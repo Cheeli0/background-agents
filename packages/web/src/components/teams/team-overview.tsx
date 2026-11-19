@@ -164,7 +164,7 @@ function SessionBucket({
                   {session.capabilities.canRead ? (
                     <Link
                       href={`/session/${encodeURIComponent(session.id)}`}
-                      className="break-words text-sm font-medium text-foreground hover:underline"
+                      className="wrap-break-word text-sm font-medium text-foreground hover:underline"
                     >
                       {session.title ?? "Untitled session"}
                     </Link>

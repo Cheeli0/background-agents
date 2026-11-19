@@ -875,7 +875,7 @@ function RoutingRulesSection({
                     value={rule.keyword}
                     onChange={(e) => updateRule(rule.id, { keyword: e.target.value })}
                     placeholder="keyword"
-                    className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-secondary-foreground focus:outline-none focus:ring-2 focus:ring-ring sm:w-48"
+                    className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-secondary-foreground focus:outline-hidden focus:ring-2 focus:ring-ring sm:w-48"
                   />
                   <span
                     className="self-center text-muted-foreground max-sm:rotate-90"

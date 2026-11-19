@@ -122,12 +122,14 @@ function useCategoryPagination(
     { shouldRetryOnError: false }
   );
 
+  // eslint-disable-next-line react-hooks/immutability -- see the ref counter note below.
   useEffect(() => {
     if (!loadedPage || !paginationRequest) return;
     if (
       paginationRequest.filterIdentity === filterIdentity &&
       paginationRequest.generation === paginationGeneration.current
     ) {
+      // eslint-disable-next-line react-hooks/immutability -- the sequence counter is a ref, mutated only inside this effect.
       const sequence = nextPageSequence.current++;
       const updates = pendingItemUpdates.current ?? [];
       const page = {

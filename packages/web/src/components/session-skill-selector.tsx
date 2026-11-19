@@ -68,7 +68,7 @@ export function SessionSkillSelector({
       triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
     >
       <SparkleIcon className="h-3.5 w-3.5" />
-      <span className="max-w-[9rem] truncate">{selectedLabel}</span>
+      <span className="max-w-36 truncate">{selectedLabel}</span>
       {target && (
         <span className="text-xs text-muted-foreground">
           {previewLoading ? "..." : preview ? `(${preview.skills.length})` : ""}

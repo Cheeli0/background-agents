@@ -163,7 +163,7 @@ export function SharedMemoriesSettings() {
           <span className={`truncate ${selectedLabel ? "" : "text-muted-foreground"}`}>
             {selectedLabel ?? "Choose a repository or environment"}
           </span>
-          <ChevronDownIcon className="h-3 w-3 flex-shrink-0" />
+          <ChevronDownIcon className="h-3 w-3 shrink-0" />
         </Combobox>
       </div>
       {(reposLoading || environmentsLoading) && <p className="text-sm">Loading scopes…</p>}

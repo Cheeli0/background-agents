@@ -483,7 +483,7 @@ describe("Home", () => {
     ).toBeTruthy();
     expect(repository.querySelectorAll("svg")).toHaveLength(1);
     expect(branch.closest("button")?.querySelectorAll("svg")).toHaveLength(1);
-    expect(branch).toHaveClass("max-w-[9rem]", "truncate");
+    expect(branch).toHaveClass("max-w-36", "truncate");
     expect(screen.queryByText("build agent")).not.toBeInTheDocument();
   });
 

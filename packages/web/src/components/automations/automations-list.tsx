@@ -147,7 +147,7 @@ export function AutomationsList({
               <Link
                 href={navigation.detail(automation.id)}
                 aria-label={`View ${automation.name}`}
-                className="absolute inset-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                className="absolute inset-0 rounded-sm outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               />
               {/* Header: Name + badge | Actions */}
               <div className="flex items-start justify-between gap-3 sm:items-center sm:gap-4">
@@ -178,7 +178,7 @@ export function AutomationsList({
                     />
                   </div>
                 </div>
-                <div className="relative z-10 hidden flex-shrink-0 items-center gap-1 sm:flex">
+                <div className="relative z-10 hidden shrink-0 items-center gap-1 sm:flex">
                   {canManage &&
                     (automation.enabled ? (
                       <Button variant="ghost" size="xs" onClick={() => onPause(automation.id)}>
@@ -260,14 +260,14 @@ export function AutomationsList({
               >
                 <span className="inline-flex items-center gap-1">
                   {automation.environmentIds.length > 0 && automation.repositories.length === 0 ? (
-                    <BoxIcon className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+                    <BoxIcon className="w-3 h-3 shrink-0" aria-hidden="true" />
                   ) : (
-                    <FolderIcon className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+                    <FolderIcon className="w-3 h-3 shrink-0" aria-hidden="true" />
                   )}
                   {formatAutomationTargetsLabel(automation, environments)}
                 </span>
                 <span className="inline-flex items-center gap-1">
-                  <ClockIcon className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+                  <ClockIcon className="w-3 h-3 shrink-0" aria-hidden="true" />
                   <span
                     className="sm:hidden"
                     title={describeTrigger(automation)}

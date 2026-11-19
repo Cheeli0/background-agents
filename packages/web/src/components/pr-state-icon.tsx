@@ -31,7 +31,7 @@ export function PullRequestStateIcon({
   const Icon = PR_STATE_ICONS[state];
   return (
     <span
-      className={`flex-shrink-0 ${PR_STATE_ICON_TEXT_CLASS[state]}`}
+      className={`shrink-0 ${PR_STATE_ICON_TEXT_CLASS[state]}`}
       title={label}
       aria-label={label}
       data-testid={`pr-state-${state}`}

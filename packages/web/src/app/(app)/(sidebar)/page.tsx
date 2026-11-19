@@ -454,7 +454,7 @@ function HomeContent({
     <div className="h-full flex flex-col">
       {/* Header with toggle when sidebar is closed */}
       {!isOpen && (
-        <header className="border-b border-border-muted flex-shrink-0">
+        <header className="border-b border-border-muted shrink-0">
           <div className="px-4 py-3">
             <CollapsedSidebarControls />
           </div>
@@ -531,7 +531,7 @@ function HomeContent({
                     placeholder="What do you want to build?"
                     autoFocus
                     autoComplete="off"
-                    className="w-full resize-none bg-transparent px-4 pt-4 pb-12 focus:outline-none text-foreground placeholder:text-secondary-foreground disabled:opacity-50"
+                    className="w-full resize-none bg-transparent px-4 pt-4 pb-12 focus:outline-hidden text-foreground placeholder:text-secondary-foreground disabled:opacity-50"
                     rows={3}
                   />
                   {/* Submit button */}

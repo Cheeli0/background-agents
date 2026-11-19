@@ -48,7 +48,7 @@ export function AnalyticsKpiStrip({ items }: { items: AnalyticsKpiItem[] }) {
 export function AnalyticsKpiGroups({ groups }: { groups: AnalyticsKpiGroup[] }) {
   return (
     <div
-      className="grid gap-4 xl:gap-3 xl:[grid-template-columns:var(--analytics-kpi-groups)]"
+      className="grid gap-4 xl:gap-3 xl:grid-cols-(--analytics-kpi-groups)"
       style={
         {
           "--analytics-kpi-groups": groups.map((group) => `${group.items.length}fr`).join(" "),

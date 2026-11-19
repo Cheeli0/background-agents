@@ -42,7 +42,7 @@ export function SegmentedControl<Value extends string>({
           key={option.value}
           value={option.value}
           size="sm"
-          className="h-7 min-w-0 rounded-sm px-2.5 text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm"
+          className="h-7 min-w-0 rounded-sm px-2.5 text-xs font-medium text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-xs"
         >
           {option.label}
         </ToggleGroupItem>

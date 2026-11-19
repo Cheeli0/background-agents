@@ -125,7 +125,7 @@ function PullRequestRow({
         <span className="text-foreground">{label}</span>
       )}
       {showHead && prHead && (
-        <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]" title={prHead}>
+        <span className="min-w-0 text-muted-foreground wrap-anywhere" title={prHead}>
           {prHead}
         </span>
       )}
@@ -260,7 +260,7 @@ export function MetadataSection({
                   href={getScmRepoUrl(repoOwner, repoName)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-accent [overflow-wrap:anywhere] hover:underline"
+                  className="text-accent wrap-anywhere hover:underline"
                   title={`${repoOwner}/${repoName}`}
                 >
                   {repoOwner}/{repoName}
@@ -373,7 +373,7 @@ export function MetadataSection({
                       href={getScmRepoUrl(repo.repoOwner, repo.repoName)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="min-w-0 text-accent [overflow-wrap:anywhere] hover:underline"
+                      className="min-w-0 text-accent wrap-anywhere hover:underline"
                       title={`${repo.repoOwner}/${repo.repoName}`}
                     >
                       {repo.repoOwner}/{repo.repoName}
@@ -392,13 +392,13 @@ export function MetadataSection({
                           href={repoBranchUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="min-w-0 text-accent [overflow-wrap:anywhere] hover:underline"
+                          className="min-w-0 text-accent wrap-anywhere hover:underline"
                           title={repo.branchName}
                         >
                           {repo.branchName}
                         </a>
                       ) : (
-                        <span className="min-w-0 [overflow-wrap:anywhere]" title={repo.branchName}>
+                        <span className="min-w-0 wrap-anywhere" title={repo.branchName}>
                           {repo.branchName}
                         </span>
                       )}
@@ -446,7 +446,7 @@ export function MetadataSection({
               }
               className="flex items-start gap-2 text-xs text-warning"
             >
-              <ErrorIcon className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <ErrorIcon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               <span className="min-w-0">
                 {(warning.repoOwner && warning.repoName
                   ? `${warning.repoOwner}/${warning.repoName}: `

@@ -155,7 +155,7 @@ export function TeamRepositories({ team }: { team: TeamResponse }) {
                   className="flex flex-wrap items-center justify-between gap-3 p-4"
                 >
                   <div className="min-w-0 space-y-1">
-                    <p className="break-words text-sm font-medium text-foreground">{label}</p>
+                    <p className="wrap-break-word text-sm font-medium text-foreground">{label}</p>
                     <Badge>
                       {grant.kind === "installation"
                         ? "Installation-wide grant"
