@@ -38,9 +38,14 @@ export class SandboxBootstrapHandler {
     }
 
     const sandbox = this.sandboxRepository.getSandbox();
+    // A fenced generation's credentials are revoked for good. Fencing keeps the
+    // sandbox id and can leave the status untouched (or set it to `failed`,
+    // which reconnects allow), so the status check alone would still hand a
+    // fenced launch its environment while its token is unexpired.
     if (
       !sandbox ||
       sandbox.modal_sandbox_id !== record.sandboxId ||
+      sandbox.fenced !== 0 ||
       isSandboxReconnectBlockedStatus(sandbox.status)
     ) {
       log.warn("Sandbox bootstrap refused: generation is not current", {

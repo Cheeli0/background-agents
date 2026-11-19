@@ -100,6 +100,8 @@ describe("SandboxBootstrapHandler", () => {
   it.each([
     ["a newer generation", "modal_sandbox_id = 'sb-2'"],
     ["a stopped sandbox", "status = 'stopped'"],
+    ["a fenced generation", "fenced = 1"],
+    ["a fenced generation whose startup failed", "fenced = 1, status = 'failed'"],
   ])("refuses a bootstrap that no longer belongs to %s", async (_name, assignments) => {
     const { store, sandboxes, setSandbox } = createStores();
     await store.put({ sandboxId: "sb-1", env: ENV }, "token-1", Date.now() + 60_000);
