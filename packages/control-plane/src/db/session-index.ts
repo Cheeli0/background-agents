@@ -129,6 +129,8 @@ export interface SessionEntry {
 
 /** Declarative fields used only when creating a session index row. */
 export interface CreateSessionCommand extends SessionEntry {
+  /** The GitHub bot started this session to submit a PR review; see {@link SessionIndexStore.isGitHubReview}. */
+  githubReview?: boolean;
   /** Memory selection to pin atomically with the session row. */
   memory?: SessionMemoryPin;
   /** Managed-skill manifest to pin atomically with the session row. */
@@ -241,8 +243,8 @@ export class SessionIndexStore {
 
     const sessionStmt = this.db
       .prepare(
-        `INSERT INTO sessions (id, title, repo_owner, repo_name, harness, model, reasoning_effort, base_branch, status, parent_session_id, root_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, scm_login, user_id, environment_id, created_at, updated_at, owner_team_id, visibility)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN ? ELSE (SELECT root_session_id FROM sessions WHERE id = ?) END, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sessions (id, title, repo_owner, repo_name, harness, model, reasoning_effort, base_branch, status, parent_session_id, root_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, scm_login, user_id, environment_id, created_at, updated_at, owner_team_id, visibility, github_review)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN ? ELSE (SELECT root_session_id FROM sessions WHERE id = ?) END, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         session.id,
@@ -268,7 +270,8 @@ export class SessionIndexStore {
         session.createdAt,
         session.updatedAt,
         session.ownerTeamId,
-        session.visibility
+        session.visibility,
+        session.githubReview ? 1 : 0
       );
 
     const repositoryStmts = (session.repositories ?? []).map((repo, position) =>
@@ -459,6 +462,20 @@ export class SessionIndexStore {
 
     const row = parseSessionRow(result);
     return row ? toEntry(row) : null;
+  }
+
+  /**
+   * Whether the GitHub bot created this session to submit a pull request review
+   * (a review request or auto-review), not to answer a PR comment or review
+   * thread. Written once at creation from the bot's service-authenticated
+   * request and never updated, so nothing a sandbox does can change it.
+   */
+  async isGitHubReview(id: string): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT github_review FROM sessions WHERE id = ?")
+      .bind(id)
+      .first<{ github_review: number }>();
+    return row?.github_review === 1;
   }
 
   async getByIds(sessionIds: readonly string[]): Promise<ReadonlyMap<string, SessionEntry>> {

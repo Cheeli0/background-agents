@@ -19,15 +19,49 @@ function isBotLogin(login: string | undefined, botUsername: string): boolean {
   return login?.toLowerCase() === botUsername.toLowerCase();
 }
 
-/** GitHub rejects APPROVE and REQUEST_CHANGES reviews from a PR's author, including the App. */
-function isAuthoredByBot(pr: { user: { login: string } }, env: Env): boolean {
-  return isBotLogin(pr.user.login, env.GITHUB_BOT_USERNAME);
+/**
+ * The logins a review request may name to reach this bot: the webhook App itself and, when a
+ * second App submits the reviews, that App too — it is the one GitHub lists as the reviewer, so
+ * the re-request button on a PR it reviewed names it, never the webhook App.
+ */
+export function reviewRequestLogins(
+  env: Pick<Env, "GITHUB_BOT_USERNAME" | "GITHUB_REVIEWER_USERNAME">
+): string[] {
+  const reviewerLogin = env.GITHUB_REVIEWER_USERNAME?.trim();
+  return reviewerLogin ? [env.GITHUB_BOT_USERNAME, reviewerLogin] : [env.GITHUB_BOT_USERNAME];
 }
 
-export function isReviewRequestedForBot(payload: unknown, botUsername: string): boolean {
+function isReviewRequestLogin(
+  login: string | undefined,
+  acceptedLogins: readonly string[]
+): boolean {
+  return acceptedLogins.some((accepted) => isBotLogin(login, accepted));
+}
+
+export function isReviewRequestedForBot(
+  payload: unknown,
+  acceptedLogins: readonly string[]
+): boolean {
   const parsed = requestedReviewerPayloadSchema.safeParse(payload);
   if (!parsed.success) return false;
-  return isBotLogin(parsed.data.requested_reviewer?.login, botUsername);
+  return isReviewRequestLogin(parsed.data.requested_reviewer?.login, acceptedLogins);
+}
+
+/**
+ * The code-review prompt fields that follow from the account whose token submits the review: the
+ * reviewer App when one is configured, otherwise the webhook App. `isSelfReview` holds when GitHub
+ * would refuse that account's approval as the PR's author; `hasReviewerApp` makes the prompt fetch
+ * the reviewer App's token before the review POST.
+ */
+function reviewIdentityFields(
+  env: Pick<Env, "GITHUB_BOT_USERNAME" | "GITHUB_REVIEWER_USERNAME">,
+  author: string
+): { isSelfReview: boolean; hasReviewerApp: boolean } {
+  const reviewerLogin = env.GITHUB_REVIEWER_USERNAME?.trim();
+  return {
+    isSelfReview: isBotLogin(author, reviewerLogin || env.GITHUB_BOT_USERNAME),
+    hasReviewerApp: Boolean(reviewerLogin),
+  };
 }
 
 export async function handleReviewRequested(
@@ -38,7 +72,7 @@ export async function handleReviewRequested(
 ): Promise<HandlerResult> {
   const { pull_request: pr, repository: repo, requested_reviewer, sender } = payload;
 
-  if (!isBotLogin(requested_reviewer?.login, env.GITHUB_BOT_USERNAME)) {
+  if (!isReviewRequestLogin(requested_reviewer?.login, reviewRequestLogins(env))) {
     log.debug("handler.review_not_for_bot", {
       trace_id: traceId,
       requested_reviewer: requested_reviewer?.login,
@@ -65,7 +99,7 @@ export async function handleReviewRequested(
         head: pr.head.ref,
         isPublic: !repo.private,
         codeReviewInstructions: config.codeReviewInstructions,
-        isSelfReview: isAuthoredByBot(pr, env),
+        ...reviewIdentityFields(env, pr.user.login),
       }),
   });
 }
@@ -102,7 +136,7 @@ export async function handlePullRequestOpened(
         head: pr.head.ref,
         isPublic: !repo.private,
         codeReviewInstructions: config.codeReviewInstructions,
-        isSelfReview: isAuthoredByBot(pr, env),
+        ...reviewIdentityFields(env, pr.user.login),
       }),
   });
 }

@@ -35,8 +35,10 @@ App or deploying the bot worker, start with
 | Post back to GitHub       | Submit a PR review, reply to a review thread, or post a PR summary comment |
 | Customize behavior        | Set repository scope, trigger users, models, and custom instructions       |
 
-Open-Inspect does not use GitHub slash commands today, and it does not support requesting the GitHub
-App bot through the PR reviewer picker. Use auto-review or `@mention` comments instead.
+Open-Inspect does not use GitHub slash commands today. To start a review, use auto-review or an
+`@mention` comment. On a PR the bot has already reviewed, GitHub's re-request button on that
+reviewer also starts a fresh review; with a [separate reviewer App](#optional-separate-reviewer-app)
+the button names the reviewer App, and both logins are accepted.
 
 ---
 
@@ -69,13 +71,69 @@ follow-up after a draft becomes ready, mention the bot in a PR comment.
 The agent can submit a general review comment, approve the PR, request changes, or add inline review
 comments when useful.
 
-An explicitly allowed App bot can trigger review of its own PR, but that self-review can only
-comment, not approve or request changes. Allowing the login only passes the bot's trigger gate: the
-request still acts as the App's bot account, which cannot sign in on the web, so Open-Inspect admits
-it only if that account is already known to the workspace or unsafe allow-all is in effect (see
-[Bot enrollment](../AUTH.md#bot-enrollment)). Pull requests that an automation run's own prompt
-opens are authored by the App (see [Commit Signing](#commit-signing)), so auto-review skips them by
-default, and any review the bot submits on them can only comment.
+An explicitly allowed App bot can trigger review of its own PR. By default, that self-review can
+only comment, not approve or request changes: GitHub does not allow a PR author to approve their own
+PR. An optional separate reviewer App lets the review approve those PRs instead. Reviews of PRs
+authored by the reviewer App itself still only comment. Allowing the login only passes the bot's
+trigger gate: the request still acts as the App's bot account, which cannot sign in on the web, so
+Open-Inspect admits it only if that account is already known to the workspace or unsafe allow-all is
+in effect (see [Bot enrollment](../AUTH.md#bot-enrollment)). Pull requests that an automation run's
+own prompt opens are authored by the App (see [Commit Signing](#commit-signing)), so auto-review
+skips them by default, and without a reviewer App any review the bot submits on them can only
+comment.
+
+### Optional Separate Reviewer App
+
+Create a second GitHub App with only **Pull requests: Read & write** (GitHub also grants the
+mandatory Metadata read permission). Disable its webhooks and install it on the repositories you
+want reviewed. The main App continues to receive webhook events and handle other GitHub operations;
+the second App is only the review-submission identity.
+
+Set all four Terraform values together, or leave all four empty:
+
+- `github_reviewer_app_id`: the second App's ID
+- `github_reviewer_app_private_key`: its private key in PKCS#8 PEM format
+- `github_reviewer_app_installation_id`: its installation ID
+- `github_reviewer_username`: its exact bot login, such as `my-reviewer[bot]`
+
+The three credentials are control-plane bindings (`GITHUB_REVIEWER_APP_*`); the login is a GitHub
+bot binding (`GITHUB_REVIEWER_USERNAME`). For non-Terraform deployments, configure the same four
+values on their respective services. A login without all three credentials stops every review, while
+credentials without the login leave reviews on the main App's identity.
+
+The agent fetches a short-lived installation token from
+`GET /sessions/:id/review-token?repository=<owner>/<name>` using its sandbox token immediately
+before submitting the review, naming the repository it is about to review. The route authenticates
+the caller against that session, issues the token only to sessions the GitHub bot created for a
+review request or auto-review (an `@mention` session, or any other session's sandbox, gets 403),
+issues it only while that session is processing the GitHub bot's own review prompt (a follow-up
+prompt from a collaborator, whether from the web, a personal access token, Slack or Linear, cannot
+mint it, and neither can a session with no prompt in progress), and scopes it to the repository
+under review, which must be a member of the session (otherwise 403) within the owner team's
+repository grants. The token is minted with only the `pull_requests: write` permission, and
+responses carry `Cache-Control: no-store`. Only the review POST of an auto-review or a review
+request uses this credential; `@mention` responses and every other GitHub call keep their existing
+credential. With no reviewer App configured, the endpoint returns 404 and the prompt omits the token
+fetch. When the GitHub bot has a reviewer login, any token-fetch failure, including that 404 from
+missing or partial reviewer credentials, stops the review: the agent does not retry the POST with
+any other credential and instead reports the failure in its final response.
+
+Before enabling a reviewer App, consider two consequences:
+
+- **No human needs to be involved in an approval.** An automation run can open a PR as the main App
+  and the reviewer App can then approve it. If your branch protection or rulesets count approvals
+  from GitHub Apps toward required reviews, such a PR can satisfy them with no person reviewing it.
+  Keep a human-review requirement (for example, CODEOWNERS review) where that matters.
+- **App-authored PRs are still gated by trigger users.** Auto-review runs on a PR's `opened` event,
+  whose sender, for a PR the main App opened, is the App's bot login, and the trigger-user gate
+  applies to that login as to any other sender: with an allowlist, the PR is auto-reviewed only when
+  the App's bot login is in `allowedTriggerUsers`; without one, the login must pass the same
+  write-permission check as any other sender. A review request on such a PR from a user who passes
+  the gate still starts a review, and with a reviewer App configured that review can approve. To
+  keep App-authored PRs from being approved, keep the App's login out of `allowedTriggerUsers` and
+  do not request reviews on them, or leave the reviewer App unconfigured (the main App's reviews of
+  its own PRs then submit `COMMENT`). Adding a reviewer App does not change which PRs are reviewed,
+  only which identity submits the review.
 
 ---
 
@@ -328,9 +386,9 @@ Important limitations:
 
 ### Bot Behavior
 
-- Auto-review skips draft PRs. An explicitly allowed App bot can trigger a comment-only self-review.
-  Manual `@mention` triggers still pass the repository and user gates, then team routing and
-  creation checks.
+- Auto-review skips draft PRs. An explicitly allowed App bot can trigger a self-review, which is
+  comment-only unless a separate reviewer App submits it. Manual `@mention` triggers still pass the
+  repository and user gates, then team routing and creation checks.
 - The bot ignores bot-authored comments, ordinary issue comments, and comments that do not mention
   the bot.
 - If the bot cannot load its GitHub integration settings, it fails closed and does not start direct
@@ -368,7 +426,8 @@ list.
 The deprecated workspace auto-review only runs for newly opened, non-draft PRs. It is skipped for
 draft PRs, disabled repositories, and users who are not allowed to trigger the bot. An App-authored
 PR needs the App bot login explicitly allowed, and its bot account must already be known to
-Open-Inspect unless unsafe allow-all is in effect; its self-review can only comment.
+Open-Inspect unless unsafe allow-all is in effect; its self-review can only comment unless a
+separate reviewer App submits it.
 
 If a PR was converted from draft to ready for review, mention the bot in a PR comment instead.
 
