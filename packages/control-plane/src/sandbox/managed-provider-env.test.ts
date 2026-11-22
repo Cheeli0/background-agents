@@ -77,6 +77,7 @@ describe("prepareManagedProviderEnv", () => {
       })
     ).toEqual({
       OPENAI_OAUTH_MANAGED: "1",
+      OPENINSPECT_USER_OPENAI_API_KEY: "sk-openai",
       XAI_API_KEY: "xai-key",
       USER_VALUE: "visible",
     });
@@ -117,7 +118,11 @@ describe("prepareManagedProviderEnv", () => {
           anthropic: "api_key",
         },
       })
-    ).toEqual({ OPENAI_OAUTH_MANAGED: "1", XAI_API_KEY: "xai-key" });
+    ).toEqual({
+      OPENAI_OAUTH_MANAGED: "1",
+      OPENINSPECT_USER_OPENAI_API_KEY: "sk-openai",
+      XAI_API_KEY: "xai-key",
+    });
   });
 
   it.each(["api_key", "provider_account"] as const)(
