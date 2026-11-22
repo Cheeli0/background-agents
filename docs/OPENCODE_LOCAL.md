@@ -55,7 +55,7 @@ a fresh machine — it just picks a free model rather than the one you want. For
 repo, log in and select a model explicitly:
 
 ```bash
-opencode run -m anthropic/claude-sonnet-4-6 "..."   # the catalog default in packages/shared/src/models.ts
+opencode run -m anthropic/claude-sonnet-5-5 "..."   # the catalog default in packages/shared/src/models.ts
 opencode models                                      # everything your credentials can reach
 ```
 

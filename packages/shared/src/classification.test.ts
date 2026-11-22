@@ -251,7 +251,7 @@ describe("callOpenAIStructured", () => {
       Response.json({ choices: [{ message: { content: "{}" } }] })
     );
 
-    await callOpenAIStructured({ ...OPENAI_TARGET, model: "gpt-6.1-sol" }, "prompt", SCHEMA, "low");
+    await callOpenAIStructured({ ...OPENAI_TARGET, model: "gpt-6.2-sol" }, "prompt", SCHEMA, "low");
 
     const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
     expect(body.reasoning_effort).toBe("low");

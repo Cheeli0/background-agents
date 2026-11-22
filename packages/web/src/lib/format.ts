@@ -6,8 +6,8 @@ import { getModelDisplayName } from "@open-inspect/shared/models";
 
 /**
  * Format model ID to display name.
- * e.g., "anthropic/claude-sonnet-4-5" → "Claude Sonnet 4.5"
- * e.g., "openai/gpt-6-sol" → "GPT-6 Sol"
+ * e.g., "anthropic/claude-sonnet-5-5" → "Claude Sonnet 5.5"
+ * e.g., "openai/gpt-6.2-sol" → "GPT-6.2 Sol"
  */
 export function formatModelName(modelId: string): string {
   if (!modelId) return "Unknown Model";
@@ -16,7 +16,7 @@ export function formatModelName(modelId: string): string {
 
 /**
  * Format model ID to lowercase display format for footer.
- * e.g., "anthropic/claude-sonnet-4-5" → "claude sonnet 4.5"
+ * e.g., "anthropic/claude-sonnet-5-5" → "claude sonnet 5.5"
  */
 export function formatModelNameLower(modelId: string): string {
   if (!modelId) return "unknown model";

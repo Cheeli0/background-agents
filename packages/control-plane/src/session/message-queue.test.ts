@@ -529,7 +529,7 @@ describe("SessionMessageQueue", () => {
   it("rechecks native deployment admission before both insertion and dispatch", async () => {
     const h = buildQueue();
     h.repository.getSession.mockReturnValue(
-      createSession({ harness: "codex", model: "openai/gpt-6.1-sol" })
+      createSession({ harness: "codex", model: "openai/gpt-6.2-sol" })
     );
     h.getProviderAuthenticationError.mockResolvedValue("This model has been disabled.");
     await expect(
@@ -1570,20 +1570,50 @@ describe("SessionMessageQueue", () => {
     expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_event", event });
   });
 
-  it.each(["openai/gpt-5.3-codex", "openai/gpt-5.3-codex-spark"])(
-    "dispatches a resumed %s session through the OpenAI replacement",
+  it("rejects a new prompt on a retired-model session or with a retired override", async () => {
+    const h = buildQueue();
+    h.repository.getSession.mockReturnValue(
+      createSession({ model: "anthropic/claude-sonnet-4-6" })
+    );
+    await expect(
+      h.queue.enqueuePromptFromApi({ content: "next", authorId: "user-1", source: "agent" })
+    ).rejects.toThrow('Model "anthropic/claude-sonnet-4-6" is no longer supported.');
+
+    h.repository.getSession.mockReturnValue(createSession());
+    await expect(
+      h.queue.enqueuePromptFromApi({
+        content: "next",
+        authorId: "user-1",
+        source: "agent",
+        model: "openai/gpt-5.4",
+      })
+    ).rejects.toThrow('Model "openai/gpt-5.4" is no longer supported.');
+    expect(h.repository.createMessageWithAttachments).not.toHaveBeenCalled();
+  });
+
+  it.each(["openai/gpt-5.3-codex", "anthropic/claude-sonnet-4-6"])(
+    "fails a pending prompt on a retired %s session instead of using another model",
     async (model) => {
       const h = buildQueue();
       h.repository.getSession.mockReturnValue(createSession({ model }));
-      h.repository.getNextPendingMessage.mockReturnValue(createMessage());
+      h.repository.getNextPendingMessage.mockReturnValueOnce(createMessage());
       h.wsManager.getSandboxSocket.mockReturnValue({ readyState: 1 } as WebSocket);
 
       await h.queue.processMessageQueue();
 
-      expect(h.getProviderAuthenticationError).toHaveBeenCalledWith("openai/gpt-6-sol");
-      expect(h.wsManager.send).toHaveBeenCalledWith(
+      expect(h.getProviderAuthenticationError).not.toHaveBeenCalled();
+      expect(h.wsManager.send).not.toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ type: "prompt", model: "openai/gpt-6-sol" })
+        expect.objectContaining({ type: "prompt" })
+      );
+      expect(h.repository.recordMessageCompletion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messageId: "msg-1",
+          success: false,
+          error: `Model "${model}" is no longer supported. Choose a supported model.`,
+        }),
+        expect.any(Number),
+        "pending"
       );
     }
   );
@@ -1659,7 +1689,7 @@ describe("SessionMessageQueue", () => {
   it("fails an unavailable prompt model before spawning or dispatching", async () => {
     const h = buildQueue();
     h.repository.getNextPendingMessage.mockReturnValueOnce(
-      createMessage({ model: "xai/grok-4.5" })
+      createMessage({ model: "xai/grok-4.7" })
     );
     h.getProviderAuthenticationError.mockResolvedValue(
       "No xAI authentication is configured for this session"
@@ -1667,7 +1697,7 @@ describe("SessionMessageQueue", () => {
 
     await h.queue.processMessageQueue();
 
-    expect(h.getProviderAuthenticationError).toHaveBeenCalledWith("xai/grok-4.5");
+    expect(h.getProviderAuthenticationError).toHaveBeenCalledWith("xai/grok-4.7");
     expect(h.repository.recordMessageCompletion).toHaveBeenCalledWith(
       expect.objectContaining({
         messageId: "msg-1",
@@ -1685,10 +1715,10 @@ describe("SessionMessageQueue", () => {
     const h = buildQueue();
     const sandboxWs = { readyState: 1 } as WebSocket;
     h.repository.getNextPendingMessage
-      .mockReturnValueOnce(createMessage({ id: "blocked", model: "xai/grok-4.5" }))
+      .mockReturnValueOnce(createMessage({ id: "blocked", model: "xai/grok-4.7" }))
       .mockReturnValueOnce(createMessage({ id: "eligible", model: "anthropic/claude-haiku-4-5" }));
     h.getProviderAuthenticationError.mockImplementation(async (model) =>
-      model === "xai/grok-4.5" ? "No xAI authentication is configured" : null
+      model === "xai/grok-4.7" ? "No xAI authentication is configured" : null
     );
     h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
 
@@ -2979,7 +3009,7 @@ describe("SessionMessageQueue", () => {
       async (harness) => {
         const h = buildQueue();
         h.repository.getSession.mockReturnValue(
-          createSession({ harness, model: "openai/gpt-6.1-sol" })
+          createSession({ harness, model: "openai/gpt-6.2-sol" })
         );
         h.repository.getMessageByClientRequestId.mockReturnValue(
           createMessage({
@@ -3024,7 +3054,7 @@ describe("SessionMessageQueue", () => {
     it("does not store the identity of a request deduplicated during the strict-auth await", async () => {
       const h = buildQueue();
       h.repository.getSession.mockReturnValue(
-        createSession({ harness: "codex", model: "openai/gpt-6.1-sol" })
+        createSession({ harness: "codex", model: "openai/gpt-6.2-sol" })
       );
       const fingerprint = await fingerprintWebPrompt("part-1", staleRetry);
       h.getProviderAuthenticationError.mockImplementationOnce(async () => {
@@ -3052,7 +3082,7 @@ describe("SessionMessageQueue", () => {
     it("keeps an account linked while an admitted request awaited the strict-auth check", async () => {
       const h = buildQueue();
       h.repository.getSession.mockReturnValue(
-        createSession({ harness: "codex", model: "openai/gpt-6.1-sol" })
+        createSession({ harness: "codex", model: "openai/gpt-6.2-sol" })
       );
       h.getProviderAuthenticationError.mockImplementationOnce(async () => {
         // A concurrent request links the participant to an account during this await.

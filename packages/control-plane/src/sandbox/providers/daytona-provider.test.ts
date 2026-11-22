@@ -93,7 +93,7 @@ const baseCreateConfig: CreateSandboxConfig = {
   sandboxAuthToken: "auth-token-abc",
   harness: "opencode" as const,
   provider: "anthropic",
-  model: "anthropic/claude-sonnet-4-5",
+  model: "anthropic/claude-sonnet-5-5",
 };
 
 const baseResumeConfig: ResumeConfig = {
@@ -180,7 +180,7 @@ describe("DaytonaSandboxProvider", () => {
         repo_owner: "testowner",
         repo_name: "testrepo",
         provider: "anthropic",
-        model: "anthropic/claude-sonnet-4-5",
+        model: "anthropic/claude-sonnet-5-5",
         bridge_early_connect: true,
       });
     });

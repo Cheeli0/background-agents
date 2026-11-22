@@ -191,11 +191,11 @@ vi.mock("@/components/model-reasoning-selector", () => ({
       >
         Model and effort
       </button>
-      <button type="button" onClick={() => onModelChange("openai/gpt-5.4")}>
-        Switch model to GPT-5.4
+      <button type="button" onClick={() => onModelChange("openai/gpt-6.2-sol")}>
+        Switch model to GPT-6.2 Sol
       </button>
-      <button type="button" onClick={() => onModelChange("openai/gpt-6.1-sol")}>
-        Switch model to GPT-6.1
+      <button type="button" onClick={() => onModelChange("openai/gpt-6.2-astra")}>
+        Switch model to GPT-6.2 Astra
       </button>
       {onHarnessChange && (
         <>

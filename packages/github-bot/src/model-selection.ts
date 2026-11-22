@@ -8,6 +8,7 @@ import {
   isValidModel,
   normalizeModelId,
   normalizeValidModels,
+  UnsupportedModelError,
   type ValidModel,
 } from "@open-inspect/shared/models";
 import {
@@ -97,8 +98,13 @@ export function applyInlineModelOverrides(
   enabledModels: readonly ValidModel[],
   harness: HarnessId
 ): { ok: true; selection: Omit<ModelSelection, "harness"> } | { ok: false; message: string } {
-  let model = getValidModelOrDefault(defaults.model);
-  if (options.model) {
+  let model: ValidModel;
+  if (!options.model) {
+    if (defaults.model && !isValidModel(defaults.model)) {
+      return { ok: false, message: new UnsupportedModelError(defaults.model).message };
+    }
+    model = getValidModelOrDefault(defaults.model);
+  } else {
     if (!isValidModel(options.model)) {
       return { ok: false, message: `Unknown model ${inlineCode(options.model)}.` };
     }
@@ -169,6 +175,15 @@ export async function resolveModelSelection(
       };
     }
     enabledModels = fetched;
+  }
+
+  if (!flags?.options.model && defaults.model && !isValidModel(defaults.model)) {
+    // A retired default is refused, never replaced with another model.
+    return {
+      ok: false,
+      reason: "harness_model_incompatible",
+      message: `I couldn't start a session. ${new UnsupportedModelError(defaults.model).message} Choose a model with \`!model\` or update the default model, then try again.`,
+    };
   }
 
   const harness = defaults.harness ?? DEFAULT_HARNESS;

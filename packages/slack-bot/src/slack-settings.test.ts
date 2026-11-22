@@ -27,14 +27,14 @@ describe("getSlackSettings", () => {
   it("returns the default model and session instructions from one fetch", async () => {
     const fetch = vi.fn().mockResolvedValue(
       settingsResponse({
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         sessionInstructions: "Prefer minimal diffs.",
       })
     );
 
     await expect(getSlackSettings(makeEnv(fetch))).resolves.toEqual({
       harness: DEFAULT_HARNESS,
-      defaultModel: "anthropic/claude-sonnet-4-6",
+      defaultModel: "anthropic/claude-sonnet-5-5",
       sessionInstructions: "Prefer minimal diffs.",
     });
     expect(fetch).toHaveBeenCalledTimes(1);

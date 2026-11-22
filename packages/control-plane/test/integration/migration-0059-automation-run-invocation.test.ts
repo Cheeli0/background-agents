@@ -54,7 +54,7 @@ async function resetToPre0059(): Promise<void> {
        (id, name, instructions, trigger_type, schedule_cron, schedule_tz, model,
         enabled, next_run_at, consecutive_failures, created_by, created_at, updated_at)
      VALUES ('auto-1', 'Audit', 'Inspect', 'schedule', '0 9 * * *', 'UTC',
-             'anthropic/claude-sonnet-4-6', 1, 2000, 0, 'user-1', 1000, 1000)`
+             'anthropic/claude-sonnet-5-5', 1, 2000, 0, 'user-1', 1000, 1000)`
   ).run();
 }
 

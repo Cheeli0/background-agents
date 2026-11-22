@@ -83,9 +83,9 @@ session, the user's App Home model and reasoning effort, the Slack **Default mod
 Slack does not fall back to OpenCode. If the session's harness cannot run the resolved model, the
 bot creates no session and, after its "Starting work..." message, replies in the thread:
 
-> Model "openai/gpt-5.4" cannot run on the Claude Agent harness. Start your request with `!model`
-> and a model Claude Agent can run, or change your model or agent harness in the Slack app's Home
-> tab.
+> Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness. Start your request with
+> `!model` and a model Claude Agent can run, or change your model or agent harness in the Slack
+> app's Home tab.
 
 App Home lists only models the user's harness can run. If the user's current model cannot run on it,
 the model picker shows "Choose a model" with no selection and says new requests are refused until a
@@ -104,7 +104,7 @@ A thread keeps the harness its session was created with, so switching the settin
 sessions. The control plane rejects a follow-up `!model` that the thread's harness cannot run, and
 the bot posts that explanation in the thread with advice:
 
-> Model "openai/gpt-5.4" cannot run on the Claude Agent harness. A thread keeps the harness its
+> Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness. A thread keeps the harness its
 > session started on. Reply without `!model`, or start a new thread to use that model.
 
 A `!reasoning`-only follow-up keeps the thread's session model, as a follow-up without flags does,

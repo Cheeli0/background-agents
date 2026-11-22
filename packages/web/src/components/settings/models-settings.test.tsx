@@ -45,7 +45,7 @@ function CachedModels() {
 }
 
 function renderSettings(
-  enabledModels = ["openai/gpt-5.4"],
+  enabledModels = ["openai/gpt-6.2-sol"],
   children: ReactNode = <ModelsSettings />
 ) {
   return render(
@@ -85,10 +85,10 @@ describe("ModelsSettings", () => {
   });
 
   it("automatically saves toggles and updates other model selectors", async () => {
-    const fetchMock = createSaveMock(["openai/gpt-5.4"]);
+    const fetchMock = createSaveMock(["openai/gpt-6.2-sol"]);
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    renderSettings(["openai/gpt-5.2", "openai/gpt-5.4"]);
+    renderSettings(["openai/gpt-5.2", "openai/gpt-6.2-sol"]);
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
@@ -103,17 +103,17 @@ describe("ModelsSettings", () => {
       changes: [{ modelId: "anthropic/claude-haiku-4-5", enabled: true }],
     });
     expect(JSON.parse(screen.getByTestId("cached-models").textContent!)).toEqual([
-      "openai/gpt-5.4",
+      "openai/gpt-6.2-sol",
       "anthropic/claude-haiku-4-5",
     ]);
-    await user.click(getModelSwitch(/GPT 5.4/));
+    await user.click(getModelSwitch(/GPT-6.2 Sol/));
     expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
-      changes: [{ modelId: "openai/gpt-5.4", enabled: false }],
+      changes: [{ modelId: "openai/gpt-6.2-sol", enabled: false }],
     });
   });
 
   it("automatically saves category actions", async () => {
-    const fetchMock = createSaveMock(["openai/gpt-5.4"]);
+    const fetchMock = createSaveMock(["openai/gpt-6.2-sol"]);
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderSettings();
@@ -132,9 +132,9 @@ describe("ModelsSettings", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
-    const { unmount } = renderSettings(["openai/gpt-5.2", "openai/gpt-5.4"]);
-    await user.click(getModelSwitch(/GPT 5.4/));
-    expect(getModelSwitch(/GPT 5.4/)).toBeChecked();
+    const { unmount } = renderSettings(["openai/gpt-5.2", "openai/gpt-6.2-sol"]);
+    await user.click(getModelSwitch(/GPT-6.2 Sol/));
+    expect(getModelSwitch(/GPT-6.2 Sol/)).toBeChecked();
     expect(fetchMock).not.toHaveBeenCalled();
     unmount();
     renderSettings(MODEL_OPTIONS[0].models.map((model) => model.id));
@@ -155,7 +155,7 @@ describe("ModelsSettings", () => {
       } else {
         fetchMock.mockRejectedValueOnce(new Error("Network unavailable"));
       }
-      const saveMock = createSaveMock(["openai/gpt-5.4"]);
+      const saveMock = createSaveMock(["openai/gpt-6.2-sol"]);
       fetchMock.mockImplementation(saveMock);
       vi.stubGlobal("fetch", fetchMock);
       const user = userEvent.setup();
@@ -164,7 +164,7 @@ describe("ModelsSettings", () => {
       await user.click(toggle);
       await waitFor(() => expect(screen.getByRole("status")).toBeEmptyDOMElement());
       expect(toggle).not.toBeChecked();
-      expect(screen.getByTestId("cached-models")).toHaveTextContent('["openai/gpt-5.4"]');
+      expect(screen.getByTestId("cached-models")).toHaveTextContent('["openai/gpt-6.2-sol"]');
       expect(toast.error).toHaveBeenCalledWith(
         failure === "server" ? "Save denied" : "Network unavailable"
       );
@@ -182,7 +182,7 @@ describe("ModelsSettings", () => {
       updateCache = useSWRConfig().mutate;
       return <ModelsSettings />;
     }
-    const fetchMock = createSaveMock(["anthropic/claude-sonnet-4-6"]);
+    const fetchMock = createSaveMock(["anthropic/claude-sonnet-5-5"]);
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderSettings(undefined, <CacheAccess />);
@@ -190,14 +190,14 @@ describe("ModelsSettings", () => {
       await updateCache(
         MODEL_PREFERENCES_KEY,
         {
-          enabledModels: ["anthropic/claude-sonnet-4-6"],
+          enabledModels: ["anthropic/claude-sonnet-5-5"],
           revision: 2,
         },
         { revalidate: false }
       );
     });
-    expect(getModelSwitch(/GPT 5.4/)).not.toBeChecked();
-    expect(getModelSwitch(/Claude Sonnet 4.6/)).toBeChecked();
+    expect(getModelSwitch(/GPT-6.2 Sol/)).not.toBeChecked();
+    expect(getModelSwitch(/Claude Sonnet 5.5/)).toBeChecked();
     await user.click(getModelSwitch(/Claude Haiku 4.5/));
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
       changes: [{ modelId: "anthropic/claude-haiku-4-5", enabled: true }],

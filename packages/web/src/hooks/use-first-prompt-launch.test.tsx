@@ -8,7 +8,7 @@ import { useFirstPromptLaunch } from "./use-first-prompt-launch";
 
 const input: Parameters<typeof useFirstPromptLaunch>[0] = {
   prompt: "  Fix the bug  ",
-  model: "openai/gpt-5.4",
+  model: "openai/gpt-6.2-sol",
   reasoningEffort: "high",
   hasAttachments: false,
   blocked: false,
@@ -192,7 +192,7 @@ describe("useFirstPromptLaunch", () => {
       request: {
         ...input,
         prompt: "New draft",
-        model: "openai/gpt-5.5",
+        model: "openai/gpt-6.2-sol",
         reasoningEffort: "low",
         hasAttachments: false,
       },

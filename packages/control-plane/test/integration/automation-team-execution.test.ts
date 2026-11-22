@@ -29,7 +29,7 @@ async function saveAutomation(id: string, ownerTeamId: string | null = TEAM) {
     `INSERT INTO automations
        (id, owner_team_id, name, instructions, schedule_cron, model, next_run_at,
         consecutive_failures, created_by, user_id, created_at, updated_at)
-     VALUES (?, ?, ?, 'Run tests', '0 9 * * *', 'anthropic/claude-sonnet-4-6', ?, 2, ?, ?, 1, 1)`
+     VALUES (?, ?, ?, 'Run tests', '0 9 * * *', 'anthropic/claude-sonnet-5-5', ?, 2, ?, ?, 1, 1)`
   )
     .bind(id, ownerTeamId, id, Date.now() - 60_000, EXECUTOR, EXECUTOR)
     .run();

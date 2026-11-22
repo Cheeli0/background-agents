@@ -1,6 +1,6 @@
 import { escapeMrkdwnText, postMessage, updateMessage } from "@open-inspect/shared/slack";
 import type { CallbackContext } from "@open-inspect/shared/types/session-api";
-import type { ValidModel } from "@open-inspect/shared/models";
+import { isValidModel, normalizeModelId, type ValidModel } from "@open-inspect/shared/models";
 import { checkHarnessCompatibility } from "@open-inspect/shared/harnesses";
 import { getAuthoritativeModels, MODEL_PREFERENCES_UNAVAILABLE_MESSAGE } from "../app-home/models";
 import {
@@ -167,12 +167,14 @@ export async function startSessionAndSendPrompt(
     return null;
   }
   const { enabledModels, slackConfig, userPreferences: userPrefs, modelSource } = launchSettings;
-  // Deferred plans may outlive a model's enablement. Refuse the selected model
-  // rather than substituting one the user never chose.
-  const sessionDefaults = normalizeModelSelection(launchPlan?.sessionDefaults ?? userPrefs);
-  const { model, reasoningEffort } = sessionDefaults;
-  if (!enabledModels.includes(model)) {
+  // Deferred plans may outlive a model's enablement, and preferences may name a
+  // retired model. Refuse the selected model rather than substituting one the
+  // user never chose.
+  const selected = launchPlan?.sessionDefaults ?? userPrefs;
+  const selectedModel = normalizeModelId(selected.model);
+  if (!isValidModel(selectedModel) || !enabledModels.includes(selectedModel)) {
     const source = launchPlan ? "request" : modelSource;
+    const model = selectedModel;
     log.info("slack.session.disabled_model_refused", { trace_id: traceId, model, source });
     await postMessage(
       env.SLACK_BOT_TOKEN,
@@ -182,10 +184,11 @@ export async function startSessionAndSendPrompt(
     );
     return null;
   }
-  const differsFromUserDefaults = !sameModelSelection(
-    sessionDefaults,
-    normalizeModelSelection(userPrefs)
-  );
+  const sessionDefaults = normalizeModelSelection(selected);
+  const { model, reasoningEffort } = sessionDefaults;
+  const differsFromUserDefaults =
+    !isValidModel(userPrefs.model) ||
+    !sameModelSelection(sessionDefaults, normalizeModelSelection(userPrefs));
   // The harness is the user's App Home choice, else the workspace setting. A
   // model it cannot run is refused, never moved to another harness, so a
   // session always runs where the user expects.

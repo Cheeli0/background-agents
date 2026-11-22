@@ -31,7 +31,7 @@ describe("publishAppHome model availability", () => {
     async (state) => {
       const preferences = {
         userId: "U123",
-        model: "xai/grok-4.6",
+        model: "xai/grok-4.7",
         reasoningEffort: "high",
         updatedAt: 1,
       };
@@ -75,7 +75,7 @@ describe("publishAppHome model availability", () => {
       );
 
       if (state === "disabled") {
-        expect(texts).toContain("Your model `xai/grok-4.6` is no longer enabled");
+        expect(texts).toContain("Your model `xai/grok-4.7` is no longer enabled");
         expect(texts).toContain("model needs replacement");
         expect(reasoning).toBeUndefined();
       } else {
@@ -97,7 +97,7 @@ describe("publishAppHome model availability", () => {
         } else {
           expect(model).toBeUndefined();
           expect(texts).toContain("Model preferences are temporarily unavailable");
-          expect(texts).toContain("Your model `xai/grok-4.6` has not been changed");
+          expect(texts).toContain("Your model `xai/grok-4.7` has not been changed");
         }
       }
     }

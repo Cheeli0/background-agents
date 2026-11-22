@@ -53,7 +53,7 @@ export async function seedMemorySession(id: string, options: MemorySessionOption
     repoName: repositories[0]?.repoName ?? null,
     repositories,
     environmentId,
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     baseBranch: repositories[0]?.baseBranch ?? null,
     status: options.status ?? "active",

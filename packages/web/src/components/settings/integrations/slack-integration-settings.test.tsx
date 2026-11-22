@@ -25,15 +25,15 @@ vi.mock("@/hooks/use-current-user-authorization", () => ({
 
 vi.mock("@/hooks/use-enabled-models", () => ({
   useEnabledModels: () => ({
-    enabledModels: ["anthropic/claude-sonnet-4-6", "openai/gpt-5.4"],
+    enabledModels: ["anthropic/claude-sonnet-5-5", "openai/gpt-6.2-sol"],
     enabledModelOptions: [
       {
         category: "Anthropic",
-        models: [{ id: "anthropic/claude-sonnet-4-6", name: "Claude Sonnet 4.6" }],
+        models: [{ id: "anthropic/claude-sonnet-5-5", name: "Claude Sonnet 5.5" }],
       },
       {
         category: "OpenAI",
-        models: [{ id: "openai/gpt-5.4", name: "GPT 5.4" }],
+        models: [{ id: "openai/gpt-6.2-sol", name: "GPT-6.2 Sol" }],
       },
     ],
     loading: false,
@@ -214,7 +214,7 @@ describe("SlackIntegrationSettings", () => {
 
   it("closes the open harness menu when permission is revoked without changing the draft", async () => {
     const user = userEvent.setup();
-    setupSWR({ global: { defaults: { model: "openai/gpt-5.4" } } });
+    setupSWR({ global: { defaults: { model: "openai/gpt-6.2-sol" } } });
     const { rerender } = render(<SlackIntegrationSettings />);
     const harness = screen.getByRole("combobox", { name: "Agent harness" });
     const model = screen.getByRole("combobox", { name: "Default model" });
@@ -230,7 +230,7 @@ describe("SlackIntegrationSettings", () => {
     authorization.canManageGlobal = true;
     rerender(<SlackIntegrationSettings />);
     expect(harness).toHaveTextContent("OpenCode");
-    expect(model).toHaveTextContent("GPT 5.4");
+    expect(model).toHaveTextContent("GPT-6.2 Sol");
     expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -326,21 +326,21 @@ describe("SlackIntegrationSettings", () => {
 
     const modelSection = screen.getByText("Default model").closest("div")!;
     await user.click(within(modelSection).getByRole("combobox"));
-    await user.click(await screen.findByRole("option", { name: "GPT 5.4" }));
+    await user.click(await screen.findByRole("option", { name: "GPT-6.2 Sol" }));
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     const [, init] = fetchMock.mock.calls[0];
     const body = JSON.parse(init.body as string) as { settings: SlackGlobalConfig };
-    expect(body.settings.defaults?.model).toBe("openai/gpt-5.4");
+    expect(body.settings.defaults?.model).toBe("openai/gpt-6.2-sol");
   });
 
   it("explains refusal and recovery when the saved default model is disabled", () => {
-    setupSWR({ global: { defaults: { model: "anthropic/claude-opus-4-6" } } });
+    setupSWR({ global: { defaults: { model: "anthropic/claude-opus-5-5" } } });
     render(<SlackIntegrationSettings />);
 
     expect(
       screen.getByText(
-        "Claude Opus 4.6 is disabled in model settings. Slack refuses new sessions using this default. Re-enable it or save an enabled default."
+        "Claude Opus 5.5 is disabled in model settings. Slack refuses new sessions using this default. Re-enable it or save an enabled default."
       )
     ).toBeInTheDocument();
   });
@@ -351,7 +351,7 @@ describe("SlackIntegrationSettings", () => {
       global: {
         defaults: {
           agentNotificationsEnabled: true,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           mentionsPolicy: "strip",
           routingRules: [{ keyword: "frontend", target: "acme/web" }],
         },
@@ -382,7 +382,7 @@ describe("SlackIntegrationSettings", () => {
         defaults: {
           agentNotificationsEnabled: true,
           mentionsPolicy: "strip",
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           routingRules: [{ keyword: "frontend", target: "acme/web" }],
         },
       },
@@ -406,7 +406,7 @@ describe("SlackIntegrationSettings", () => {
     expect(body.settings.defaults).toEqual({
       agentNotificationsEnabled: true,
       mentionsPolicy: "strip",
-      model: "openai/gpt-5.4",
+      model: "openai/gpt-6.2-sol",
       routingRules: [{ keyword: "frontend", target: "acme/web" }],
       sessionInstructions: "Prefer minimal diffs.",
       unboundChannels: "reject",
@@ -674,7 +674,7 @@ describe("SlackIntegrationSettings", () => {
             agentNotificationsEnabled: true,
             mentionsPolicy: "allow",
             unboundChannels: "reject",
-            model: "openai/gpt-5.4",
+            model: "openai/gpt-6.2-sol",
             sessionInstructions: "Prefer minimal diffs.",
           },
         },
@@ -703,7 +703,7 @@ describe("SlackIntegrationSettings", () => {
         agentNotificationsEnabled: true,
         mentionsPolicy: "allow",
         unboundChannels: "reject",
-        model: "openai/gpt-5.4",
+        model: "openai/gpt-6.2-sol",
         sessionInstructions: "Prefer minimal diffs.",
         routingRules: [{ keyword: "Frontend", target: "acme/web" }],
       });
@@ -945,7 +945,7 @@ describe("SlackIntegrationSettings harness", () => {
     expect(harness).toHaveTextContent("OpenCode");
     expect(harness).toHaveAttribute("aria-describedby", "slack-harness-help");
     expect(await optionNames(user, harness)).toEqual(HARNESS_IDS.map(getHarnessLabel));
-    expect(await optionNames(user, model)).toEqual(["Claude Sonnet 4.6", "GPT 5.4"]);
+    expect(await optionNames(user, model)).toEqual(["Claude Sonnet 5.5", "GPT-6.2 Sol"]);
 
     await user.click(harness);
     await user.click(
@@ -954,12 +954,12 @@ describe("SlackIntegrationSettings harness", () => {
       })
     );
 
-    expect(await optionNames(user, model)).toEqual(["Claude Sonnet 4.6"]);
+    expect(await optionNames(user, model)).toEqual(["Claude Sonnet 5.5"]);
   });
 
   it("clears a default model the selected harness cannot run and requires a new one before saving", async () => {
     const user = userEvent.setup();
-    setupSWR({ global: { defaults: { model: "openai/gpt-5.4", mentionsPolicy: "strip" } } });
+    setupSWR({ global: { defaults: { model: "openai/gpt-6.2-sol", mentionsPolicy: "strip" } } });
     fetchMock.mockResolvedValue(okJson({}));
     render(<SlackIntegrationSettings />);
     const harness = screen.getByRole("combobox", { name: "Agent harness" });
@@ -980,14 +980,14 @@ describe("SlackIntegrationSettings harness", () => {
     await user.click(model);
     await user.click(
       await within(await screen.findByRole("listbox")).findByRole("option", {
-        name: "Claude Sonnet 4.6",
+        name: "Claude Sonnet 5.5",
       })
     );
 
     expect(await savedDefaults(user)).toEqual({
       agentNotificationsEnabled: false,
       harness: "claude",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
       mentionsPolicy: "strip",
       unboundChannels: "workspace",
     });
@@ -996,7 +996,7 @@ describe("SlackIntegrationSettings harness", () => {
   it("omits the harness when saving the default harness", async () => {
     const user = userEvent.setup();
     setupSWR({
-      global: { defaults: { harness: "claude", model: "anthropic/claude-sonnet-4-6" } },
+      global: { defaults: { harness: "claude", model: "anthropic/claude-sonnet-5-5" } },
     });
     fetchMock.mockResolvedValue(okJson({}));
     render(<SlackIntegrationSettings />);
@@ -1010,7 +1010,7 @@ describe("SlackIntegrationSettings harness", () => {
 
     const defaults = await savedDefaults(user);
     expect(defaults).not.toHaveProperty("harness");
-    expect(defaults).toMatchObject({ model: "anthropic/claude-sonnet-4-6" });
+    expect(defaults).toMatchObject({ model: "anthropic/claude-sonnet-5-5" });
   });
 
   it("asks for a default model when saved settings use Claude Agent without one", () => {

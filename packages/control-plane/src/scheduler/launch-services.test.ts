@@ -30,7 +30,7 @@ const automation: AutomationRow = {
   schedule_once_at: null,
   schedule_tz: "UTC",
   harness: "codex",
-  model: "openai/gpt-5.4",
+  model: "openai/gpt-6.2-sol",
   reasoning_effort: null,
   enabled: 1,
   next_run_at: 0,

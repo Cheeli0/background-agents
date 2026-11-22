@@ -110,7 +110,7 @@ const baseCreateConfig: CreateSandboxConfig = {
   sandboxAuthToken: "auth-token",
   harness: "opencode" as const,
   provider: "anthropic",
-  model: "anthropic/claude-sonnet-4-5",
+  model: "anthropic/claude-sonnet-5-5",
 };
 
 const baseRestoreConfig: RestoreConfig = {
@@ -123,7 +123,7 @@ const baseRestoreConfig: RestoreConfig = {
   sandboxAuthToken: "auth-token",
   harness: "opencode" as const,
   provider: "anthropic",
-  model: "anthropic/claude-sonnet-4-5",
+  model: "anthropic/claude-sonnet-5-5",
 };
 
 // Mirrors VERCEL_MAX_SANDBOX_TIMEOUT_MS in provider.ts — Vercel rejects timeouts above 45 minutes.
@@ -228,7 +228,7 @@ describe("VercelSandboxProvider", () => {
       repo_owner: "testowner",
       repo_name: "testrepo",
       provider: "anthropic",
-      model: "anthropic/claude-sonnet-4-5",
+      model: "anthropic/claude-sonnet-5-5",
       mcp_servers: [{ id: "mcp-1", name: "Tool", type: "local", enabled: true }],
       branch: "feature/vercel",
       bridge_early_connect: true,

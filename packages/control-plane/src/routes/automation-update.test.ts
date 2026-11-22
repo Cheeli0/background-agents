@@ -1010,16 +1010,16 @@ describe("automation read, update, and delete routes", () => {
     });
 
     it("clears incompatible reasoning effort when model changes", async () => {
-      mockStore.getById.mockResolvedValue({ ...sampleRow, reasoning_effort: "max" });
+      mockStore.getById.mockResolvedValue({ ...sampleRow, reasoning_effort: "xhigh" });
 
       const res = await callRoute("PUT", "/automations/auto-1", {
-        body: { model: "openai/gpt-5.4" },
+        body: { model: "anthropic/claude-haiku-4-5" },
       });
 
       expect(res.status).toBe(200);
       expect(mockStore.bindAutomationUpdate).toHaveBeenCalledWith(
         "auto-1",
-        expect.objectContaining({ model: "openai/gpt-5.4", reasoning_effort: null })
+        expect.objectContaining({ model: "anthropic/claude-haiku-4-5", reasoning_effort: null })
       );
     });
 
@@ -1212,7 +1212,7 @@ describe("automation read, update, and delete routes", () => {
       mockStore.getById.mockResolvedValue(sampleRow);
 
       const res = await callRoute("PUT", "/automations/auto-1", {
-        body: { model: "anthropic/claude-sonnet-4-6", reasoningEffort: "xhigh" },
+        body: { model: "anthropic/claude-haiku-4-5", reasoningEffort: "xhigh" },
       });
 
       expect(res.status).toBe(400);

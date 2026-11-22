@@ -111,7 +111,7 @@ async function seedAutomationRun(stub: DurableObjectStub, sessionName: string) {
     `INSERT INTO automations
        (id, owner_team_id, name, instructions, trigger_type, model, created_by, user_id,
         created_at, updated_at, trigger_config)
-     VALUES (?, NULL, 'Nightly refactor', 'Fixture only', 'webhook', 'anthropic/claude-sonnet-4-6',
+     VALUES (?, NULL, 'Nightly refactor', 'Fixture only', 'webhook', 'anthropic/claude-sonnet-5-5',
        ?, ?, ?, ?, ?)`
   )
     .bind(AUTOMATION_ID, owner, owner, now, now, JSON.stringify({ conditions: [] }))

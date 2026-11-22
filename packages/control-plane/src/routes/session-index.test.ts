@@ -83,7 +83,7 @@ const listSession = {
   repoOwner: "open-inspect",
   repoName: "background-agents",
   harness: "opencode" as const,
-  model: "anthropic/claude-sonnet-4-6",
+  model: "anthropic/claude-sonnet-5-5",
   reasoningEffort: null,
   baseBranch: "main",
   status: "active" as const,

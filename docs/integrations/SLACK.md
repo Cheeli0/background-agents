@@ -102,7 +102,7 @@ your saved preference. See
 Start a DM or `@mention` request with `!model` or `!reasoning` to override your App Home defaults:
 
 ```text
-@Open-Inspect !model anthropic/claude-sonnet-4-6 !reasoning max investigate the flaky test
+@Open-Inspect !model anthropic/claude-sonnet-5-5 !reasoning max investigate the flaky test
 ```
 
 Where you use the flags decides how long they last:
@@ -118,16 +118,16 @@ A running session's defaults cannot be changed. Naming your App Home model on a 
 one request on it and leaves the session where it is; to go back to your defaults for good, start a
 new session in a new thread.
 
-Both flags accept a space or colon before their value, such as `!model:openai/gpt-5.6-sol` and
+Both flags accept a space or colon before their value, such as `!model:openai/gpt-6.2-sol` and
 `!reasoning:high`. Any flags must appear together at the start of the request. Models must be
 enabled under **Settings > Models**, and reasoning values must be supported by the selected model.
 
 When your [agent harness](#default-model-and-agent-harness) is Claude Agent, a session-starting
-`!model` that Claude Agent cannot run, such as `!model openai/gpt-5.4`, is refused and no session
-starts. A follow-up stays on the thread's harness, so the control plane rejects a follow-up `!model`
-that the harness cannot run. The bot replies in the thread:
+`!model` that Claude Agent cannot run, such as `!model openai/gpt-6.2-sol`, is refused and no
+session starts. A follow-up stays on the thread's harness, so the control plane rejects a follow-up
+`!model` that the harness cannot run. The bot replies in the thread:
 
-> Model "openai/gpt-5.4" cannot run on the Claude Agent harness. A thread keeps the harness its
+> Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness. A thread keeps the harness its
 > session started on. Reply without `!model`, or start a new thread to use that model.
 
 A `!reasoning`-only follow-up keeps the thread's session model, as a follow-up without flags does,
@@ -255,12 +255,12 @@ session's harness can run it. Existing-thread follow-ups without `!model` keep t
 even if it has since been disabled.
 
 If the session's harness cannot run the resolved model, the bot starts no session. Claude Agent runs
-Anthropic models only, so an OpenAI App Home model or `!model openai/gpt-5.4` is refused on Claude
-Agent. After its "Starting work..." message, the bot replies in the thread:
+Anthropic models only, so an OpenAI App Home model or `!model openai/gpt-6.2-sol` is refused on
+Claude Agent. After its "Starting work..." message, the bot replies in the thread:
 
-> Model "openai/gpt-5.4" cannot run on the Claude Agent harness. Start your request with `!model`
-> and a model Claude Agent can run, or change your model or agent harness in the Slack app's Home
-> tab.
+> Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness. Start your request with
+> `!model` and a model Claude Agent can run, or change your model or agent harness in the Slack
+> app's Home tab.
 
 The settings form lists only models the selected harness can run and rejects saving a harness with a
 model it cannot run. When the workspace **Agent harness** is Claude Agent, a **Default model** is

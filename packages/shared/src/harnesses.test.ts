@@ -16,13 +16,14 @@ import {
   checkHarnessPromptCompatibility,
   selectHarnessProviderSelections,
 } from "./harnesses";
-import { DEFAULT_MODEL, VALID_MODELS, getReasoningConfig } from "./models";
+import { DEFAULT_MODEL, UnsupportedModelError, VALID_MODELS, getReasoningConfig } from "./models";
 
 describe("harness selection policy", () => {
   it.each(["opencode", "claude"] as const)(
-    "preserves %s legacy model and effort fallback",
+    "defaults a missing %s model but refuses an unsupported one",
     (harness) => {
-      expect(resolveHarnessModel(harness, "unknown")).toBe(DEFAULT_MODEL);
+      expect(resolveHarnessModel(harness, undefined)).toBe(DEFAULT_MODEL);
+      expect(() => resolveHarnessModel(harness, "unknown")).toThrow(UnsupportedModelError);
       expect(checkHarnessPromptCompatibility(harness, DEFAULT_MODEL, "invalid")).toBeNull();
     }
   );
@@ -31,8 +32,8 @@ describe("harness selection policy", () => {
     expect(
       checkHarnessPromptCompatibility("codex", resolveHarnessModel("codex", "unknown"))?.code
     ).toBe("model");
-    expect(resolveHarnessModel("codex", "gpt-6.1-sol")).toBe("openai/gpt-6.1-sol");
-    expect(checkHarnessPromptCompatibility("codex", "openai/gpt-6.1-sol", "invalid")?.code).toBe(
+    expect(resolveHarnessModel("codex", "gpt-6.2-sol")).toBe("openai/gpt-6.2-sol");
+    expect(checkHarnessPromptCompatibility("codex", "openai/gpt-6.2-sol", "invalid")?.code).toBe(
       "reasoning_effort"
     );
   });
@@ -79,10 +80,10 @@ describe("harnessSupportsModel", () => {
   });
 
   it("restricts the Claude harness to Anthropic models", () => {
-    expect(harnessSupportsModel("claude", "anthropic/claude-sonnet-4-6")).toBe(true);
-    expect(harnessSupportsModel("claude", "claude-sonnet-4-6")).toBe(true);
-    expect(harnessSupportsModel("claude", "openai/gpt-5.5")).toBe(false);
-    expect(harnessSupportsModel("claude", "xai/grok-4.6")).toBe(false);
+    expect(harnessSupportsModel("claude", "anthropic/claude-sonnet-5-5")).toBe(true);
+    expect(harnessSupportsModel("claude", "claude-sonnet-5-5")).toBe(true);
+    expect(harnessSupportsModel("claude", "openai/gpt-6.2-sol")).toBe(false);
+    expect(harnessSupportsModel("claude", "xai/grok-4.7")).toBe(false);
   });
 
   it("filters a model list by harness", () => {
@@ -156,9 +157,9 @@ describe("selectedProviderAuthModes", () => {
 
 describe("checkHarnessCompatibility", () => {
   it("accepts a compatible harness, model and auth", () => {
-    expect(checkHarnessCompatibility("opencode", "anthropic/claude-sonnet-4-6")).toBeNull();
+    expect(checkHarnessCompatibility("opencode", "anthropic/claude-sonnet-5-5")).toBeNull();
     expect(
-      checkHarnessCompatibility("claude", "anthropic/claude-sonnet-4-6", {
+      checkHarnessCompatibility("claude", "anthropic/claude-sonnet-5-5", {
         anthropic: "provider_account",
         openai: "provider_account",
       })
@@ -166,13 +167,13 @@ describe("checkHarnessCompatibility", () => {
   });
 
   it("rejects a model the harness cannot run", () => {
-    const result = checkHarnessCompatibility("claude", "openai/gpt-5.5");
+    const result = checkHarnessCompatibility("claude", "openai/gpt-6.2-sol");
     expect(result?.code).toBe("model");
     expect(result?.message).toContain("Claude Agent");
   });
 
   it("rejects an auth mode the harness cannot select for the model's provider", () => {
-    const result = checkHarnessCompatibility("opencode", "anthropic/claude-sonnet-4-6", {
+    const result = checkHarnessCompatibility("opencode", "anthropic/claude-sonnet-5-5", {
       anthropic: "provider_account",
     });
     expect(result?.code).toBe("provider_auth");
@@ -181,7 +182,7 @@ describe("checkHarnessCompatibility", () => {
 
   it("ignores auth modes for providers the model does not use", () => {
     expect(
-      checkHarnessCompatibility("opencode", "openai/gpt-5.5", {
+      checkHarnessCompatibility("opencode", "openai/gpt-6.2-sol", {
         anthropic: "provider_account",
         openai: "api_key",
       })
@@ -191,13 +192,6 @@ describe("checkHarnessCompatibility", () => {
 
 describe("Codex pinned native compatibility", () => {
   it.each([
-    ["openai/gpt-5.5", "medium", false],
-    ["openai/gpt-5.6-sol", "low", true],
-    ["openai/gpt-5.6-terra", "medium", true],
-    ["openai/gpt-5.6-luna", "medium", true],
-    ["openai/gpt-6-astra", "low", true],
-    ["openai/gpt-6-sol", "medium", true],
-    ["openai/gpt-6.1-sol", "low", true],
     ["openai/gpt-6.1-terra", "low", true],
     ["openai/gpt-6.2-astra", "low", true],
     ["openai/gpt-6.2-sol", "low", true],
@@ -217,29 +211,25 @@ describe("Codex pinned native compatibility", () => {
     }
   );
   it("intersects the native catalog without changing legacy model support", () => {
-    expect(harnessSupportsModel("codex", "openai/gpt-6.1-sol")).toBe(true);
-    expect(harnessSupportsModel("codex", "gpt-5.5")).toBe(true);
-    expect(harnessSupportsModel("codex", "openai/gpt-5.4")).toBe(false);
-    expect(harnessSupportsModel("opencode", "openai/gpt-5.4")).toBe(true);
-    expect(harnessSupportsModel("codex", "anthropic/claude-sonnet-4-6")).toBe(false);
+    expect(harnessSupportsModel("codex", "openai/gpt-6.2-sol")).toBe(true);
+    expect(harnessSupportsModel("codex", "gpt-6.2-sol")).toBe(true);
+    expect(harnessSupportsModel("opencode", "openai/gpt-6.2-sol")).toBe(true);
+    expect(harnessSupportsModel("codex", "anthropic/claude-sonnet-5-5")).toBe(false);
   });
   it("accepts native max but never none or automatic ultra delegation", () => {
-    expect(checkHarnessCompatibility("codex", "openai/gpt-5.6-sol", undefined, "max")).toBeNull();
+    expect(checkHarnessCompatibility("codex", "openai/gpt-6.2-sol", undefined, "max")).toBeNull();
     for (const effort of ["none", "ultra", ""]) {
       expect(
-        checkHarnessCompatibility("codex", "openai/gpt-6.1-sol", undefined, effort)?.code
+        checkHarnessCompatibility("codex", "openai/gpt-6.2-sol", undefined, effort)?.code
       ).toBe("reasoning_effort");
     }
-    expect(checkHarnessCompatibility("codex", "openai/gpt-5.5", undefined, "max")?.code).toBe(
-      "reasoning_effort"
-    );
   });
   it("permits API keys and connected Settings accounts but not legacy OAuth", () => {
     for (const mode of ["api_key", "provider_account"] as const) {
-      expect(checkHarnessCompatibility("codex", "openai/gpt-6-sol", { openai: mode })).toBeNull();
+      expect(checkHarnessCompatibility("codex", "openai/gpt-6.2-sol", { openai: mode })).toBeNull();
     }
     expect(
-      checkHarnessCompatibility("codex", "openai/gpt-6-sol", { openai: "legacy_scoped_oauth" })
+      checkHarnessCompatibility("codex", "openai/gpt-6.2-sol", { openai: "legacy_scoped_oauth" })
         ?.code
     ).toBe("provider_auth");
   });

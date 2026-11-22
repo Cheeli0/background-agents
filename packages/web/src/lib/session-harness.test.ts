@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_MODEL, type ModelCategory } from "@open-inspect/shared/models";
 import { filterModelOptionsForHarness, resolveHarnessModelSelection } from "./session-harness";
 
-const OPENAI_MODEL = "openai/gpt-5.4";
+const OPENAI_MODEL = "openai/gpt-6.2-sol";
 const options: ModelCategory[] = [
   { category: "Anthropic", models: [{ id: DEFAULT_MODEL, name: "Default", description: "" }] },
-  { category: "OpenAI", models: [{ id: OPENAI_MODEL, name: "GPT-5.4", description: "" }] },
+  { category: "OpenAI", models: [{ id: OPENAI_MODEL, name: "GPT-6.2 Sol", description: "" }] },
 ];
 
 describe("filterModelOptionsForHarness", () => {
@@ -62,8 +62,8 @@ describe("Codex model selection", () => {
     const native: ModelCategory = {
       category: "OpenAI",
       models: [
-        { id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol", description: "" },
         ...options[1].models,
+        { id: "opencode-go/gpt-5.6-luna", name: "GPT 5.6 Luna", description: "" },
       ],
     };
     expect(filterModelOptionsForHarness("codex", [options[0], native])).toEqual([
@@ -72,8 +72,8 @@ describe("Codex model selection", () => {
   });
   const request = {
     harness: "codex" as const,
-    preference: { model: "openai/gpt-5.6-sol", reasoningEffort: "max" },
-    enabledModels: ["openai/gpt-5.6-sol"],
+    preference: { model: "openai/gpt-6.2-sol", reasoningEffort: "max" },
+    enabledModels: ["openai/gpt-6.2-sol"],
     enabledModelOptions: [],
     loading: false,
   };
@@ -87,7 +87,7 @@ describe("Codex model selection", () => {
     expect(
       resolveHarnessModelSelection({
         ...request,
-        enabledModels: ["openai/gpt-5.4"],
+        enabledModels: ["opencode-go/gpt-5.6-luna"],
       }).availability.status
     ).toBe("unavailable");
   });

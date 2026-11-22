@@ -382,7 +382,7 @@ describe("ModalClient", () => {
           repoName: null,
           harness: "opencode",
           provider: "anthropic",
-          model: "anthropic/claude-sonnet-4-5",
+          model: "anthropic/claude-sonnet-5-5",
         }),
     },
     {
@@ -449,7 +449,7 @@ describe("ModalClient", () => {
       repoOwner: "testowner",
       repoName: "testrepo",
       provider: "anthropic",
-      model: "anthropic/claude-sonnet-4-5",
+      model: "anthropic/claude-sonnet-5-5",
       mcpServers: [{ id: "mcp-1", name: "Tool", type: "local", enabled: true }],
       scmIdentity: scmCloneIdentity("github"),
     });
@@ -466,7 +466,7 @@ describe("ModalClient", () => {
       repo_owner: "testowner",
       repo_name: "testrepo",
       provider: "anthropic",
-      model: "anthropic/claude-sonnet-4-5",
+      model: "anthropic/claude-sonnet-5-5",
       mcp_servers: [{ id: "mcp-1", name: "Tool", type: "local", enabled: true }],
       bridge_early_connect: true,
     });
@@ -497,7 +497,7 @@ describe("ModalClient", () => {
         repoName: "repo",
         harness: "opencode" as const,
         provider: "anthropic",
-        model: "claude-sonnet-4-5",
+        model: "claude-sonnet-5-5",
         scmIdentity: scmCloneIdentity("gitlab"),
       };
       if (source === "restore") {
@@ -781,7 +781,7 @@ describe("ModalClient", () => {
       repoOwner: "testowner",
       repoName: "testrepo",
       provider: "anthropic",
-      model: "anthropic/claude-sonnet-4-5",
+      model: "anthropic/claude-sonnet-5-5",
       repositories: [
         { repoOwner: "testowner", repoName: "testrepo", baseBranch: "main" },
         { repoOwner: "testowner", repoName: "backend", baseBranch: "develop" },
@@ -821,7 +821,7 @@ describe("ModalClient", () => {
         repoOwner: "testowner",
         repoName: "testrepo",
         provider: "anthropic",
-        model: "anthropic/claude-sonnet-4-5",
+        model: "anthropic/claude-sonnet-5-5",
       })
     ).rejects.toThrow("Modal API error: Invalid response");
   });
@@ -860,7 +860,7 @@ describe("ModalClient", () => {
         repoOwner: "testowner",
         repoName: "testrepo",
         provider: "anthropic",
-        model: "anthropic/claude-sonnet-4-5",
+        model: "anthropic/claude-sonnet-5-5",
       })
     ).resolves.toEqual({
       sandboxId: "sb-1",
@@ -908,7 +908,7 @@ describe("ModalClient", () => {
       repoOwner: null,
       repoName: null,
       provider: "anthropic",
-      model: "anthropic/claude-sonnet-4-5",
+      model: "anthropic/claude-sonnet-5-5",
       vncEnabled: true,
     });
 

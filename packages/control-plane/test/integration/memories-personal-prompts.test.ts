@@ -459,7 +459,7 @@ describe("child sessions spawned through the route", () => {
       visibility: "workspace",
       repoOwner: null,
       repoName: null,
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
       reasoningEffort: null,
       baseBranch: null,
       status: "active",

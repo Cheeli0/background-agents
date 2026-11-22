@@ -380,7 +380,7 @@ describe("IntegrationSettingsStore", () => {
     it("accepts valid defaults on setGlobal", async () => {
       await expect(
         store.setGlobal("github", {
-          defaults: { model: "anthropic/claude-opus-4-6", reasoningEffort: "high" },
+          defaults: { model: "anthropic/claude-opus-5-5", reasoningEffort: "high" },
         })
       ).resolves.not.toThrow();
     });
@@ -388,7 +388,7 @@ describe("IntegrationSettingsStore", () => {
     it("accepts a compatible harness/model pair on setGlobal", async () => {
       await expect(
         store.setGlobal("github", {
-          defaults: { harness: "claude", model: "anthropic/claude-opus-4-6" },
+          defaults: { harness: "claude", model: "anthropic/claude-opus-5-5" },
         })
       ).resolves.not.toThrow();
     });
@@ -396,9 +396,9 @@ describe("IntegrationSettingsStore", () => {
     it("rejects an incompatible harness/model pair on setGlobal", async () => {
       await expect(
         store.setGlobal("github", {
-          defaults: { harness: "claude", model: "openai/gpt-5.4" },
+          defaults: { harness: "claude", model: "openai/gpt-6.2-sol" },
         })
-      ).rejects.toThrow('Model "openai/gpt-5.4" cannot run on the Claude Agent harness.');
+      ).rejects.toThrow('Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.');
     });
 
     it("rejects malformed stored global settings", async () => {
@@ -431,20 +431,20 @@ describe("IntegrationSettingsStore", () => {
 
     it("round-trips set + get", async () => {
       await store.setRepoSettings("github", "acme/widgets", {
-        model: "anthropic/claude-opus-4-6",
+        model: "anthropic/claude-opus-5-5",
         reasoningEffort: "high",
       });
 
       const result = await store.getRepoSettings("github", "acme/widgets");
       expect(result).toEqual({
-        model: "anthropic/claude-opus-4-6",
+        model: "anthropic/claude-opus-5-5",
         reasoningEffort: "high",
       });
     });
 
     it("delete removes the override", async () => {
       await store.setRepoSettings("github", "acme/widgets", {
-        model: "anthropic/claude-opus-4-6",
+        model: "anthropic/claude-opus-5-5",
       });
       await store.deleteRepoSettings("github", "acme/widgets");
 
@@ -454,7 +454,7 @@ describe("IntegrationSettingsStore", () => {
 
     it("list returns all overrides for integration", async () => {
       await store.setRepoSettings("github", "acme/widgets", {
-        model: "anthropic/claude-opus-4-6",
+        model: "anthropic/claude-opus-5-5",
       });
       await store.setRepoSettings("github", "acme/gadgets", {
         model: "anthropic/claude-haiku-4-5",
@@ -468,13 +468,13 @@ describe("IntegrationSettingsStore", () => {
 
     it("normalizes repo name to lowercase on write and lookup", async () => {
       await store.setRepoSettings("github", "Acme/Widgets", {
-        model: "anthropic/claude-opus-4-6",
+        model: "anthropic/claude-opus-5-5",
       });
 
       // Lookup with different casing
       const result = await store.getRepoSettings("github", "acme/widgets");
       expect(result).not.toBeNull();
-      expect(result?.model).toBe("anthropic/claude-opus-4-6");
+      expect(result?.model).toBe("anthropic/claude-opus-5-5");
     });
 
     it("supports autoReviewOnOpen as per-repo override", async () => {
@@ -607,14 +607,14 @@ describe("IntegrationSettingsStore", () => {
         defaults: { autoReviewOnOpen: false },
       });
       await store.setRepoSettings("github", "acme/widgets", {
-        model: "anthropic/claude-opus-4-6",
+        model: "anthropic/claude-opus-5-5",
         reasoningEffort: "high",
       });
 
       const config = await store.getResolvedConfig("github", "acme/widgets");
       expect(config.settings.autoReviewOnOpen).toBe(false);
       expect(config.enabledRepos).toEqual(["acme/widgets"]);
-      expect(config.settings.model).toBe("anthropic/claude-opus-4-6");
+      expect(config.settings.model).toBe("anthropic/claude-opus-5-5");
       expect(config.settings.reasoningEffort).toBe("high");
     });
 
@@ -651,16 +651,16 @@ describe("IntegrationSettingsStore", () => {
 
     it("global default model is used when no repo override", async () => {
       await store.setGlobal("github", {
-        defaults: { model: "anthropic/claude-opus-4-6" },
+        defaults: { model: "anthropic/claude-opus-5-5" },
       });
 
       const config = await store.getResolvedConfig("github", "acme/widgets");
-      expect(config.settings.model).toBe("anthropic/claude-opus-4-6");
+      expect(config.settings.model).toBe("anthropic/claude-opus-5-5");
     });
 
     it("repo model overrides global default model", async () => {
       await store.setGlobal("github", {
-        defaults: { model: "anthropic/claude-opus-4-6" },
+        defaults: { model: "anthropic/claude-opus-5-5" },
       });
       await store.setRepoSettings("github", "acme/widgets", {
         model: "anthropic/claude-haiku-4-5",
@@ -672,12 +672,12 @@ describe("IntegrationSettingsStore", () => {
 
     it("handles missing global gracefully", async () => {
       await store.setRepoSettings("github", "acme/widgets", {
-        model: "anthropic/claude-opus-4-6",
+        model: "anthropic/claude-opus-5-5",
       });
 
       const config = await store.getResolvedConfig("github", "acme/widgets");
       expect(config.enabledRepos).toBeNull();
-      expect(config.settings.model).toBe("anthropic/claude-opus-4-6");
+      expect(config.settings.model).toBe("anthropic/claude-opus-5-5");
     });
 
     it("normalizes undefined enabledRepos to null", async () => {
@@ -734,12 +734,12 @@ describe("IntegrationSettingsStore", () => {
         defaults: { allowedTriggerUsers: ["alice", "bob"] },
       });
       await store.setRepoSettings("github", "acme/widgets", {
-        model: "anthropic/claude-opus-4-6",
+        model: "anthropic/claude-opus-5-5",
       });
 
       const config = await store.getResolvedConfig("github", "acme/widgets");
       expect(config.settings.allowedTriggerUsers).toEqual(["alice", "bob"]);
-      expect(config.settings.model).toBe("anthropic/claude-opus-4-6");
+      expect(config.settings.model).toBe("anthropic/claude-opus-5-5");
     });
 
     it("global codeReviewInstructions surfaces in resolved config", async () => {
@@ -911,7 +911,7 @@ describe("IntegrationSettingsStore", () => {
 
       it("requires a local model with a restricted repo harness despite a compatible inherited model", async () => {
         await store.setGlobal(integrationId, {
-          defaults: { model: "anthropic/claude-sonnet-4-6" },
+          defaults: { model: "anthropic/claude-sonnet-5-5" },
         });
         await expect(
           store.setRepoSettings(integrationId, "acme/widgets", { harness: "claude" })
@@ -937,7 +937,7 @@ describe("IntegrationSettingsStore", () => {
 
         const repaired = {
           ...edited,
-          defaults: { ...legacy.defaults, model: "anthropic/claude-sonnet-4-6" },
+          defaults: { ...legacy.defaults, model: "anthropic/claude-sonnet-5-5" },
         };
         await store.setGlobal(integrationId, repaired);
         expect(await store.getGlobal(integrationId)).toEqual(repaired);
@@ -952,7 +952,7 @@ describe("IntegrationSettingsStore", () => {
           .bind(integrationId, "acme/widgets", JSON.stringify(legacy), 1, 1)
           .run();
         await store.setGlobal(integrationId, {
-          defaults: { model: "anthropic/claude-sonnet-4-6" },
+          defaults: { model: "anthropic/claude-sonnet-5-5" },
         });
 
         expect(await store.getRepoSettings(integrationId, "acme/widgets")).toEqual(legacy);
@@ -962,7 +962,7 @@ describe("IntegrationSettingsStore", () => {
         );
         expect(await store.getRepoSettings(integrationId, "acme/widgets")).toEqual(legacy);
 
-        const repaired = { ...edited, model: "anthropic/claude-sonnet-4-6" };
+        const repaired = { ...edited, model: "anthropic/claude-sonnet-5-5" };
         await store.setRepoSettings(integrationId, "acme/widgets", repaired);
         expect(await store.getRepoSettings(integrationId, "acme/widgets")).toEqual(repaired);
       });
@@ -977,12 +977,12 @@ describe("IntegrationSettingsStore", () => {
 
       it("preserves sparse overrides and leaves cross-level compatibility to launch admission", async () => {
         await store.setGlobal(integrationId, {
-          defaults: { harness: "claude", model: "anthropic/claude-sonnet-4-6" },
+          defaults: { harness: "claude", model: "anthropic/claude-sonnet-5-5" },
         });
-        await store.setRepoSettings(integrationId, "acme/widgets", { model: "openai/gpt-5.5" });
+        await store.setRepoSettings(integrationId, "acme/widgets", { model: "openai/gpt-6.2-sol" });
         expect((await store.getResolvedConfig(integrationId, "acme/widgets")).settings).toEqual({
           harness: "claude",
-          model: "openai/gpt-5.5",
+          model: "openai/gpt-6.2-sol",
         });
       });
     });
@@ -999,7 +999,7 @@ describe("IntegrationSettingsStore", () => {
     it("accepts valid reasoning effort for model on write", async () => {
       await expect(
         store.setRepoSettings("github", "acme/widgets", {
-          model: "anthropic/claude-opus-4-6",
+          model: "anthropic/claude-opus-5-5",
           reasoningEffort: "low",
         })
       ).resolves.not.toThrow();
@@ -1007,12 +1007,12 @@ describe("IntegrationSettingsStore", () => {
 
     it("preserves merged settings without domain-specific filtering", async () => {
       await store.setRepoSettings("github", "acme/widgets", {
-        model: "anthropic/claude-opus-4-6",
+        model: "anthropic/claude-opus-5-5",
         reasoningEffort: "low",
       });
 
       const config = await store.getResolvedConfig("github", "acme/widgets");
-      expect(config.settings.model).toBe("anthropic/claude-opus-4-6");
+      expect(config.settings.model).toBe("anthropic/claude-opus-5-5");
       expect(config.settings.reasoningEffort).toBe("low");
     });
   });
@@ -1327,7 +1327,7 @@ describe("IntegrationSettingsStore", () => {
       await store.setGlobal("linear", {
         enabledRepos: ["acme/platform"],
         defaults: {
-          model: "anthropic/claude-sonnet-4-6",
+          model: "anthropic/claude-sonnet-5-5",
           reasoningEffort: "high",
           allowUserPreferenceOverride: true,
           allowLabelModelOverride: false,
@@ -1339,7 +1339,7 @@ describe("IntegrationSettingsStore", () => {
       expect(result).toEqual({
         enabledRepos: ["acme/platform"],
         defaults: {
-          model: "anthropic/claude-sonnet-4-6",
+          model: "anthropic/claude-sonnet-5-5",
           reasoningEffort: "high",
           allowUserPreferenceOverride: true,
           allowLabelModelOverride: false,
@@ -1350,14 +1350,14 @@ describe("IntegrationSettingsStore", () => {
 
     it("round-trips linear repo settings", async () => {
       await store.setRepoSettings("linear", "acme/platform", {
-        model: "openai/gpt-6-sol",
+        model: "openai/gpt-6.2-sol",
         reasoningEffort: "high",
         allowLabelModelOverride: false,
       });
 
       const result = await store.getRepoSettings("linear", "acme/platform");
       expect(result).toEqual({
-        model: "openai/gpt-6-sol",
+        model: "openai/gpt-6.2-sol",
         reasoningEffort: "high",
         allowLabelModelOverride: false,
       });
@@ -1375,7 +1375,7 @@ describe("IntegrationSettingsStore", () => {
       await store.setGlobal("linear", {
         enabledRepos: ["acme/platform"],
         defaults: {
-          model: "anthropic/claude-sonnet-4-6",
+          model: "anthropic/claude-sonnet-5-5",
           allowUserPreferenceOverride: true,
         },
       });
@@ -1387,7 +1387,7 @@ describe("IntegrationSettingsStore", () => {
       const config = await store.getResolvedConfig("linear", "acme/platform");
       expect(config.enabledRepos).toEqual(["acme/platform"]);
       expect(config.settings).toEqual({
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         allowUserPreferenceOverride: false,
         emitToolProgressActivities: false,
       });
@@ -1408,11 +1408,11 @@ describe("IntegrationSettingsStore", () => {
 
     it("round-trips a global slack default model", async () => {
       await store.setGlobal("slack", {
-        defaults: { model: "anthropic/claude-sonnet-4-6" },
+        defaults: { model: "anthropic/claude-sonnet-5-5" },
       });
 
       const result = await store.getGlobal("slack");
-      expect(result?.defaults?.model).toBe("anthropic/claude-sonnet-4-6");
+      expect(result?.defaults?.model).toBe("anthropic/claude-sonnet-5-5");
     });
 
     it("rejects invalid slack default models", async () => {
@@ -1435,9 +1435,9 @@ describe("IntegrationSettingsStore", () => {
     it("rejects a global slack harness saved with a model it cannot run", async () => {
       await expect(
         store.setGlobal("slack", {
-          defaults: { harness: "claude", model: "openai/gpt-5.4" },
+          defaults: { harness: "claude", model: "openai/gpt-6.2-sol" },
         })
-      ).rejects.toThrow('Model "openai/gpt-5.4" cannot run on the Claude Agent harness.');
+      ).rejects.toThrow('Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.');
     });
 
     it("requires a default model for a global slack harness limited to some models", async () => {
@@ -1539,7 +1539,7 @@ describe("IntegrationSettingsStore", () => {
     it("rejects model at per-repo level (global-only field)", async () => {
       await expect(
         store.setRepoSettings("slack", "acme/widgets", {
-          model: "anthropic/claude-sonnet-4-6",
+          model: "anthropic/claude-sonnet-5-5",
         } as unknown as { agentNotificationsEnabled?: boolean })
       ).rejects.toThrow(IntegrationSettingsValidationError);
     });

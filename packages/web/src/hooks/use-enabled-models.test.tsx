@@ -34,9 +34,9 @@ function wrapper(enabledModels: unknown) {
 describe("useEnabledModels", () => {
   it("normalizes and removes models that are no longer in the catalog", () => {
     const { result } = renderHook(() => useEnabledModels(), {
-      wrapper: wrapper(["openai/gpt-5.2", "gpt-5.4", "openai/gpt-5.4"]),
+      wrapper: wrapper(["openai/gpt-5.2", "gpt-6.2-sol", "openai/gpt-6.2-sol"]),
     });
-    expect(result.current.enabledModels).toEqual(["openai/gpt-5.4"]);
+    expect(result.current.enabledModels).toEqual(["openai/gpt-6.2-sol"]);
   });
 
   it("falls back to defaults when the response has no valid models", () => {
@@ -49,11 +49,11 @@ describe("useEnabledModels", () => {
   it("stores the authoritative PATCH response", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ enabledModels: ["anthropic/claude-sonnet-4-6"], revision: 2 }),
+      json: async () => ({ enabledModels: ["anthropic/claude-sonnet-5-5"], revision: 2 }),
     });
     vi.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => useEnabledModels(), {
-      wrapper: wrapper(["openai/gpt-5.4"]),
+      wrapper: wrapper(["openai/gpt-6.2-sol"]),
     });
 
     await act(async () => {
@@ -69,7 +69,7 @@ describe("useEnabledModels", () => {
         }),
       })
     );
-    expect(result.current.enabledModels).toEqual(["anthropic/claude-sonnet-4-6"]);
+    expect(result.current.enabledModels).toEqual(["anthropic/claude-sonnet-5-5"]);
     expect(result.current.saving).toBe(false);
   });
 
@@ -77,7 +77,7 @@ describe("useEnabledModels", () => {
     let resolve!: (response: Response) => void;
     vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise((done) => (resolve = done))));
     const { result } = renderHook(() => useEnabledModels(), {
-      wrapper: wrapper(["openai/gpt-5.4"]),
+      wrapper: wrapper(["openai/gpt-6.2-sol"]),
     });
 
     let update!: Promise<void>;
@@ -86,13 +86,16 @@ describe("useEnabledModels", () => {
         { modelId: "anthropic/claude-haiku-4-5", enabled: true },
       ]);
     });
-    expect(result.current.enabledModels).toEqual(["openai/gpt-5.4", "anthropic/claude-haiku-4-5"]);
+    expect(result.current.enabledModels).toEqual([
+      "openai/gpt-6.2-sol",
+      "anthropic/claude-haiku-4-5",
+    ]);
     expect(result.current.saving).toBe(true);
 
     await act(async () => {
       resolve(
         Response.json({
-          enabledModels: ["openai/gpt-5.4", "anthropic/claude-haiku-4-5"],
+          enabledModels: ["openai/gpt-6.2-sol", "anthropic/claude-haiku-4-5"],
           revision: 2,
         })
       );
@@ -106,7 +109,7 @@ describe("useEnabledModels", () => {
     vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise((done) => (resolve = done))));
     const { result } = renderHook(
       () => ({ preferences: useEnabledModels(), mutate: useSWRConfig().mutate }),
-      { wrapper: wrapper(["openai/gpt-5.4"]) }
+      { wrapper: wrapper(["openai/gpt-6.2-sol"]) }
     );
 
     let update!: Promise<void>;
@@ -120,9 +123,9 @@ describe("useEnabledModels", () => {
         MODEL_PREFERENCES_KEY,
         {
           enabledModels: [
-            "openai/gpt-5.4",
+            "openai/gpt-6.2-sol",
             "anthropic/claude-haiku-4-5",
-            "anthropic/claude-sonnet-4-6",
+            "anthropic/claude-sonnet-5-5",
           ],
           revision: 3,
         },
@@ -130,24 +133,24 @@ describe("useEnabledModels", () => {
       );
     });
     expect(result.current.preferences.enabledModels).toEqual([
-      "openai/gpt-5.4",
+      "openai/gpt-6.2-sol",
       "anthropic/claude-haiku-4-5",
-      "anthropic/claude-sonnet-4-6",
+      "anthropic/claude-sonnet-5-5",
     ]);
 
     await act(async () => {
       resolve(
         Response.json({
-          enabledModels: ["openai/gpt-5.4", "anthropic/claude-haiku-4-5"],
+          enabledModels: ["openai/gpt-6.2-sol", "anthropic/claude-haiku-4-5"],
           revision: 2,
         })
       );
       await update;
     });
     expect(result.current.preferences.enabledModels).toEqual([
-      "openai/gpt-5.4",
+      "openai/gpt-6.2-sol",
       "anthropic/claude-haiku-4-5",
-      "anthropic/claude-sonnet-4-6",
+      "anthropic/claude-sonnet-5-5",
     ]);
   });
 
@@ -160,20 +163,20 @@ describe("useEnabledModels", () => {
   ])("rejects an invalid PATCH response and rolls back: %j", async (response) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => response }));
     const { result } = renderHook(() => useEnabledModels(), {
-      wrapper: wrapper(["openai/gpt-5.4"]),
+      wrapper: wrapper(["openai/gpt-6.2-sol"]),
     });
     await act(async () => {
       await expect(
         result.current.updateModels([{ modelId: "anthropic/claude-haiku-4-5", enabled: true }])
       ).rejects.toThrow("Invalid model preferences response");
     });
-    expect(result.current.enabledModels).toEqual(["openai/gpt-5.4"]);
+    expect(result.current.enabledModels).toEqual(["openai/gpt-6.2-sol"]);
     expect(result.current.saving).toBe(false);
   });
 
   it("only dispatches the model preferences resource through the global fetcher", async () => {
     const fetcher = vi.fn(async (_key: string) => ({
-      enabledModels: ["openai/gpt-5.4"],
+      enabledModels: ["openai/gpt-6.2-sol"],
       revision: 1,
     }));
     vi.stubGlobal(
@@ -216,7 +219,7 @@ describe("useEnabledModels", () => {
     });
     await waitFor(() => expect(result.current.error).toBe(readError));
     await expect(
-      result.current.updateModels([{ modelId: "openai/gpt-5.4", enabled: true }])
+      result.current.updateModels([{ modelId: "openai/gpt-6.2-sol", enabled: true }])
     ).rejects.toThrow("Model preferences must load before saving");
   });
 });

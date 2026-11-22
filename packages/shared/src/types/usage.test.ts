@@ -5,7 +5,7 @@ import { normalizeTokenUsage, stepUsageSchema, type StepUsage } from "./usage";
 const stepUsage: StepUsage = {
   id: "step-1",
   messageId: "message-1",
-  model: "anthropic/claude-sonnet-5",
+  model: "anthropic/claude-sonnet-5-5",
   harness: "opencode",
   inputTokens: 40,
   outputTokens: null,

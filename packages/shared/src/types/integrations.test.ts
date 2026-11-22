@@ -73,7 +73,7 @@ describe("Linear unbound channel policy", () => {
   });
 
   it.each(["workspace", "reject"])("accepts %s only at the global level", (unboundChannels) => {
-    const defaults = { model: "anthropic/claude-sonnet-4-6", unboundChannels };
+    const defaults = { model: "anthropic/claude-sonnet-5-5", unboundChannels };
     expect(linearBotGlobalSettingsSchema.parse(defaults)).toEqual(defaults);
     expect(integrationSettingsSchemas.linear.global.parse({ defaults })).toEqual({ defaults });
     expect(linearBotSettingsSchema.safeParse({ unboundChannels }).success).toBe(false);

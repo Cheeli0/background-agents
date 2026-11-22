@@ -35,7 +35,7 @@ async function seedAutomation(now: number) {
     `INSERT INTO automations
        (id, owner_team_id, name, instructions, trigger_type, model, created_by, user_id,
         created_at, updated_at, trigger_config)
-     VALUES (?, NULL, 'Card agent', 'Fixture only', 'webhook', 'anthropic/claude-sonnet-4-6',
+     VALUES (?, NULL, 'Card agent', 'Fixture only', 'webhook', 'anthropic/claude-sonnet-5-5',
        ?, ?, ?, ?, ?)`
   )
     .bind(AUTOMATION_ID, OWNER, OWNER, now, now, JSON.stringify({ conditions: [] }))

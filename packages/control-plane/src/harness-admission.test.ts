@@ -26,30 +26,34 @@ describe("consolidated selection boundaries", () => {
         validateHarnessExecution(db, { harness, model: DEFAULT_MODEL, reasoningEffort: "invalid" })
       ).resolves.toBeUndefined();
       expect(getEnabledModels).not.toHaveBeenCalled();
-      expect(resolveHarnessInitialization(harness, { model: "unknown" })).toEqual({
+      expect(resolveHarnessInitialization(harness, {})).toEqual({
         model: DEFAULT_MODEL,
         reasoningEffort: undefined,
       });
+      // A retired or unknown model is refused, never replaced with the default.
+      expect(() =>
+        resolveHarnessInitialization(harness, { model: "anthropic/claude-sonnet-4-6" })
+      ).toThrow('Model "anthropic/claude-sonnet-4-6" is no longer supported.');
     }
   );
   it("checks current native model availability and resolved auth again at dispatch", async () => {
     await expect(
       validateHarnessExecution(
         db,
-        { harness: "codex", model: "openai/gpt-6.1-sol" },
+        { harness: "codex", model: "openai/gpt-6.2-sol" },
         { openai: "legacy_scoped_oauth" }
       )
     ).rejects.toThrow("legacy_scoped_oauth");
     getEnabledModels.mockResolvedValue([DEFAULT_MODEL]);
     await expect(
-      validateHarnessExecution(db, { harness: "codex", model: "openai/gpt-6.1-sol" })
+      validateHarnessExecution(db, { harness: "codex", model: "openai/gpt-6.2-sol" })
     ).rejects.toThrow("not enabled");
   });
   it("does not silently repair invalid internal native initialization", () => {
     expect(() => resolveHarnessInitialization("codex", {})).toThrow("cannot run");
     expect(() => resolveHarnessInitialization("codex", { model: "unknown" })).toThrow("cannot run");
-    expect(resolveHarnessInitialization("codex", { model: "gpt-6.1-sol" })).toEqual({
-      model: "openai/gpt-6.1-sol",
+    expect(resolveHarnessInitialization("codex", { model: "gpt-6.2-sol" })).toEqual({
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "low",
     });
   });
@@ -58,15 +62,15 @@ describe("consolidated selection boundaries", () => {
     await expect(
       resolveHarnessAutomationUpdate(
         db,
-        { model: "openai/gpt-5.6-sol", reasoningEffort: "max" },
+        { model: "openai/gpt-6.2-sol", reasoningEffort: "max" },
         { harness: "codex", executionChanged: false }
       )
-    ).resolves.toEqual({ model: "openai/gpt-5.6-sol", reasoningEffort: "max" });
+    ).resolves.toEqual({ model: "openai/gpt-6.2-sol", reasoningEffort: "max" });
     expect(getEnabledModels).not.toHaveBeenCalled();
     await expect(
       resolveHarnessAutomationUpdate(
         db,
-        { model: "openai/gpt-5.6-sol", reasoningEffort: "max" },
+        { model: "openai/gpt-6.2-sol", reasoningEffort: "max" },
         { harness: "codex", executionChanged: true }
       )
     ).rejects.toThrow("storage unavailable");
@@ -75,33 +79,33 @@ describe("consolidated selection boundaries", () => {
     await expect(
       resolveHarnessAutomationUpdate(
         db,
-        { model: DEFAULT_MODEL, reasoningEffort: "max" },
-        { harness: "opencode", model: "openai/gpt-5.4", executionChanged: true }
+        { model: DEFAULT_MODEL, reasoningEffort: "xhigh" },
+        { harness: "opencode", model: "anthropic/claude-haiku-4-5", executionChanged: true }
       )
-    ).resolves.toEqual({ model: "openai/gpt-5.4", reasoningEffort: null });
+    ).resolves.toEqual({ model: "anthropic/claude-haiku-4-5", reasoningEffort: null });
   });
   it("reuses the loaded catalog for native child model and effort inheritance", async () => {
     getEnabledModels.mockRejectedValue(new Error("must not reread the catalog"));
     await expect(
       resolveChildHarnessSelection(
         db,
-        { harness: "codex", model: "openai/gpt-5.6-sol", reasoningEffort: "max" },
+        { harness: "codex", model: "openai/gpt-6.2-sol", reasoningEffort: "max" },
         {},
-        ["openai/gpt-5.6-sol"]
+        ["openai/gpt-6.2-sol"]
       )
-    ).resolves.toEqual({ model: "openai/gpt-5.6-sol", reasoningEffort: "max" });
+    ).resolves.toEqual({ model: "openai/gpt-6.2-sol", reasoningEffort: "max" });
     expect(getEnabledModels).not.toHaveBeenCalled();
   });
-  it("uses a qualified enabled child default and drops incompatible inherited effort", async () => {
-    getEnabledModels.mockResolvedValue([DEFAULT_MODEL, "openai/gpt-5.5"]);
+  it("uses a qualified enabled child default when the parent model is disabled", async () => {
+    getEnabledModels.mockResolvedValue([DEFAULT_MODEL, "openai/gpt-6-luna"]);
     await expect(
       resolveChildHarnessSelection(
         db,
-        { harness: "codex", model: "openai/gpt-5.6-sol", reasoningEffort: "max" },
+        { harness: "codex", model: "openai/gpt-6.2-sol", reasoningEffort: "max" },
         {},
-        [DEFAULT_MODEL, "openai/gpt-5.5"]
+        [DEFAULT_MODEL, "openai/gpt-6-luna"]
       )
-    ).resolves.toEqual({ model: "openai/gpt-5.5", reasoningEffort: "medium" });
+    ).resolves.toEqual({ model: "openai/gpt-6-luna", reasoningEffort: "max" });
   });
   it("rejects explicitly incompatible child effort rather than discarding it", async () => {
     await expect(
@@ -115,27 +119,22 @@ describe("consolidated selection boundaries", () => {
     await expect(
       resolveChildHarnessSelection(
         db,
-        { harness: "codex", model: "openai/gpt-6.1-sol", reasoningEffort: null },
+        { harness: "codex", model: "openai/gpt-6.2-sol", reasoningEffort: null },
         { reasoningEffort: "invalid" },
-        ["openai/gpt-6.1-sol"]
+        ["openai/gpt-6.2-sol"]
       )
     ).rejects.toThrow("Invalid reasoning effort");
   });
 });
 beforeEach(() => {
   getEnabledModels.mockReset();
-  getEnabledModels.mockResolvedValue([
-    DEFAULT_MODEL,
-    "openai/gpt-5.4",
-    "openai/gpt-6.1-sol",
-    "openai/gpt-5.6-sol",
-  ]);
+  getEnabledModels.mockResolvedValue([DEFAULT_MODEL, "openai/gpt-6.2-sol", "openai/gpt-6.1-terra"]);
 });
 
 describe("Codex admission", () => {
   it("uses an enabled native default instead of the Anthropic deployment default", async () => {
     await expect(resolveHarnessSelection(db, { harness: "codex" })).resolves.toEqual({
-      model: "openai/gpt-6.1-sol",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "low",
     });
   });
@@ -143,12 +142,12 @@ describe("Codex admission", () => {
     await expect(
       resolveHarnessSelection(db, {
         harness: "codex",
-        model: "gpt-5.6-sol",
+        model: "gpt-6.2-sol",
         reasoningEffort: "max",
       })
-    ).resolves.toEqual({ model: "openai/gpt-5.6-sol", reasoningEffort: "max" });
+    ).resolves.toEqual({ model: "openai/gpt-6.2-sol", reasoningEffort: "max" });
   });
-  it.each(["bogus", "anthropic/claude-sonnet-4-6", "openai/gpt-5.4"])(
+  it.each(["bogus", "anthropic/claude-sonnet-5-5", "openai/gpt-5.4"])(
     "never substitutes explicit incompatible model %s",
     async (model) => {
       await expect(resolveHarnessSelection(db, { harness: "codex", model })).rejects.toThrow(
@@ -158,7 +157,7 @@ describe("Codex admission", () => {
   );
   it("rejects disabled native models and unavailable preference storage", async () => {
     await expect(
-      resolveHarnessSelection(db, { harness: "codex", model: "openai/gpt-5.5" })
+      resolveHarnessSelection(db, { harness: "codex", model: "openai/gpt-6.2-astra" })
     ).rejects.toThrow("not enabled");
     getEnabledModels.mockRejectedValue(new Error("storage unavailable"));
     await expect(resolveHarnessSelection(db, { harness: "codex" })).rejects.toThrow(

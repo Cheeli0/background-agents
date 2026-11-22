@@ -116,7 +116,7 @@ function seedActiveSession(opts?: {
     title: "Test session",
     repoOwner: opts && "repoOwner" in opts ? opts.repoOwner : "acme",
     repoName: opts && "repoName" in opts ? opts.repoName : "web-app",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     baseBranch: null,
     status: opts?.status ?? "active",

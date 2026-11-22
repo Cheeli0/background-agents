@@ -15,7 +15,8 @@ import {
   type LinearGlobalConfig,
 } from "@open-inspect/shared/types/integrations";
 import {
-  getValidModelOrDefault,
+  getValidModel,
+  UnsupportedModelError,
   isValidModel,
   type ModelCategory,
 } from "@open-inspect/shared/models";
@@ -648,14 +649,12 @@ function RepoOverrideRow({
     (model !== "" &&
       (!isValidModel(model) ||
         (harness !== undefined && shouldClearModelForHarness(harness, model))));
-  const mismatch = effectiveModel
-    ? checkHarnessCompatibility(
-        effectiveHarness,
-        getValidModelOrDefault(effectiveModel),
-        undefined,
-        effectiveEffort
-      )
-    : null;
+  const validEffectiveModel = getValidModel(effectiveModel);
+  const mismatch = !effectiveModel
+    ? null
+    : validEffectiveModel
+      ? checkHarnessCompatibility(effectiveHarness, validEffectiveModel, undefined, effectiveEffort)
+      : { code: "model" as const, message: new UnsupportedModelError(effectiveModel).message };
 
   const handleHarnessChange = (newHarness: HarnessId | undefined) => {
     setHarness(newHarness);

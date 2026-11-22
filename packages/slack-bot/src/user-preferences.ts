@@ -2,7 +2,6 @@ import {
   DEFAULT_MODEL,
   getDefaultReasoningEffort,
   getValidModelOrDefault,
-  getValidModelOrReplacement,
   isValidModel,
   isValidReasoningEffort,
   normalizeModelId,
@@ -31,7 +30,6 @@ type UserPreferences = z.infer<typeof slackUserPreferencesSchema>;
 
 export interface ResolvedUserPreferences {
   model: string;
-  /** Retired-model replacements still originate from the App Home preference. */
   modelOrigin: "app-home" | "default";
   reasoningEffort: string | undefined;
   branch: string | undefined;
@@ -64,8 +62,9 @@ function normalizeResolvedPreferences(
   },
   defaultModel: string | undefined
 ): ResolvedUserPreferences {
-  // Preserve disabled preferences; only new-session launches check enablement.
-  const preferredModel = getValidModelOrReplacement(preferences.model);
+  // Preserve disabled and retired preferences as chosen; only new-session
+  // launches check them, and refuse rather than substitute another model.
+  const preferredModel = preferences.model ? normalizeModelId(preferences.model) : undefined;
   const model = preferredModel ?? getValidModelOrDefault(defaultModel);
   const reasoningEffort =
     preferences.reasoningEffort && isValidReasoningEffort(model, preferences.reasoningEffort)

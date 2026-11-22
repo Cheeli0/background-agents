@@ -157,11 +157,11 @@ Start the request with `!model` or `!reasoning` to override the configured model
 for the session that comment starts:
 
 ```text
-@my-app[bot] !model openai/gpt-5.6-sol !reasoning high investigate the flaky test
+@my-app[bot] !model openai/gpt-6.2-sol !reasoning high investigate the flaky test
 ```
 
 The flags use the same syntax as Slack: each accepts a space or colon before its value (such as
-`!model:anthropic/claude-sonnet-4-6` or `!reasoning:max`), and any flags must appear together at the
+`!model:anthropic/claude-sonnet-5-5` or `!reasoning:max`), and any flags must appear together at the
 start of the request, right after the bot mention. Flags later in the comment are treated as part of
 the request. Models must be enabled under **Settings > Models**, and the reasoning value must be
 supported by the selected model. A model flag without `!reasoning` keeps the configured reasoning

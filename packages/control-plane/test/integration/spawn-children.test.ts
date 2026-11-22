@@ -48,7 +48,7 @@ describe("POST /sessions/:parentId/children — spawn child", () => {
       title: "Parent",
       repoOwner: "acme",
       repoName: "web-app",
-      model: opts?.model ?? "anthropic/claude-sonnet-4-6",
+      model: opts?.model ?? "anthropic/claude-sonnet-5-5",
       reasoningEffort: opts?.reasoningEffort ?? null,
       baseBranch: null,
       status: "active",
@@ -703,7 +703,7 @@ describe("POST /sessions/:parentId/children — spawn child", () => {
   it("rejects a disabled model override for grandchildren", async () => {
     const { parentName, sandboxToken } = await setupParent();
 
-    await seedEnabledModels(["anthropic/claude-sonnet-4-6"]);
+    await seedEnabledModels(["anthropic/claude-sonnet-5-5"]);
 
     const childRes = await SELF.fetch(`https://test.local/sessions/${parentName}/children`, {
       method: "POST",
@@ -735,20 +735,20 @@ describe("POST /sessions/:parentId/children — spawn child", () => {
         body: JSON.stringify({
           title: "Grandchild",
           prompt: "Use a disabled model",
-          model: "opencode/kimi-k2.5",
+          model: "opencode/kimi-k3",
         }),
       }
     );
 
     expect(grandchildRes.status).toBe(400);
     await expect(grandchildRes.json()).resolves.toEqual({
-      error: 'Model "opencode/kimi-k2.5" is not enabled',
+      error: 'Model "opencode/kimi-k3" is not enabled',
     });
   });
 
   it("uses an enabled fallback when the inherited parent model was disabled", async () => {
     const { parentName, sandboxToken, store } = await setupParent({
-      model: "openai/gpt-5.5",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "xhigh",
     });
 
@@ -833,7 +833,7 @@ describe("POST /sessions/:parentId/children — spawn child", () => {
         title: `Active Child ${i}`,
         repoOwner: "acme",
         repoName: "web-app",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         reasoningEffort: null,
         baseBranch: null,
         status: "created",
@@ -874,7 +874,7 @@ describe("POST /sessions/:parentId/children — spawn child", () => {
         title: `Child ${i}`,
         repoOwner: "acme",
         repoName: "web-app",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         reasoningEffort: null,
         baseBranch: null,
         status: i < 4 ? "created" : "completed", // 4 active, 11 completed = 15 total
@@ -971,7 +971,7 @@ describe("POST /sessions/:parentId/children — spawn child", () => {
       title: "Child A",
       repoOwner: "acme",
       repoName: "web-app",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
       reasoningEffort: null,
       baseBranch: null,
       status: "created",
@@ -989,7 +989,7 @@ describe("POST /sessions/:parentId/children — spawn child", () => {
       title: "Child B",
       repoOwner: "acme",
       repoName: "web-app",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
       reasoningEffort: null,
       baseBranch: null,
       status: "completed",

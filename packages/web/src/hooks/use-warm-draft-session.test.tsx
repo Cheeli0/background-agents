@@ -15,7 +15,7 @@ import {
 vi.mock("@/lib/browser-api-fetch", () => ({ browserApiFetch: vi.fn() }));
 vi.mock("@/lib/warm-session", () => ({ retireWarmDraftSession: vi.fn() }));
 
-const request = (model = "openai/gpt-5.4"): WarmDraftSessionRequest => ({
+const request = (model = "openai/gpt-6.2-sol"): WarmDraftSessionRequest => ({
   repoOwner: "open-inspect",
   repoName: "background-agents",
   harness: "opencode",
@@ -98,7 +98,7 @@ describe("useWarmDraftSession", () => {
       });
       expect(browserApiFetch).toHaveBeenCalledTimes(1);
 
-      rerender({ launchRequest: request("openai/gpt-5.5") });
+      rerender({ launchRequest: request("openai/gpt-6.2-astra") });
       expect(result.current.error).toBeNull();
       await act(async () => {
         await result.current.warm();
@@ -254,7 +254,7 @@ describe("useWarmDraftSession", () => {
     act(() => {
       warming = result.current.warm();
     });
-    rerender({ launchRequest: request("openai/gpt-5.5") });
+    rerender({ launchRequest: request("openai/gpt-6.2-astra") });
     resolveCreate?.(
       Response.json({ error: "Forbidden", code: "not_team_member" }, { status: 403 })
     );
@@ -273,7 +273,7 @@ describe("useWarmDraftSession", () => {
             openai: { accountId: "a".repeat(32), mode: "provider_account" },
           },
           skillSelection: { mode: "all" },
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           harness: "opencode",
           repoName: "background-agents",
           repoOwner: "open-inspect",
@@ -299,7 +299,7 @@ describe("useWarmDraftSession", () => {
     });
     expect(result.current.sessionId).toBe("session-1");
 
-    rerender({ launchRequest: request("openai/gpt-5.5") });
+    rerender({ launchRequest: request("openai/gpt-6.2-astra") });
     await waitFor(() => expect(retireWarmDraftSession).toHaveBeenCalledWith("session-1"));
     expect(result.current.sessionId).toBeNull();
   });
@@ -471,14 +471,14 @@ describe("useWarmDraftSession", () => {
       { initialProps: { launchRequest: request(), warmInLayout: false } }
     );
 
-    rerender({ launchRequest: request("openai/gpt-5.5"), warmInLayout: true });
+    rerender({ launchRequest: request("openai/gpt-6.2-astra"), warmInLayout: true });
     await act(async () => {
       await warming;
     });
 
     expect(browserApiFetch).toHaveBeenCalledWith(
       "/api/sessions",
-      expect.objectContaining({ body: JSON.stringify(request("openai/gpt-5.5")) })
+      expect.objectContaining({ body: JSON.stringify(request("openai/gpt-6.2-astra")) })
     );
     await expect(warming).resolves.toBe("session-2");
   });
@@ -497,7 +497,7 @@ describe("useWarmDraftSession", () => {
     act(() => {
       warming = result.current.warm();
     });
-    rerender({ launchRequest: request("openai/gpt-5.5") });
+    rerender({ launchRequest: request("openai/gpt-6.2-astra") });
     resolveCreate?.(Response.json({ sessionId: "stale-session", status: "created" }));
 
     await act(async () => {

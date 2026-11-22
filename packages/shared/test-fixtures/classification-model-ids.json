@@ -59,11 +59,11 @@
     }
   },
   {
-    "id": "bedrock/ap-southeast-4/anthropic.claude-opus-4-8",
+    "id": "bedrock/ap-southeast-4/anthropic.claude-opus-5-5",
     "parsed": {
       "provider": "bedrock",
       "region": "ap-southeast-4",
-      "model": "anthropic.claude-opus-4-8"
+      "model": "anthropic.claude-opus-5-5"
     }
   },
   {

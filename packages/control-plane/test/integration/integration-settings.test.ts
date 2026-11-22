@@ -226,7 +226,7 @@ describe("Integration settings API", () => {
         {
           method: "PUT",
           body: JSON.stringify({
-            settings: { model: "anthropic/claude-opus-4-6", reasoningEffort: "high" },
+            settings: { model: "anthropic/claude-opus-5-5", reasoningEffort: "high" },
           }),
         }
       );
@@ -241,7 +241,7 @@ describe("Integration settings API", () => {
         repo: string;
         settings: { model: string; reasoningEffort: string };
       }>();
-      expect(getBody.settings.model).toBe("anthropic/claude-opus-4-6");
+      expect(getBody.settings.model).toBe("anthropic/claude-opus-5-5");
       expect(getBody.settings.reasoningEffort).toBe("high");
 
       // List all
@@ -314,7 +314,7 @@ describe("Integration settings API", () => {
       await serviceFetch("https://test.local/integration-settings/github/repos/acme/widgets", {
         method: "PUT",
         body: JSON.stringify({
-          settings: { model: "anthropic/claude-opus-4-6", reasoningEffort: "high" },
+          settings: { model: "anthropic/claude-opus-5-5", reasoningEffort: "high" },
         }),
       });
 
@@ -331,7 +331,7 @@ describe("Integration settings API", () => {
           enabledRepos: string[];
         };
       }>();
-      expect(body.config.model).toBe("anthropic/claude-opus-4-6");
+      expect(body.config.model).toBe("anthropic/claude-opus-5-5");
       expect(body.config.reasoningEffort).toBe("high");
       expect(body.config.autoReviewOnOpen).toBe(false);
       expect(body.config.enabledRepos).toEqual(["acme/widgets"]);
@@ -465,7 +465,7 @@ describe("Integration settings API", () => {
           settings: {
             enabledRepos: ["acme/widgets"],
             defaults: {
-              model: "anthropic/claude-sonnet-4-6",
+              model: "anthropic/claude-sonnet-5-5",
               reasoningEffort: "high",
               allowUserPreferenceOverride: true,
               allowLabelModelOverride: true,
@@ -501,7 +501,7 @@ describe("Integration settings API", () => {
         };
       }>();
 
-      expect(body.config.model).toBe("anthropic/claude-sonnet-4-6");
+      expect(body.config.model).toBe("anthropic/claude-sonnet-5-5");
       expect(body.config.reasoningEffort).toBe("high");
       expect(body.config.allowUserPreferenceOverride).toBe(false);
       expect(body.config.allowLabelModelOverride).toBe(true);

@@ -32,7 +32,7 @@ The agent harness is the coding agent that runs inside the sandbox. Every sessio
 - Child sessions inherit their parent's harness.
 - An automation carries a harness for the sessions it creates.
 - Sessions started by Linear run on the harness chosen in Settings › Integrations › Linear, globally or per repository (OpenCode by default). A model the chosen harness cannot run, such as one from a `model:gpt-*` label on Claude Agent, is refused with an error activity and no coding session. Choose a compatible `model:*` label, user preference, or default model, or change the integration harness, then delegate again.
-- Sessions started by Slack run on the harness the user chose in the Slack app's Home tab, else the one chosen in Settings › Integrations › Slack (OpenCode by default). A request whose model that harness cannot run, such as one from `!model openai/gpt-5.4` or an App Home preference on Claude Agent, is refused rather than started on OpenCode. A Slack thread keeps its session's harness.
+- Sessions started by Slack run on the harness the user chose in the Slack app's Home tab, else the one chosen in Settings › Integrations › Slack (OpenCode by default). A request whose model that harness cannot run, such as one from `!model openai/gpt-6.2-sol` or an App Home preference on Claude Agent, is refused rather than started on OpenCode. A Slack thread keeps its session's harness.
 - Sessions started by GitHub run on the harness chosen in Settings › Integrations › GitHub, globally or per repository (OpenCode by default). A model the chosen harness cannot run is refused with a reply on the PR and no session. Retry a mention with a compatible `!model`, update the default model, or change the integration harness.
 - OpenCode is the default harness.
 
@@ -73,7 +73,7 @@ All three harnesses emit the same session events (tokens, tool calls, steps, war
 
 Switching harness drops any provider authentication pin the new harness cannot honor (for example a connected Claude account selected for a session you then switch to OpenCode), so you never submit a selection the server would refuse.
 
-Once the session exists, the **Agent** row disappears. Per-message model overrides on the session page are limited to models the harness can run; an override outside that set is rejected with an error such as `Model "openai/gpt-5.5" cannot run on the Claude Agent harness.` rather than replaced.
+Once the session exists, the **Agent** row disappears. Per-message model overrides on the session page are limited to models the harness can run; an override outside that set is rejected with an error such as `Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.` rather than replaced.
 
 ## Claude Agent sessions
 

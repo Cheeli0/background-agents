@@ -195,7 +195,7 @@ describe("automation create route", () => {
     it("saves native max and effective OpenAI pins without rollout configuration", async () => {
       const preferences = vi
         .spyOn(ModelPreferencesStore.prototype, "getEnabledModels")
-        .mockResolvedValue(["openai/gpt-5.6-sol"]);
+        .mockResolvedValue(["openai/gpt-6.2-sol"]);
       const handle = createTestRequestHandler([automationRoutes]);
       const request = automationRequest((request, env, tasks) => handle(request, env, tasks));
       mockProviderAccountStore.getById.mockResolvedValue(null);
@@ -204,7 +204,7 @@ describe("automation create route", () => {
           body: {
             ...validBody,
             harness: "codex",
-            model: "openai/gpt-5.6-sol",
+            model: "openai/gpt-6.2-sol",
             reasoningEffort: "max",
             providerSelections: {
               openai: { mode: "api_key" },
@@ -216,7 +216,7 @@ describe("automation create route", () => {
         expect(mockStore.bindAutomationInsert).toHaveBeenCalledWith(
           expect.objectContaining({
             harness: "codex",
-            model: "openai/gpt-5.6-sol",
+            model: "openai/gpt-6.2-sol",
             reasoning_effort: "max",
           })
         );
@@ -386,7 +386,7 @@ describe("automation create route", () => {
       const res = await callRoute("POST", "/automations", {
         body: {
           ...validBody,
-          model: "anthropic/claude-sonnet-4-6",
+          model: "anthropic/claude-sonnet-5-5",
           providerSelections: {
             anthropic: {
               mode: "provider_account",
@@ -914,18 +914,18 @@ describe("automation create route", () => {
       mockStore.getById.mockResolvedValue({ ...sampleRow, reasoning_effort: "high" });
 
       const res = await callRoute("POST", "/automations", {
-        body: { ...validBody, model: "anthropic/claude-sonnet-4-6", reasoningEffort: "high" },
+        body: { ...validBody, model: "anthropic/claude-sonnet-5-5", reasoningEffort: "high" },
       });
 
       expect(res.status).toBe(201);
       expect(mockStore.bindAutomationInsert).toHaveBeenCalledWith(
-        expect.objectContaining({ model: "anthropic/claude-sonnet-4-6", reasoning_effort: "high" })
+        expect.objectContaining({ model: "anthropic/claude-sonnet-5-5", reasoning_effort: "high" })
       );
     });
 
     it("returns 400 for invalid reasoning effort", async () => {
       const res = await callRoute("POST", "/automations", {
-        body: { ...validBody, model: "anthropic/claude-sonnet-4-6", reasoningEffort: "xhigh" },
+        body: { ...validBody, model: "anthropic/claude-haiku-4-5", reasoningEffort: "xhigh" },
       });
 
       expect(res.status).toBe(400);

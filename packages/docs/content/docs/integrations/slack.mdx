@@ -132,7 +132,7 @@ A DM session uses your personal memories the way a web session does, when your *
 Start a request with `!model` or `!reasoning` to override your App Home defaults:
 
 ```text
-@OpenInspect !model anthropic/claude-sonnet-4-6 !reasoning max investigate the flaky test
+@OpenInspect !model anthropic/claude-sonnet-5-5 !reasoning max investigate the flaky test
 ```
 
 | Where you use the flags              | Effect                                                                                                                                                                           |
@@ -140,12 +140,12 @@ Start a request with `!model` or `!reasoning` to override your App Home defaults
 | On the request that starts a session | They become that session's defaults. Every follow-up in the thread keeps them. The "Starting work..." acknowledgement names the model when it differs from your App Home default |
 | On a follow-up in an existing thread | They apply to that one request only. The session's defaults do not change                                                                                                        |
 
-A running session's defaults cannot be changed. To go back to your defaults for good, start a new session in a new thread. Both flags accept a space or a colon before the value (`!model:openai/gpt-5.6-sol`, `!reasoning:high`), and all flags must appear together at the start of the request. Models must be enabled under Settings › Models, and the reasoning value must be supported by the model.
+A running session's defaults cannot be changed. To go back to your defaults for good, start a new session in a new thread. Both flags accept a space or a colon before the value (`!model:openai/gpt-6.2-sol`, `!reasoning:high`), and all flags must appear together at the start of the request. Models must be enabled under Settings › Models, and the reasoning value must be supported by the model.
 
 A thread runs on one [agent harness](#default-model-and-agent-harness) for its whole life. On a request that starts a session, a `!model` that your harness cannot run is refused and no session starts. On a follow-up, the control plane rejects a `!model` that the thread's harness cannot run, and the bot replies in the thread:
 
 ```text
-Model "openai/gpt-5.4" cannot run on the Claude Agent harness. A thread keeps the harness its session started on. Reply without !model, or start a new thread to use that model.
+Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness. A thread keeps the harness its session started on. Reply without !model, or start a new thread to use that model.
 ```
 
 A `!reasoning`-only follow-up keeps the thread's session model, as a follow-up without flags does, even if an administrator has since disabled that model. The thread's harness was chosen to run that model, so the follow-up always runs.
@@ -257,10 +257,10 @@ A new session runs on the requester's App Home **Agent harness**, or on the work
 
 The effective model must be enabled under Settings › Models. If the App Home model, Slack **Default model**, or deployment/system default used by the request is disabled, the bot refuses to start a new session. It never substitutes a lower-priority default or the first enabled model. Re-enable the model or update the applicable preference or default. An enabled App Home model or leading `!model` override still works when a lower-priority default is disabled, provided the session's harness can run it. Existing-thread follow-ups without `!model` keep the session's model, even if it has since been disabled.
 
-If the session's harness cannot run that model, the bot starts no session. Claude Agent runs Anthropic models only, so with Claude Agent as the harness, an OpenAI App Home model or `!model openai/gpt-5.4` is refused. After its "Starting work..." message, the bot replies in the thread:
+If the session's harness cannot run that model, the bot starts no session. Claude Agent runs Anthropic models only, so with Claude Agent as the harness, an OpenAI App Home model or `!model openai/gpt-6.2-sol` is refused. After its "Starting work..." message, the bot replies in the thread:
 
 ```text
-Model "openai/gpt-5.4" cannot run on the Claude Agent harness. Start your request with !model and a model Claude Agent can run, or change your model or agent harness in the Slack app's Home tab.
+Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness. Start your request with !model and a model Claude Agent can run, or change your model or agent harness in the Slack app's Home tab.
 ```
 
 The settings form lists only models the selected harness can run and rejects saving a harness with a model it cannot run. With **Claude Agent** or **Codex** selected, a **Default model** is required: the form disables **Save** and shows the message for the selected harness, such as "Choose a default model Codex can run.", until you pick one, and the control plane rejects saving either harness without one. **Use system default** is not offered for either, because the settings page cannot see the deployment default model, which may be one the harness cannot run.

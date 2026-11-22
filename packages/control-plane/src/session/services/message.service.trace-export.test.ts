@@ -61,7 +61,7 @@ describe("MessageService.exportTrace", () => {
       transaction,
     });
     db.exec(
-      "INSERT INTO session (id, model, harness, created_at, updated_at) VALUES ('s', 'anthropic/claude-sonnet-5', 'opencode', 1, 1)"
+      "INSERT INTO session (id, model, harness, created_at, updated_at) VALUES ('s', 'anthropic/claude-sonnet-5-5', 'opencode', 1, 1)"
     );
     db.exec("INSERT INTO participants (id, user_id, joined_at) VALUES ('p', 'user', 1)");
   });

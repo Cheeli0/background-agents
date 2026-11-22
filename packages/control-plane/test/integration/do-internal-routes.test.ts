@@ -67,7 +67,7 @@ describe("DO internal sub-session routes", () => {
         repoId: 12345,
         userId: "user-1",
         scmLogin: "acmedev",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         sandboxSettings: { sandboxTimeoutMs: 14_400_000 },
       });
       const [owner] = await queryDO<{ id: string }>(
@@ -93,7 +93,7 @@ describe("DO internal sub-session routes", () => {
       expect(context.repoOwner).toBe("acme");
       expect(context.repoName).toBe("web-app");
       expect(context.repoId).toBe(12345);
-      expect(context.model).toBe("anthropic/claude-sonnet-4-6");
+      expect(context.model).toBe("anthropic/claude-sonnet-5-5");
       expect(context.reasoningEffort).toBeNull();
       expect(context.sandboxTimeoutMs).toBe(14_400_000);
 

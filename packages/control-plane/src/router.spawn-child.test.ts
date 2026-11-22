@@ -101,7 +101,7 @@ describe("handleSpawnChild prompt enqueue handling", () => {
     repoName: "web-app",
     repoId: 12345,
     harness: "opencode",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     sandboxTimeoutMs: 14_400_000,
     baseBranch: "main",
@@ -153,7 +153,7 @@ describe("handleSpawnChild prompt enqueue handling", () => {
       new Map([["team_alpha", "member"]])
     );
     environmentMocks.getById.mockResolvedValue({ id: "env_parent", owner_team_id: null });
-    vi.mocked(getEffectiveEnabledModels).mockResolvedValue(["anthropic/claude-sonnet-4-6"]);
+    vi.mocked(getEffectiveEnabledModels).mockResolvedValue(["anthropic/claude-sonnet-5-5"]);
     integrationSettingsMocks.resolveCodeServerEnabled.mockResolvedValue(false);
     integrationSettingsMocks.resolveVncEnabled.mockResolvedValue(false);
     integrationSettingsMocks.resolveSandboxSettings.mockResolvedValue({});
@@ -396,13 +396,13 @@ describe("handleSpawnChild prompt enqueue handling", () => {
       return store as never;
     });
     vi.mocked(getEffectiveEnabledModels).mockResolvedValue([
-      "anthropic/claude-sonnet-4-6",
-      "openai/gpt-5.5",
+      "anthropic/claude-sonnet-5-5",
+      "openai/gpt-6-luna",
     ]);
     const { env, childStub } = makeSuccessfulEnv({
       ...spawnContext,
       harness: "codex",
-      model: "openai/gpt-6.1-sol",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "max",
     });
     const response = await makeRequest(env);
@@ -410,14 +410,14 @@ describe("handleSpawnChild prompt enqueue handling", () => {
     expect(store.create).toHaveBeenCalledWith(
       expect.objectContaining({
         harness: "codex",
-        model: "openai/gpt-5.5",
-        reasoningEffort: "medium",
+        model: "openai/gpt-6-luna",
+        reasoningEffort: "max",
       })
     );
     await expect(getInitBody(childStub)).resolves.toMatchObject({
       harness: "codex",
-      model: "openai/gpt-5.5",
-      reasoningEffort: "medium",
+      model: "openai/gpt-6-luna",
+      reasoningEffort: "max",
     });
     expect(getEffectiveEnabledModels).toHaveBeenCalledOnce();
   });
@@ -524,7 +524,12 @@ describe("handleSpawnChild prompt enqueue handling", () => {
     vi.mocked(SessionIndexStore).mockImplementation(function () {
       return store as never;
     });
-    const { env, childStub } = makeSuccessfulEnv({ ...spawnContext, reasoningEffort: "high" });
+    vi.mocked(getEffectiveEnabledModels).mockResolvedValue(["anthropic/claude-haiku-4-5"]);
+    const { env, childStub } = makeSuccessfulEnv({
+      ...spawnContext,
+      model: "anthropic/claude-haiku-4-5",
+      reasoningEffort: "high",
+    });
 
     const response = await makeRequest(env, {
       title: "Child task",
@@ -535,7 +540,7 @@ describe("handleSpawnChild prompt enqueue handling", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error:
-        'Invalid reasoning effort "xhigh" for model "anthropic/claude-sonnet-4-6". Valid efforts: low, medium, high, max',
+        'Invalid reasoning effort "xhigh" for model "anthropic/claude-haiku-4-5". Valid efforts: high, max',
     });
     expect(childStub.fetch).not.toHaveBeenCalled();
   });
@@ -546,22 +551,22 @@ describe("handleSpawnChild prompt enqueue handling", () => {
       return store as never;
     });
     vi.mocked(getEffectiveEnabledModels).mockResolvedValue([
-      "anthropic/claude-sonnet-4-6",
-      "openai/gpt-5.6-sol",
+      "anthropic/claude-sonnet-5-5",
+      "openai/gpt-6.2-sol",
     ]);
     const { env, childStub } = makeSuccessfulEnv(spawnContext);
 
     const response = await makeRequest(env, {
       title: "Child task",
       prompt: "Do the thing",
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "x-high",
     });
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error:
-        'Invalid reasoning effort "x-high" for model "openai/gpt-5.6-sol". Valid efforts: none, low, medium, high, xhigh',
+        'Invalid reasoning effort "x-high" for model "openai/gpt-6.2-sol". Valid efforts: low, medium, high, xhigh, max',
     });
     expect(childStub.fetch).not.toHaveBeenCalled();
   });
@@ -572,15 +577,15 @@ describe("handleSpawnChild prompt enqueue handling", () => {
       return store as never;
     });
     vi.mocked(getEffectiveEnabledModels).mockResolvedValue([
-      "anthropic/claude-sonnet-4-6",
-      "openai/gpt-5.6-sol",
+      "anthropic/claude-sonnet-5-5",
+      "openai/gpt-6.2-sol",
     ]);
     const { env, childStub } = makeSuccessfulEnv(spawnContext);
 
     const response = await makeRequest(env, {
       title: "Child task",
       prompt: "Do the thing",
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "xhigh",
     });
 

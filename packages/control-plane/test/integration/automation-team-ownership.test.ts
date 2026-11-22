@@ -51,7 +51,7 @@ async function automation(id: string, ownerTeamId: string | null, createdAt = 1)
   await env.DB.prepare(
     `INSERT INTO automations
      (id, name, instructions, model, schedule_cron, created_by, user_id, owner_team_id, created_at, updated_at)
-     VALUES (?, ?, 'Run tests', 'anthropic/claude-sonnet-4-6', '0 9 * * *', ?, ?, ?, ?, ?)`
+     VALUES (?, ?, 'Run tests', 'anthropic/claude-sonnet-5-5', '0 9 * * *', ?, ?, ?, ?, ?)`
   )
     .bind(id, id, EXECUTOR, EXECUTOR, ownerTeamId, createdAt, createdAt)
     .run();

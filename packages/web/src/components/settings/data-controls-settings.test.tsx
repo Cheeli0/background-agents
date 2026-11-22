@@ -58,7 +58,7 @@ function createArchivedSession(index: number): ArchivedSession {
     repoName: "background-agents",
     baseBranch: "main",
     harness: "opencode",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     parentSessionId: null,
     spawnSource: "user",

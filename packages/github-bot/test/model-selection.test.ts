@@ -5,36 +5,36 @@ import { applyInlineModelOverrides, resolveModelSelection } from "../src/model-s
 import type { Logger } from "../src/logger";
 import type { Env } from "../src/types";
 
-const defaults = { model: "anthropic/claude-sonnet-4-6", reasoningEffort: "low" };
+const defaults = { model: "anthropic/claude-sonnet-5-5", reasoningEffort: "low" };
 const harness = "opencode";
 const enabledModels = [
-  "anthropic/claude-sonnet-4-6",
+  "anthropic/claude-sonnet-5-5",
   "anthropic/claude-haiku-4-5",
-  "openai/gpt-5.6-sol",
-  "opencode/kimi-k2.6",
+  "openai/gpt-6.2-sol",
+  "opencode/minimax-m2.5",
 ] satisfies ValidModel[];
 
 describe("applyInlineModelOverrides", () => {
   it("applies a model and reasoning override together", () => {
     expect(
       applyInlineModelOverrides(
-        { model: "openai/gpt-5.6-sol", reasoningEffort: "xhigh" },
+        { model: "openai/gpt-6.2-sol", reasoningEffort: "xhigh" },
         defaults,
         enabledModels,
         harness
       )
     ).toEqual({
       ok: true,
-      selection: { model: "openai/gpt-5.6-sol", reasoningEffort: "xhigh" },
+      selection: { model: "openai/gpt-6.2-sol", reasoningEffort: "xhigh" },
     });
   });
 
   it("normalizes bare model ids and keeps a compatible configured effort", () => {
     expect(
-      applyInlineModelOverrides({ model: "gpt-5.6-sol" }, defaults, enabledModels, harness)
+      applyInlineModelOverrides({ model: "gpt-6.2-sol" }, defaults, enabledModels, harness)
     ).toEqual({
       ok: true,
-      selection: { model: "openai/gpt-5.6-sol", reasoningEffort: "low" },
+      selection: { model: "openai/gpt-6.2-sol", reasoningEffort: "low" },
     });
   });
 
@@ -55,7 +55,7 @@ describe("applyInlineModelOverrides", () => {
   it("applies a reasoning-only override to the configured model", () => {
     expect(applyInlineModelOverrides({ reasoningEffort: "max" }, defaults, [], harness)).toEqual({
       ok: true,
-      selection: { model: "anthropic/claude-sonnet-4-6", reasoningEffort: "max" },
+      selection: { model: "anthropic/claude-sonnet-5-5", reasoningEffort: "max" },
     });
   });
 
@@ -68,27 +68,27 @@ describe("applyInlineModelOverrides", () => {
     );
     expect(
       applyInlineModelOverrides(
-        { model: "anthropic/claude-sonnet-4-6" },
+        { model: "anthropic/claude-sonnet-5-5" },
         defaults,
-        ["openai/gpt-5.6-sol"],
+        ["openai/gpt-6.2-sol"],
         harness
       )
     ).toEqual({
       ok: false,
       message:
-        "Model `anthropic/claude-sonnet-4-6` is not enabled. Enable it under Settings › Models.",
+        "Model `anthropic/claude-sonnet-5-5` is not enabled. Enable it under Settings › Models.",
     });
   });
 
   it("rejects reasoning the effective model does not support", () => {
-    expect(applyInlineModelOverrides({ reasoningEffort: "xhigh" }, defaults, [], harness)).toEqual({
+    expect(applyInlineModelOverrides({ reasoningEffort: "none" }, defaults, [], harness)).toEqual({
       ok: false,
       message:
-        "Reasoning effort `xhigh` is not valid for `anthropic/claude-sonnet-4-6`. Supported values: `low`, `medium`, `high`, `max`.",
+        "Reasoning effort `none` is not valid for `anthropic/claude-sonnet-5-5`. Supported values: `low`, `medium`, `high`, `xhigh`, `max`.",
     });
     expect(
       applyInlineModelOverrides(
-        { model: "opencode/kimi-k2.6", reasoningEffort: "high" },
+        { model: "opencode/minimax-m2.5", reasoningEffort: "high" },
         defaults,
         enabledModels,
         harness
@@ -96,7 +96,7 @@ describe("applyInlineModelOverrides", () => {
     ).toEqual({
       ok: false,
       message:
-        "Reasoning effort `high` is not valid for `opencode/kimi-k2.6`. This model does not support reasoning controls.",
+        "Reasoning effort `high` is not valid for `opencode/minimax-m2.5`. This model does not support reasoning controls.",
     });
   });
 
@@ -128,14 +128,14 @@ describe("resolveModelSelection compatibility", () => {
           env,
           log,
           "trace-compatibility",
-          { model: "gpt-5.6-sol", harness: "claude", reasoningEffort: null },
+          { model: "gpt-6.2-sol", harness: "claude", reasoningEffort: null },
           parseInlinePromptFlags(prompt)
         )
       ).toMatchObject({
         ok: false,
         reason: "harness_model_incompatible",
         message: expect.stringContaining(
-          'Model "openai/gpt-5.6-sol" cannot run on the Claude Agent harness.'
+          'Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.'
         ),
       });
       expect(fetch).not.toHaveBeenCalled();
@@ -153,14 +153,14 @@ describe("resolveModelSelection compatibility", () => {
         env,
         log,
         "trace-compatible-override",
-        { model: "openai/gpt-5.6-sol", harness: "claude", reasoningEffort: "low" },
-        parseInlinePromptFlags("!model:claude-sonnet-4-6 Review this")
+        { model: "openai/gpt-6.2-sol", harness: "claude", reasoningEffort: "low" },
+        parseInlinePromptFlags("!model:claude-sonnet-5-5 Review this")
       )
     ).toEqual({
       ok: true,
       overridden: true,
       selection: {
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         harness: "claude",
         reasoningEffort: "low",
       },
@@ -170,7 +170,7 @@ describe("resolveModelSelection compatibility", () => {
   it("uses Codex reasoning capabilities for inline overrides", async () => {
     const env = { CONTROL_PLANE: { fetch: vi.fn() } } as unknown as Env;
     const codexDefaults = {
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6.2-sol",
       harness: "codex" as const,
       reasoningEffort: "low",
     };

@@ -89,10 +89,10 @@ flowchart TB
 **Model and reasoning overrides.** Start the request with `!model` or `!reasoning` to override the configured model or reasoning effort for the session that comment starts:
 
 ```text
-@my-app[bot] !model openai/gpt-5.6-sol !reasoning high investigate the flaky test
+@my-app[bot] !model openai/gpt-6.2-sol !reasoning high investigate the flaky test
 ```
 
-The flags work like Slack's: each accepts a space or a colon before the value (`!model:anthropic/claude-sonnet-4-6`, `!reasoning:max`), and all flags must appear together at the start of the request, right after the mention. Models must be enabled under Settings › Models, and the reasoning value must be supported by the model. A model flag without `!reasoning` keeps the configured effort when the new model supports it. If a flag is invalid, the bot replies on the PR and does not start a session. Auto-reviews and review requests always use the configured model.
+The flags work like Slack's: each accepts a space or a colon before the value (`!model:anthropic/claude-sonnet-5-5`, `!reasoning:max`), and all flags must appear together at the start of the request, right after the mention. Models must be enabled under Settings › Models, and the reasoning value must be supported by the model. A model flag without `!reasoning` keeps the configured effort when the new model supports it. If a flag is invalid, the bot replies on the PR and does not start a session. Auto-reviews and review requests always use the configured model.
 
 If the configured **Agent harness** cannot run the resolved model, the bot replies on the PR and creates no session instead of switching to OpenCode. Retry a mention with a compatible `!model`, update the default model, or change the GitHub integration harness.
 

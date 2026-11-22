@@ -34,7 +34,7 @@ const automation = {
   triggerType: "schedule" as const,
   scheduleCron: "0 9 * * *",
   scheduleTz: "UTC",
-  model: "anthropic/claude-sonnet-4-6",
+  model: "anthropic/claude-sonnet-5-5",
   reasoningEffort: null,
   enabled: true,
   nextRunAt: null,
@@ -84,7 +84,7 @@ vi.mock("@/components/automations/automation-form", () => ({
             props.onSubmit({
               name: "Updated",
               harness: "opencode",
-              model: "openai/gpt-5.4",
+              model: "openai/gpt-6.2-sol",
               reasoningEffort: null,
               triggerType: "schedule",
               instructions: "Review",

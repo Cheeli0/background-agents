@@ -66,7 +66,7 @@ describe("control plane client timeouts", () => {
     const result = createSession(makeEnv(fetch), {
       target,
       harness: "opencode",
-      model: "openai/gpt-5.4",
+      model: "openai/gpt-6.2-sol",
     });
 
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
@@ -124,11 +124,11 @@ describe("prompt harness refusal", () => {
     channel: "C123",
     content: "Fix it",
     authorId: "slack:U123",
-    model: "openai/gpt-5.4",
+    model: "openai/gpt-6.2-sol",
   };
 
   it("keeps the control plane's message when the session's harness cannot run the model", async () => {
-    const message = 'Model "openai/gpt-5.4" cannot run on the Claude Agent harness.';
+    const message = 'Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.';
     const fetch = vi.fn(async () =>
       okJson({ error: message, code: "HARNESS_MODEL_INCOMPATIBLE" }, 400)
     );
@@ -215,7 +215,7 @@ describe("control plane client request payloads", () => {
     await createSession(makeEnv(fetch), {
       target,
       harness: "opencode",
-      model: "openai/gpt-5.4",
+      model: "openai/gpt-6.2-sol",
       teamId,
     });
     expect(parseRequestBody(fetch)).toMatchObject({ teamId });
@@ -231,7 +231,7 @@ describe("control plane client request payloads", () => {
       await createSession(makeEnv(fetch), {
         target,
         harness: "opencode",
-        model: "openai/gpt-5.4",
+        model: "openai/gpt-6.2-sol",
         directMessage,
       });
       const body = parseRequestBody(fetch);
@@ -251,7 +251,7 @@ describe("control plane client request payloads", () => {
       await createSession(makeEnv(fetch), {
         target,
         harness: "opencode",
-        model: "openai/gpt-5.4",
+        model: "openai/gpt-6.2-sol",
       })
     ).toEqual({
       error: {
@@ -272,7 +272,7 @@ describe("control plane client request payloads", () => {
       createSession(makeEnv(fetch), {
         target,
         harness: "opencode",
-        model: "openai/gpt-5.4",
+        model: "openai/gpt-6.2-sol",
         reasoningEffort: "high",
         branch: "feature/slack-images",
         slackUserId: "U123",
@@ -293,7 +293,7 @@ describe("control plane client request payloads", () => {
       repoName: "app",
       branch: "feature/slack-images",
       harness: "opencode",
-      model: "openai/gpt-5.4",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "high",
       actorDisplayName: "Ada Lovelace",
       actorEmail: "ada@example.com",
@@ -308,14 +308,14 @@ describe("control plane client request payloads", () => {
     await createSession(makeEnv(fetch), {
       target: environmentTarget,
       harness: "opencode",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
       branch: "ignored-for-environments",
     });
 
     expect(parseRequestBody(fetch)).toEqual({
       environmentId: "env-1",
       harness: "opencode",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
     });
   });
 
@@ -327,7 +327,7 @@ describe("control plane client request payloads", () => {
     await createSession(makeEnv(fetch), {
       target: noRepositoryTarget,
       harness: "opencode",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
       branch: "ignored-without-a-repository",
     });
 
@@ -335,13 +335,13 @@ describe("control plane client request payloads", () => {
       repoOwner: null,
       repoName: null,
       harness: "opencode",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
     });
   });
 
   it.each([
     ["claude", "anthropic/claude-haiku-4-5"],
-    ["opencode", "openai/gpt-5.4"],
+    ["opencode", "openai/gpt-6.2-sol"],
   ] as const)("sends the %s harness with the session model", async (harness, model) => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       okJson({ sessionId: "session-1", status: "created" })
@@ -366,7 +366,7 @@ describe("control plane client request payloads", () => {
       channel: "C123",
       content: "Use the screenshot",
       authorId: "slack:U123",
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "high",
       attachments: [{ attachmentId: "att-1", name: "screenshot.png" }],
     });
@@ -381,7 +381,7 @@ describe("control plane client request payloads", () => {
     expect(parseRequestBody(fetch, 0)).toEqual({
       content: "Use the screenshot",
       source: "slack",
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "high",
       attachments: [{ attachmentId: "att-1", name: "screenshot.png" }],
     });
@@ -411,7 +411,7 @@ describe("service credential headers", () => {
     await createSession(makeServiceEnv(fetch), {
       target,
       harness: "opencode",
-      model: "openai/gpt-5.4",
+      model: "openai/gpt-6.2-sol",
       slackUserId: "U0123",
     });
 

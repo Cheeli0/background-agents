@@ -190,7 +190,7 @@ describe("automation lifecycle routes", () => {
         ...sampleRow,
         enabled: 0,
         harness: "codex",
-        model: "openai/gpt-6.1-sol",
+        model: "openai/gpt-6.2-sol",
       });
       try {
         expect((await callRoute("POST", "/automations/auto-1/resume")).status).toBe(200);
@@ -236,7 +236,7 @@ describe("automation lifecycle routes", () => {
       mockStore.getById.mockResolvedValue({
         ...sampleRow,
         harness: "codex",
-        model: "openai/gpt-6.1-sol",
+        model: "openai/gpt-6.2-sol",
       });
       try {
         expect((await callRoute("POST", "/automations/auto-1/trigger")).status).toBe(201);

@@ -41,7 +41,7 @@ function makeAutomation(overrides: Partial<AutomationListItem> = {}): Automation
     scheduleCron: "0 9 * * *",
     scheduleOnceAt: null,
     scheduleTz: "UTC",
-    model: "openai/gpt-5.4",
+    model: "openai/gpt-6.2-sol",
     reasoningEffort: null,
     enabled: true,
     nextRunAt: null,

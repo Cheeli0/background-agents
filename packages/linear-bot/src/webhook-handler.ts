@@ -8,6 +8,7 @@ import type { LinearCallbackContext } from "@open-inspect/shared/types/session-a
 import { ACTOR_EMAIL_REQUIRED_CODE } from "@open-inspect/shared/types/actors";
 import { MAX_WEB_PROMPT_CHARS } from "@open-inspect/shared/types/prompts";
 import { checkHarnessCompatibility, getHarnessLabel } from "@open-inspect/shared/harnesses";
+import { isValidModel, UnsupportedModelError } from "@open-inspect/shared/models";
 import { z } from "zod";
 import type { Env, AgentSessionWebhook, AgentSessionWebhookIssue } from "./types";
 import {
@@ -618,7 +619,9 @@ async function handleNewSession(
     labelModel,
   });
 
-  const compatibilityError = checkHarnessCompatibility(harness, model, undefined, reasoningEffort);
+  const compatibilityError = isValidModel(model)
+    ? checkHarnessCompatibility(harness, model, undefined, reasoningEffort)
+    : { message: new UnsupportedModelError(model).message };
   if (compatibilityError) {
     await emitAgentActivity(client, agentSessionId, {
       type: "error",

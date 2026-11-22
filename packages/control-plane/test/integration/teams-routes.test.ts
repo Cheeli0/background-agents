@@ -41,7 +41,7 @@ async function seedSession(id: string, teamId: string, overrides: Partial<Sessio
     repoOwner: "acme",
     repoName: "widgets",
     baseBranch: "main",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     status: "completed",
     createdAt: 100,

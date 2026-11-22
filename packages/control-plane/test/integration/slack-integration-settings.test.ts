@@ -28,11 +28,11 @@ describe("Slack integration settings harness", () => {
 
   it("rejects a harness and model it cannot run saved together", async () => {
     const rejected = await put(globalEndpoint, {
-      defaults: { harness: "claude", model: "openai/gpt-5.4" },
+      defaults: { harness: "claude", model: "openai/gpt-6.2-sol" },
     });
     expect(rejected.status).toBe(400);
     expect(await rejected.json()).toEqual({
-      error: 'Model "openai/gpt-5.4" cannot run on the Claude Agent harness.',
+      error: 'Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.',
     });
 
     const read = await serviceFetch(globalEndpoint, { service: "slack-bot" });
