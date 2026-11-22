@@ -609,15 +609,11 @@ describe("model utilities", () => {
       });
     }
 
-    for (const model of [
-      "opencode/muse-spark-1.3-contributor-free",
-      "opencode-go/muse-spark-1.3-contributor",
-    ]) {
-      expect(getReasoningConfig(model)).toEqual({
-        efforts: ["low", "medium", "high", "xhigh"],
-        default: "xhigh",
-      });
-    }
+    expect(getReasoningConfig("opencode-go/muse-spark-1.3-contributor")).toEqual({
+      efforts: ["low", "medium", "high", "xhigh"],
+      default: "xhigh",
+    });
+    expect(getReasoningConfig("opencode/muse-spark-1.3-contributor-free")).toBeUndefined();
 
     expect(getReasoningConfig("opencode-go/deepseek-v4.1-flash")).toEqual({
       efforts: ["low", "high", "max"],

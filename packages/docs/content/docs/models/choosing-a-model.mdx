@@ -130,25 +130,25 @@ Runs on OpenCode only. Opt-in group. Credential: a connected SuperGrok account, 
 
 Runs on OpenCode only. Opt-in group. Credential: `OPENCODE_API_KEY` as a global or repository secret. Zen is billed per token.
 
-| Model ID                                   | Display name                    | Reasoning efforts        | Default effort |
-| ------------------------------------------ | ------------------------------- | ------------------------ | -------------- |
-| `opencode/kimi-k2.5`                       | Kimi K2.5                       | Not supported            | N/A            |
-| `opencode/kimi-k2.6`                       | Kimi K2.6                       | Not supported            | N/A            |
-| `opencode/kimi-k3`                         | Kimi K3                         | low, high, max           | Not set        |
-| `opencode/minimax-m2.5`                    | MiniMax M2.5                    | Not supported            | N/A            |
-| `opencode/qwen3.7-max`                     | Qwen3.7 Max                     | Not supported            | N/A            |
-| `opencode/glm-5`                           | GLM 5                           | Not supported            | N/A            |
-| `opencode/glm-5.1`                         | GLM 5.1                         | Not supported            | N/A            |
-| `opencode/glm-5.2`                         | GLM 5.2                         | high, max                | Not set        |
-| `opencode/gemini-4-carbon`                 | Gemini 4 Carbon                 | low, medium, high        | high           |
-| `opencode/gemini-4-argon`                  | Gemini 4 Argon                  | low, medium, high        | high           |
-| `opencode/gemini-3.8-flash`                | Gemini 3.8 Flash                | low, medium, high        | high           |
-| `opencode/muse-spark-1.3-contributor-free` | Muse Spark 1.3 Contributor Free | low, medium, high, xhigh | xhigh          |
-| `opencode/big-pickle`                      | Big Pickle                      | Not supported            | N/A            |
+| Model ID                                   | Display name                    | Reasoning efforts | Default effort |
+| ------------------------------------------ | ------------------------------- | ----------------- | -------------- |
+| `opencode/kimi-k2.5`                       | Kimi K2.5                       | Not supported     | N/A            |
+| `opencode/kimi-k2.6`                       | Kimi K2.6                       | Not supported     | N/A            |
+| `opencode/kimi-k3`                         | Kimi K3                         | low, high, max    | Not set        |
+| `opencode/minimax-m2.5`                    | MiniMax M2.5                    | Not supported     | N/A            |
+| `opencode/qwen3.7-max`                     | Qwen3.7 Max                     | Not supported     | N/A            |
+| `opencode/glm-5`                           | GLM 5                           | Not supported     | N/A            |
+| `opencode/glm-5.1`                         | GLM 5.1                         | Not supported     | N/A            |
+| `opencode/glm-5.2`                         | GLM 5.2                         | high, max         | Not set        |
+| `opencode/gemini-4-carbon`                 | Gemini 4 Carbon                 | low, medium, high | high           |
+| `opencode/gemini-4-argon`                  | Gemini 4 Argon                  | low, medium, high | high           |
+| `opencode/gemini-3.8-flash`                | Gemini 3.8 Flash                | low, medium, high | high           |
+| `opencode/muse-spark-1.3-contributor-free` | Muse Spark 1.3 Contributor Free | Not supported     | N/A            |
+| `opencode/big-pickle`                      | Big Pickle                      | Not supported     | N/A            |
 
 ### OpenCode Go
 
-Runs on OpenCode only. Opt-in group. Credential: the same `OPENCODE_API_KEY` secret as Zen, but the key must carry an active OpenCode Go subscription. Go bills against the subscription's rolling allowance instead of per token, so a key without a Go subscription fails on `opencode-go/*` models while `opencode/*` models keep working.
+Runs on OpenCode only. Opt-in group. Credential: `OPENCODE_GO_API_KEY` as a global, environment, or repository secret, separate from Zen's `OPENCODE_API_KEY`. The key must carry an active OpenCode Go subscription. Go bills against the subscription's rolling allowance instead of per token.
 
 <Callout type="warn" title="Rolling allowance and unattended sessions">
   Go usage is capped on three rolling windows: 20% of the monthly allowance per 5 hours, 50% per
@@ -224,7 +224,7 @@ Runs on OpenCode only. Opt-in group. Credential: `DEEPSEEK_API_KEY` as a global 
 
 ## The same model behind several gateways
 
-Some models appear more than once because they are reachable through more than one provider, each billed differently. `opencode-go/grok-4.6` and `xai/grok-4.6` are the same Grok model behind two gateways. `opencode-go/glm-5.2`, `opencode/glm-5.2`, and `zai-coding-plan/glm-5.2` are the same GLM model behind three. `opencode/gemini-4-argon` and `opencode-go/gemini-4-argon` are the same Gemini model on Zen and Go: one `OPENCODE_API_KEY` serves both, billed per token on Zen and against the subscription allowance on Go. Pick the entry whose billing you want.
+Some models appear more than once because they are reachable through more than one provider, each billed differently. `opencode-go/grok-4.6` and `xai/grok-4.6` are the same Grok model behind two gateways. `opencode-go/glm-5.2`, `opencode/glm-5.2`, and `zai-coding-plan/glm-5.2` are the same GLM model behind three. `opencode/gemini-4-argon` and `opencode-go/gemini-4-argon` are the same Gemini model on Zen and Go: Zen uses `OPENCODE_API_KEY` and bills per token; Go uses `OPENCODE_GO_API_KEY` and bills against the subscription allowance. Pick the entry whose billing you want.
 
 ## Defaults for integrations and automations
 
@@ -277,8 +277,8 @@ For a refused GitHub launch, retry a mention with a compatible `!model`, update 
     mode first. In provider-account mode, verify the account and confirm it is entitled to the
     model. In API-key mode, add the provider's key to the session's secret scope:
     `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`,
-    `ZHIPU_API_KEY`, or `OPENCODE_API_KEY` (an `opencode-go/*` model additionally needs an active
-    Go subscription on that key). See [Secrets](/configure/secrets).
+    `ZHIPU_API_KEY`, `OPENCODE_API_KEY`, or `OPENCODE_GO_API_KEY` (for `opencode-go/*` models, on a
+    key with an active Go subscription). See [Secrets](/configure/secrets).
 
 </Accordion>
   <Accordion title="A model is missing from the selector">

@@ -155,7 +155,6 @@ class TestBuildPromptRequestBody:
         [
             ("zai-coding-plan/glm-5.3-flash", "high"),
             ("opencode-go/glm-5.3-flash", "max"),
-            ("opencode/muse-spark-1.3-contributor-free", "low"),
             ("opencode-go/muse-spark-1.3-contributor", "xhigh"),
             ("opencode-go/deepseek-v4.1-flash", "low"),
             ("opencode-go/deepseek-v4-pro", "max"),

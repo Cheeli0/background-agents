@@ -4,7 +4,6 @@
   "opencode/gemini-4-carbon": ["low", "medium", "high"],
   "opencode/gemini-4-argon": ["low", "medium", "high"],
   "opencode/gemini-3.8-flash": ["low", "medium", "high"],
-  "opencode/muse-spark-1.3-contributor-free": ["low", "medium", "high", "xhigh"],
   "opencode-go/gpt-5.6-luna": ["none", "low", "medium", "high", "xhigh", "max"],
   "opencode-go/gemini-4-argon": ["low", "medium", "high"],
   "opencode-go/glm-5.3-flash": ["low", "high", "max"],

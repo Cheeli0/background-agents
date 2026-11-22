@@ -3,9 +3,10 @@
 Open-Inspect exposes these models in the model picker and integration preferences. The default
 enabled set includes Anthropic and OpenAI models. Every other provider is opt-in under **Settings >
 Models**. OpenAI and SuperGrok subscriptions are configured in **Settings > Provider Accounts**.
-OpenCode Zen and OpenCode Go require `OPENCODE_API_KEY`; Kimi Coding Plan requires `KIMI_API_KEY`;
-Z.AI Coding Plan requires `ZHIPU_API_KEY`; DeepSeek requires `DEEPSEEK_API_KEY`. Other API-key
-providers require the matching global, environment, or repository secret described below.
+OpenCode Zen requires `OPENCODE_API_KEY`; OpenCode Go requires `OPENCODE_GO_API_KEY`; Kimi Coding
+Plan requires `KIMI_API_KEY`; Z.AI Coding Plan requires `ZHIPU_API_KEY`; DeepSeek requires
+`DEEPSEEK_API_KEY`. Other API-key providers require the matching global, environment, or repository
+secret described below.
 
 OpenAI, xAI and Anthropic session selectors offer provider policy, any active connected account, and
 API-key mode. Automation editors can resolve defaults on each run or pin an account/API-key choice.
@@ -92,29 +93,29 @@ includes an effort carried over from an earlier message, a saved Slack preferenc
 session, which is sent whenever the new model supports that level. The Gemini models default to
 high, the thinking level OpenCode already sends for them when none is chosen.
 
-| Model ID                                   | Display name                    | Description     | Reasoning efforts        | Default effort |
-| ------------------------------------------ | ------------------------------- | --------------- | ------------------------ | -------------- |
-| `opencode/kimi-k2.5`                       | Kimi K2.5                       | Moonshot AI     | Not supported            | N/A            |
-| `opencode/kimi-k2.6`                       | Kimi K2.6                       | Moonshot AI     | Not supported            | N/A            |
-| `opencode/kimi-k3`                         | Kimi K3                         | Moonshot AI     | low, high, max           | Not set        |
-| `opencode/minimax-m2.5`                    | MiniMax M2.5                    | MiniMax         | Not supported            | N/A            |
-| `opencode/qwen3.7-max`                     | Qwen3.7 Max                     | Alibaba Cloud   | Not supported            | N/A            |
-| `opencode/glm-5`                           | GLM 5                           | Z.ai 744B MoE   | Not supported            | N/A            |
-| `opencode/glm-5.1`                         | GLM 5.1                         | Z.ai            | Not supported            | N/A            |
-| `opencode/glm-5.2`                         | GLM 5.2                         | Z.ai            | high, max                | Not set        |
-| `opencode/gemini-4-carbon`                 | Gemini 4 Carbon                 | Google          | low, medium, high        | high           |
-| `opencode/gemini-4-argon`                  | Gemini 4 Argon                  | Google          | low, medium, high        | high           |
-| `opencode/gemini-3.8-flash`                | Gemini 3.8 Flash                | Google          | low, medium, high        | high           |
-| `opencode/muse-spark-1.3-contributor-free` | Muse Spark 1.3 Contributor Free | Meta            | low, medium, high, xhigh | xhigh          |
-| `opencode/big-pickle`                      | Big Pickle                      | Reasoning model | Not supported            | N/A            |
+| Model ID                                   | Display name                    | Description     | Reasoning efforts | Default effort |
+| ------------------------------------------ | ------------------------------- | --------------- | ----------------- | -------------- |
+| `opencode/kimi-k2.5`                       | Kimi K2.5                       | Moonshot AI     | Not supported     | N/A            |
+| `opencode/kimi-k2.6`                       | Kimi K2.6                       | Moonshot AI     | Not supported     | N/A            |
+| `opencode/kimi-k3`                         | Kimi K3                         | Moonshot AI     | low, high, max    | Not set        |
+| `opencode/minimax-m2.5`                    | MiniMax M2.5                    | MiniMax         | Not supported     | N/A            |
+| `opencode/qwen3.7-max`                     | Qwen3.7 Max                     | Alibaba Cloud   | Not supported     | N/A            |
+| `opencode/glm-5`                           | GLM 5                           | Z.ai 744B MoE   | Not supported     | N/A            |
+| `opencode/glm-5.1`                         | GLM 5.1                         | Z.ai            | Not supported     | N/A            |
+| `opencode/glm-5.2`                         | GLM 5.2                         | Z.ai            | high, max         | Not set        |
+| `opencode/gemini-4-carbon`                 | Gemini 4 Carbon                 | Google          | low, medium, high | high           |
+| `opencode/gemini-4-argon`                  | Gemini 4 Argon                  | Google          | low, medium, high | high           |
+| `opencode/gemini-3.8-flash`                | Gemini 3.8 Flash                | Google          | low, medium, high | high           |
+| `opencode/muse-spark-1.3-contributor-free` | Muse Spark 1.3 Contributor Free | Meta            | Not supported     | N/A            |
+| `opencode/big-pickle`                      | Big Pickle                      | Reasoning model | Not supported     | N/A            |
 
 ## OpenCode Go
 
-[OpenCode Go](https://opencode.ai/docs/go/) is a flat-rate subscription over the same credential as
-Zen: one `OPENCODE_API_KEY` global or repository secret serves both. Go routes to a separate gateway
+[OpenCode Go](https://opencode.ai/docs/go/) is a flat-rate subscription. It requires
+`OPENCODE_GO_API_KEY` as a global, environment, or repository secret, separate from Zen's
+`OPENCODE_API_KEY`. The key must carry an active Go subscription. Go routes to a separate gateway
 (`https://opencode.ai/zen/go/v1`) and bills against the subscription's rolling usage allowance
-instead of per token, so a key without an active Go subscription fails on `opencode-go/*` models
-while still working on `opencode/*` ones.
+instead of per token.
 
 Usage is capped on three rolling windows — 20% of the monthly allowance per 5 hours, 50% per week,
 100% per month. Allowances differ per model, so an unattended session pinned to a Go model can
@@ -223,13 +224,6 @@ Fireworks AI requires `FIREWORKS_API_KEY` as a global, environment, or repositor
 | Model ID                       | Display name    | Description  | Reasoning efforts | Default effort |
 | ------------------------------ | --------------- | ------------ | ----------------- | -------------- |
 | `fireworks-ai/kimi-k2p5-turbo` | Kimi K2.5 Turbo | Fireworks AI | Not supported     | N/A            |
-
-## OpenCode Go
-
-OpenCode Go requires `OPENCODE_GO_API_KEY` as a global, environment, or repository secret.
-
-| Model ID | Display name | Description | Reasoning efforts | Default effort |
-| -------- | ------------ | ----------- | ----------------- | -------------- |
 
 ## Ollama Cloud
 

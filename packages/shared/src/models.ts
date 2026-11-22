@@ -327,7 +327,6 @@ export const MODEL_CATALOG = [
         id: "opencode/muse-spark-1.3-contributor-free",
         name: "Muse Spark 1.3 Contributor Free",
         description: "Meta",
-        reasoning: { efforts: ["low", "medium", "high", "xhigh"], default: "xhigh" },
       },
       {
         id: "opencode/big-pickle",
