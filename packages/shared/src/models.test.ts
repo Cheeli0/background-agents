@@ -57,7 +57,6 @@ const GO_MODELS = [
   "opencode-go/gemini-4-argon",
   "opencode-go/glm-5.3-flash",
   "opencode-go/glm-5.3",
-  "opencode-go/glm-5.2",
   "opencode-go/kimi-k3",
   "opencode-go/kimi-k2.7-code",
   "opencode-go/longcat-2.0",
@@ -67,7 +66,6 @@ const GO_MODELS = [
   "opencode-go/mimo-v2.5",
   "opencode-go/mimo-v2.5-pro",
   "opencode-go/minimax-m3",
-  "opencode-go/minimax-m2.7",
   "opencode-go/muse-spark-1.3-contributor",
   "opencode-go/qwen3.8-max",
   "opencode-go/qwen3.8-flash",
@@ -85,7 +83,6 @@ const KIMI_CODE_PLAN_MODELS = [
   "kimi-code-plan-global/kimi-for-coding-highspeed",
 ] as const;
 const ZAI_CODING_PLAN_MODELS = [
-  "zai-coding-plan/glm-5.2",
   "zai-coding-plan/glm-5.3",
   "zai-coding-plan/glm-5.3-flash",
 ] as const;

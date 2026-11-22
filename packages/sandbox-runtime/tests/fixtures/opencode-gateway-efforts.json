@@ -8,7 +8,6 @@
   "opencode-go/gemini-4-argon": ["low", "medium", "high"],
   "opencode-go/glm-5.3-flash": ["low", "high", "max"],
   "opencode-go/glm-5.3": ["low", "high", "max"],
-  "opencode-go/glm-5.2": ["high", "max"],
   "opencode-go/kimi-k3": ["max"],
   "opencode-go/deepseek-v4.1-flash": ["low", "high", "max"],
   "opencode-go/deepseek-v4-pro": ["high", "max"],

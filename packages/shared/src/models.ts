@@ -216,12 +216,6 @@ export const MODEL_CATALOG = [
         reasoning: { efforts: ["low", "high", "max"], default: undefined },
       },
       {
-        id: "opencode-go/glm-5.2",
-        name: "GLM 5.2",
-        description: "Z.ai",
-        reasoning: { efforts: ["high", "max"], default: undefined },
-      },
-      {
         id: "opencode-go/kimi-k3",
         name: "Kimi K3",
         description: "Moonshot AI",
@@ -252,7 +246,6 @@ export const MODEL_CATALOG = [
       // Go's docs list minimax-m2.5 too, but opencode does not resolve
       // opencode-go/minimax-m2.5 at the pinned version — it is reachable as
       // opencode/minimax-m2.5 on Zen. Re-add when the harness exposes it.
-      { id: "opencode-go/minimax-m2.7", name: "MiniMax M2.7", description: "MiniMax" },
       {
         id: "opencode-go/muse-spark-1.3-contributor",
         name: "Muse Spark 1.3 Contributor",
@@ -338,7 +331,6 @@ export const MODEL_CATALOG = [
     category: "Z.AI Coding Plan",
     enabledByDefault: false,
     models: [
-      { id: "zai-coding-plan/glm-5.2", name: "GLM 5.2", description: "Z.AI Coding Plan" },
       {
         id: "zai-coding-plan/glm-5.3",
         name: "GLM 5.3",

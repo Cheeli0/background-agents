@@ -51,15 +51,15 @@ it("shows distinct model keys when display names collide", () => {
       pullRequests={pullRequests({
         models: [
           {
-            key: "opencode/glm-5.2",
-            displayName: "GLM 5.2",
+            key: "opencode/gemini-4-argon",
+            displayName: "Gemini 4 Argon",
             created: 1,
             merged: 1,
             sessionCost: 1,
           },
           {
-            key: "opencode-go/glm-5.2",
-            displayName: "GLM 5.2",
+            key: "opencode-go/gemini-4-argon",
+            displayName: "Gemini 4 Argon",
             created: 1,
             merged: 1,
             sessionCost: 1,
@@ -68,8 +68,8 @@ it("shows distinct model keys when display names collide", () => {
       })}
     />
   );
-  expect(screen.getByRole("row", { name: /opencode\/glm-5.2/ })).toBeInTheDocument();
-  expect(screen.getByRole("row", { name: /opencode-go\/glm-5.2/ })).toBeInTheDocument();
+  expect(screen.getByRole("row", { name: /opencode\/gemini-4-argon/ })).toBeInTheDocument();
+  expect(screen.getByRole("row", { name: /opencode-go\/gemini-4-argon/ })).toBeInTheDocument();
 });
 
 it("shows an empty message", () => {

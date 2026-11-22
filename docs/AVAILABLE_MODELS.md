@@ -116,7 +116,6 @@ fails. That model is reachable as `opencode/minimax-m2.5` on Zen.
 | `opencode-go/gemini-4-argon`               | Gemini 4 Argon               | Google                        | low, medium, high                   | high           |
 | `opencode-go/glm-5.3-flash`                | GLM 5.3 Flash                | Z.ai                          | low, high, max                      | high           |
 | `opencode-go/glm-5.3`                      | GLM 5.3                      | Z.ai                          | low, high, max                      | Not set        |
-| `opencode-go/glm-5.2`                      | GLM 5.2                      | Z.ai                          | high, max                           | Not set        |
 | `opencode-go/kimi-k3`                      | Kimi K3                      | Moonshot AI                   | max                                 | Not set        |
 | `opencode-go/kimi-k2.7-code`               | Kimi K2.7 Code               | Moonshot AI                   | Not supported                       | N/A            |
 | `opencode-go/longcat-2.0`                  | LongCat 2.0                  | Meituan                       | Not supported                       | N/A            |
@@ -126,7 +125,6 @@ fails. That model is reachable as `opencode/minimax-m2.5` on Zen.
 | `opencode-go/mimo-v2.5`                    | MiMo V2.5                    | Xiaomi                        | Not supported                       | N/A            |
 | `opencode-go/mimo-v2.5-pro`                | MiMo V2.5 Pro                | Xiaomi                        | Not supported                       | N/A            |
 | `opencode-go/minimax-m3`                   | MiniMax M3                   | MiniMax                       | Not supported                       | N/A            |
-| `opencode-go/minimax-m2.7`                 | MiniMax M2.7                 | MiniMax                       | Not supported                       | N/A            |
 | `opencode-go/muse-spark-1.3-contributor`   | Muse Spark 1.3 Contributor   | Multimodal contributor tier   | low, medium, high, xhigh            | xhigh          |
 | `opencode-go/qwen3.8-max`                  | Qwen3.8 Max                  | Alibaba Cloud                 | low, medium, xhigh                  | Not set        |
 | `opencode-go/qwen3.8-flash`                | Qwen3.8 Flash                | Alibaba Cloud                 | low, medium, xhigh                  | Not set        |
@@ -134,8 +132,8 @@ fails. That model is reachable as `opencode/minimax-m2.5` on Zen.
 | `opencode-go/hy3`                          | Hy3                          | Tencent Hunyuan               | none, low, high                     | Not set        |
 
 Some of these models are reachable through more than one provider, billed against different
-credentials. `opencode-go/glm-5.2`, `opencode/glm-5.2` and `zai-coding-plan/glm-5.2` are the same
-GLM model behind three. Pick the entry whose billing you want.
+credentials. `opencode/gemini-4-argon` and `opencode-go/gemini-4-argon` are the same Gemini model on
+Zen and Go. Pick the entry whose billing you want.
 
 These models run on the OpenCode harness only — the Claude Agent harness runs Anthropic models
 exclusively.
@@ -168,7 +166,6 @@ Z.AI Coding Plan models require `ZHIPU_API_KEY` as a global or repository secret
 
 | Model ID                        | Display name  | Description      | Reasoning efforts | Default effort |
 | ------------------------------- | ------------- | ---------------- | ----------------- | -------------- |
-| `zai-coding-plan/glm-5.2`       | GLM 5.2       | Z.AI Coding Plan | Not supported     | N/A            |
 | `zai-coding-plan/glm-5.3`       | GLM 5.3       | Z.AI Coding Plan | low, high, max    | high           |
 | `zai-coding-plan/glm-5.3-flash` | GLM 5.3 Flash | Z.AI Coding Plan | low, high, max    | high           |
 

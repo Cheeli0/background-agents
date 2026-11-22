@@ -132,7 +132,6 @@ Runs on OpenCode only. Opt-in group. Credential: `OPENCODE_GO_API_KEY` as a glob
 | `opencode-go/gemini-4-argon`               | Gemini 4 Argon               | low, medium, high                   | high           |
 | `opencode-go/glm-5.3-flash`                | GLM 5.3 Flash                | low, high, max                      | high           |
 | `opencode-go/glm-5.3`                      | GLM 5.3                      | low, high, max                      | Not set        |
-| `opencode-go/glm-5.2`                      | GLM 5.2                      | high, max                           | Not set        |
 | `opencode-go/kimi-k3`                      | Kimi K3                      | max                                 | Not set        |
 | `opencode-go/kimi-k2.7-code`               | Kimi K2.7 Code               | Not supported                       | N/A            |
 | `opencode-go/longcat-2.0`                  | LongCat 2.0                  | Not supported                       | N/A            |
@@ -142,7 +141,6 @@ Runs on OpenCode only. Opt-in group. Credential: `OPENCODE_GO_API_KEY` as a glob
 | `opencode-go/mimo-v2.5`                    | MiMo V2.5                    | Not supported                       | N/A            |
 | `opencode-go/mimo-v2.5-pro`                | MiMo V2.5 Pro                | Not supported                       | N/A            |
 | `opencode-go/minimax-m3`                   | MiniMax M3                   | Not supported                       | N/A            |
-| `opencode-go/minimax-m2.7`                 | MiniMax M2.7                 | Not supported                       | N/A            |
 | `opencode-go/muse-spark-1.3-contributor`   | Muse Spark 1.3 Contributor   | low, medium, high, xhigh            | xhigh          |
 | `opencode-go/qwen3.8-max`                  | Qwen3.8 Max                  | low, medium, xhigh                  | Not set        |
 | `opencode-go/qwen3.8-flash`                | Qwen3.8 Flash                | low, medium, xhigh                  | Not set        |
@@ -170,7 +168,6 @@ Runs on OpenCode only. Opt-in group. Credential: `ZHIPU_API_KEY` as a global or 
 
 | Model ID                        | Display name  | Reasoning efforts | Default effort |
 | ------------------------------- | ------------- | ----------------- | -------------- |
-| `zai-coding-plan/glm-5.2`       | GLM 5.2       | Not supported     | N/A            |
 | `zai-coding-plan/glm-5.3`       | GLM 5.3       | low, high, max    | high           |
 | `zai-coding-plan/glm-5.3-flash` | GLM 5.3 Flash | low, high, max    | high           |
 
@@ -185,7 +182,7 @@ Runs on OpenCode only. Opt-in group. Credential: `DEEPSEEK_API_KEY` as a global 
 
 ## The same model behind several gateways
 
-Some models appear more than once because they are reachable through more than one provider, each billed differently. `opencode-go/glm-5.2`, `opencode/glm-5.2`, and `zai-coding-plan/glm-5.2` are the same GLM model behind three. `opencode/gemini-4-argon` and `opencode-go/gemini-4-argon` are the same Gemini model on Zen and Go: Zen uses `OPENCODE_API_KEY` and bills per token; Go uses `OPENCODE_GO_API_KEY` and bills against the subscription allowance. Pick the entry whose billing you want.
+Some models appear more than once because they are reachable through more than one provider, each billed differently. `opencode/gemini-4-argon` and `opencode-go/gemini-4-argon` are the same Gemini model on Zen and Go: Zen uses `OPENCODE_API_KEY` and bills per token; Go uses `OPENCODE_GO_API_KEY` and bills against the subscription allowance. Pick the entry whose billing you want.
 
 ## Defaults for integrations and automations
 
