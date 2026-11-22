@@ -96,42 +96,51 @@ describe("a sandbox launch that fails before connecting (fork)", () => {
 
   // The integration provider's create call fails, exactly the production
   // state: failed sandbox, no provider object, a never-started prompt.
-  it("fails the prompt it was for, so the session settles and can be archived", async () => {
-    const { stub } = await initSession({ userId: "user-1" });
-    await waitForSandboxStatus(stub, "failed");
+  // Its waits (sandbox status, launch-failure deadline, prompt status) add up
+  // to more than vitest's default 5 s.
+  it(
+    "fails the prompt it was for, so the session settles and can be archived",
+    { timeout: 15_000 },
+    async () => {
+      const { stub } = await initSession({ userId: "user-1" });
+      await waitForSandboxStatus(stub, "failed");
 
-    const prompt = await stub.fetch("http://internal/internal/prompt", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: "review the PR", authorId: "user-1", source: "web" }),
-    });
-    const { messageId } = await prompt.json<{ messageId: string }>();
-    // The failed launch arms the alarm that fails the prompt.
-    await expect
-      .poll(async () => {
-        const [row] = await queryDO<{ pending_deadline: number | null }>(
-          stub,
-          "SELECT pending_deadline FROM session_alarm_state"
-        );
-        return row?.pending_deadline ?? 0;
-      })
-      .toBeGreaterThan(Date.now() + 10_000);
-    await runInSessionDO(stub, (instance: SessionDO) => instance.alarm());
-    await waitForMessageStatus(stub, messageId, "failed");
+      const prompt = await stub.fetch("http://internal/internal/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "review the PR", authorId: "user-1", source: "web" }),
+      });
+      const { messageId } = await prompt.json<{ messageId: string }>();
+      // The failed launch arms the alarm that fails the prompt, 30 s out. The
+      // prompt's own connect deadline is minutes away, so wait for the earlier
+      // launch-failure deadline: it is armed only once the launch has settled.
+      await expect
+        .poll(async () => {
+          const [row] = await queryDO<{ pending_deadline: number | null }>(
+            stub,
+            "SELECT pending_deadline FROM session_alarm_state"
+          );
+          const deadline = row?.pending_deadline ?? 0;
+          return deadline > Date.now() + 10_000 && deadline <= Date.now() + 31_000;
+        })
+        .toBe(true);
+      await runInSessionDO(stub, (instance: SessionDO) => instance.alarm());
+      await waitForMessageStatus(stub, messageId, "failed");
 
-    const [session] = await queryDO<{ status: string }>(stub, "SELECT status FROM session");
-    expect(session.status).not.toBe("active");
-    const [message] = await queryDO<{ error_message: string | null; started_at: number | null }>(
-      stub,
-      `SELECT error_message, started_at FROM messages WHERE id = '${messageId}'`
-    );
-    expect(message.started_at).toBeNull();
-    expect(message.error_message).toEqual(expect.any(String));
+      const [session] = await queryDO<{ status: string }>(stub, "SELECT status FROM session");
+      expect(session.status).not.toBe("active");
+      const [message] = await queryDO<{ error_message: string | null; started_at: number | null }>(
+        stub,
+        `SELECT error_message, started_at FROM messages WHERE id = '${messageId}'`
+      );
+      expect(message.started_at).toBeNull();
+      expect(message.error_message).toEqual(expect.any(String));
 
-    const archived = await stub.fetch("http://internal/internal/archive", { method: "POST" });
-    expect(archived.status).toBe(200);
-    expect(await archived.json()).toMatchObject({ outcome: "archived", status: "archived" });
-  });
+      const archived = await stub.fetch("http://internal/internal/archive", { method: "POST" });
+      expect(archived.status).toBe(200);
+      expect(await archived.json()).toMatchObject({ outcome: "archived", status: "archived" });
+    }
+  );
 });
 
 describe("archiving a cancelled session (fork)", () => {

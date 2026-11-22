@@ -564,7 +564,7 @@ function UserMessageEvent({
           <pre
             tabIndex={boundedRawAutofix ? 0 : undefined}
             className={cn(
-              "whitespace-pre-wrap text-sm text-foreground [overflow-wrap:anywhere]",
+              "whitespace-pre-wrap text-sm text-foreground wrap-anywhere",
               boundedRawAutofix &&
                 "max-h-96 overflow-auto focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             )}

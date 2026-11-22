@@ -299,7 +299,7 @@ export function Combobox<T = string>({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={searchPlaceholder}
-                className="w-full px-2 py-1.5 text-sm bg-input border border-border focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent placeholder:text-secondary-foreground text-foreground"
+                className="w-full px-2 py-1.5 text-sm bg-input border border-border focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-transparent placeholder:text-secondary-foreground text-foreground"
                 role="combobox"
                 aria-expanded={open}
                 aria-controls={listboxId}
@@ -417,7 +417,7 @@ function OptionButton<T>({
           </span>
         )}
       </div>
-      {isSelected && <CheckIcon className="w-4 h-4 text-accent flex-shrink-0" />}
+      {isSelected && <CheckIcon className="w-4 h-4 text-accent shrink-0" />}
     </button>
   );
 }

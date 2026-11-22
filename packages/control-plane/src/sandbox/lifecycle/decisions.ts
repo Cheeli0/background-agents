@@ -239,7 +239,7 @@ export interface SpawnConfig {
  * its liveness is the heartbeat's to judge and its boot length the boot budget's
  * (DEFAULT_BOOT_BUDGET_CONFIG). Runtimes that predate early connect still boot in full before
  * connecting, which is why the value keeps its earlier margin rather than shrinking to a launch
- * bound. See ColeMurray/background-agents#1363 for the pending-prompt recovery gap on this path.
+ * bound. See open-inspect/background-agents#1363 for the pending-prompt recovery gap on this path.
  */
 const CONNECT_WATCHDOG_MS = 240_000;
 

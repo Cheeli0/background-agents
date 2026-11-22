@@ -6,7 +6,7 @@ import type { SandboxSettings } from "@open-inspect/shared/types/integrations";
 import { buildServiceAuthHeaders, type ServiceName } from "@open-inspect/shared/service-auth";
 import type { BuiltInRoleKey } from "@open-inspect/shared/rbac";
 import { seedBrowserSession } from "../support/browser-session";
-import type { SandboxStatus } from "@open-inspect/shared/types/sessions";
+import type { SandboxStatus, SpawnSource } from "@open-inspect/shared/types/sessions";
 import type { SessionDO } from "../../src/cloudflare/durable-object";
 import { hashToken } from "../../src/auth/crypto";
 import type { SqlDatabase } from "../../src/db/sql-database";
@@ -370,8 +370,9 @@ export async function initNamedSession(
     canonicalUserId?: string;
     scmLogin?: string;
     parentSessionId?: string;
-    spawnSource?: "user" | "agent" | "automation";
+    spawnSource?: SpawnSource;
     spawnDepth?: number;
+    githubReview?: boolean;
     sandboxSettings?: Record<string, unknown>;
     providerAuth?: SessionModelProviderAuthInput[];
   },
@@ -382,7 +383,11 @@ export async function initNamedSession(
     ...TEST_NAMED_SESSION_DEFAULTS,
     ...overrides,
   };
-  const { providerAuth = TEST_SESSION_PROVIDER_AUTH, ...doDefaults } = defaults;
+  const {
+    providerAuth = TEST_SESSION_PROVIDER_AUTH,
+    githubReview = false,
+    ...doDefaults
+  } = defaults;
   const now = Date.now();
   await new SessionIndexStore(env.DB).create({
     id: sessionName,
@@ -411,6 +416,7 @@ export async function initNamedSession(
     parentSessionId: defaults.parentSessionId ?? null,
     spawnSource: defaults.spawnSource ?? "user",
     spawnDepth: defaults.spawnDepth ?? 0,
+    githubReview,
     userId: defaults.canonicalUserId ?? defaults.userId,
     providerAuth,
     createdAt: now,

@@ -1,6 +1,8 @@
 # Reference build. The context is the output of sandbox:images pack, not the checkout.
 ARG BASE_IMAGE=python:3.12-slim-bookworm
 FROM ${BASE_IMAGE}
+# Optional Ubuntu archive override for the os phase (see install/os/debian.sh).
+ARG OI_UBUNTU_MIRROR=
 COPY image-config.sh /tmp/openinspect-image/image-config.sh
 COPY packages/sandbox-images/install/install.sh packages/sandbox-images/install/common.sh /tmp/openinspect-image/packages/sandbox-images/install/
 COPY packages/sandbox-images/install/os /tmp/openinspect-image/packages/sandbox-images/install/os

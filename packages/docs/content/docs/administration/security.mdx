@@ -31,7 +31,7 @@ relatedCode:
   - packages/control-plane/src/mcp/authorization.ts
 ---
 
-This page summarizes the trust boundaries and operator decisions for an OpenInspect deployment. [Authentication and Authorization](https://github.com/ColeMurray/background-agents/blob/main/docs/AUTH.md) is the canonical guide to security, resource access, and credential boundaries.
+This page summarizes the trust boundaries and operator decisions for an OpenInspect deployment. [Authentication and Authorization](https://github.com/open-inspect/background-agents/blob/main/docs/AUTH.md) is the canonical guide to security, resource access, and credential boundaries.
 
 ## One trusted organization
 
@@ -51,7 +51,7 @@ Sign-in is GitHub, Google, or both. After the provider verifies identity and ema
 
 The four roles (Owner, Administrator, Member, Viewer) decide which OpenInspect features a person can use: create sessions, manage settings, view the audit log, and so on. They are not repository ACLs. Team membership, repository grants, resource ownership, session visibility, and private collaborator grants add checks; role permissions alone do not grant access to every session, environment, or automation.
 
-Being able to read a session does not grant sandbox or collaboration access. Prompting and sandbox access on team-owned sessions require current owning-team membership even for Owners and Administrators. Non-private team-session read isolation depends on [Teams enforcement](/administration/deployment#teams-enforcement), which defaults to `shadow`. For private-session exceptions and resource-specific rules, use the canonical [access rules](https://github.com/ColeMurray/background-agents/blob/main/docs/AUTH.md#teams-and-session-visibility); [Workspace access](/administration/workspace-access) explains the user-facing controls. See [Multiplayer and sharing](/sessions/multiplayer-and-sharing) for audience rules, defaults, and enforcement modes.
+Being able to read a session does not grant sandbox or collaboration access. Prompting and sandbox access on team-owned sessions require current owning-team membership even for Owners and Administrators. Non-private team-session read isolation depends on [Teams enforcement](/administration/deployment#teams-enforcement), which defaults to `shadow`. For private-session exceptions and resource-specific rules, use the canonical [access rules](https://github.com/open-inspect/background-agents/blob/main/docs/AUTH.md#teams-and-session-visibility); [Workspace access](/administration/workspace-access) explains the user-facing controls. See [Multiplayer and sharing](/sessions/multiplayer-and-sharing) for audience rules, defaults, and enforcement modes.
 
 ## Token architecture
 
@@ -99,7 +99,7 @@ flowchart TB
 
 Git credentials are brokered on demand, but the helper caches the response password on disk. Modal snapshots capture the full filesystem and can retain that cache, including files outside `/workspace`. Neither brokerage nor short-lived GitHub tokens guarantees credential-free snapshots. Treat snapshots as sensitive artifacts.
 
-Grant removal changes subsequent credential resolution, not immediate revocation of issued tokens. GitLab's helper refresh time does not shorten the deployment PAT's lifetime. For dependency access, build-token scope, and user versus App identity, see the canonical [Repository and Credential Boundaries](https://github.com/ColeMurray/background-agents/blob/main/docs/AUTH.md#repository-and-credential-boundaries). Cache paths and runtime mechanics are in the [sandbox environment reference](/reference/sandbox-environment#git-credentials).
+Grant removal changes subsequent credential resolution, not immediate revocation of issued tokens. GitLab's helper refresh time does not shorten the deployment PAT's lifetime. For dependency access, build-token scope, and user versus App identity, see the canonical [Repository and Credential Boundaries](https://github.com/open-inspect/background-agents/blob/main/docs/AUTH.md#repository-and-credential-boundaries). Cache paths and runtime mechanics are in the [sandbox environment reference](/reference/sandbox-environment#git-credentials).
 
 ## Secrets and provider accounts
 

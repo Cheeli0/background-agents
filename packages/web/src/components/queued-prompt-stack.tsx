@@ -20,7 +20,7 @@ export function QueuedPromptStack({
 
   return (
     <section aria-label="Queued prompts" className="mx-auto w-full min-w-0 max-w-4xl px-4 pt-3">
-      <div className="max-h-48 overflow-y-auto rounded-t-xl border border-b-0 border-border bg-card/95 px-3 pb-3 pt-2 shadow-[0_-8px_30px_-22px_rgba(0,0,0,0.45)] backdrop-blur-sm">
+      <div className="max-h-48 overflow-y-auto rounded-t-xl border border-b-0 border-border bg-card/95 px-3 pb-3 pt-2 shadow-[0_-8px_30px_-22px_rgba(0,0,0,0.45)] backdrop-blur-xs">
         <ol className="divide-y divide-border-muted">
           {pendingPrompts.map((prompt) => (
             <li
@@ -28,7 +28,7 @@ export function QueuedPromptStack({
               className="flex min-w-0 items-start gap-2 py-2.5 first:pt-1.5"
             >
               <ClockIcon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/70" />
-              <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm text-secondary-foreground">
+              <p className="min-w-0 flex-1 whitespace-pre-wrap wrap-break-word text-sm text-secondary-foreground">
                 {prompt.content}
               </p>
               {capabilities.lifecycle && (

@@ -26,13 +26,9 @@ async function SessionSnapshotBoundary({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  let snapshot: Awaited<ReturnType<typeof getSessionSnapshot>>;
   try {
-    const snapshot = await getSessionSnapshot(id);
-    return (
-      <SessionSnapshotProvider key={id} snapshot={snapshot}>
-        {children}
-      </SessionSnapshotProvider>
-    );
+    snapshot = await getSessionSnapshot(id);
   } catch (error) {
     if (error instanceof SessionSnapshotError) {
       if (error.status === 401) redirect("/login");
@@ -40,4 +36,9 @@ async function SessionSnapshotBoundary({
     }
     throw error;
   }
+  return (
+    <SessionSnapshotProvider key={id} snapshot={snapshot}>
+      {children}
+    </SessionSnapshotProvider>
+  );
 }

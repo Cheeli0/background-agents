@@ -77,6 +77,7 @@ describe("prepareManagedProviderEnv", () => {
       })
     ).toEqual({
       OPENAI_OAUTH_MANAGED: "1",
+      OPENINSPECT_USER_OPENAI_API_KEY: "sk-openai",
       XAI_API_KEY: "xai-key",
       USER_VALUE: "visible",
     });
@@ -117,7 +118,11 @@ describe("prepareManagedProviderEnv", () => {
           anthropic: "api_key",
         },
       })
-    ).toEqual({ OPENAI_OAUTH_MANAGED: "1", XAI_API_KEY: "xai-key" });
+    ).toEqual({
+      OPENAI_OAUTH_MANAGED: "1",
+      OPENINSPECT_USER_OPENAI_API_KEY: "sk-openai",
+      XAI_API_KEY: "xai-key",
+    });
   });
 
   it.each(["api_key", "provider_account"] as const)(
@@ -142,7 +147,11 @@ describe("prepareManagedProviderEnv", () => {
       expect(result).toEqual(
         mode === "api_key"
           ? { OPENAI_API_KEY: "selected", USER_BUILD_VAR: "keep" }
-          : { OPENAI_OAUTH_MANAGED: "1", USER_BUILD_VAR: "keep" }
+          : {
+              OPENAI_OAUTH_MANAGED: "1",
+              OPENINSPECT_USER_OPENAI_API_KEY: "selected",
+              USER_BUILD_VAR: "keep",
+            }
       );
     }
   );
@@ -164,6 +173,57 @@ describe("prepareManagedProviderEnv", () => {
       OPENAI_API_KEY: "selected",
       OPENAI_BASE_URL: "https://custom",
     });
+  });
+
+  it("keeps a withheld user API key under the prefixed name for each managed provider", () => {
+    expect(
+      prepareManagedProviderEnv({
+        harness: "opencode",
+        exposedSecrets: {
+          OPENAI_API_KEY: "openai-key",
+          XAI_API_KEY: "xai-key",
+          ANTHROPIC_API_KEY: "anthropic-key",
+        },
+        brokerSecrets: {},
+        providerAuthModes: {
+          openai: "provider_account",
+          xai: "provider_account",
+          anthropic: "provider_account",
+        },
+      })
+    ).toEqual({
+      OPENAI_OAUTH_MANAGED: "1",
+      OPENINSPECT_USER_OPENAI_API_KEY: "openai-key",
+      XAI_OAUTH_MANAGED: "1",
+      OPENINSPECT_USER_XAI_API_KEY: "xai-key",
+      ANTHROPIC_OAUTH_MANAGED: "1",
+      OPENINSPECT_USER_ANTHROPIC_API_KEY: "anthropic-key",
+    });
+  });
+
+  it("keeps a secret the user stored under the prefixed name", () => {
+    expect(
+      prepareManagedProviderEnv({
+        harness: "opencode",
+        exposedSecrets: {
+          OPENAI_API_KEY: "openai-key",
+          OPENINSPECT_USER_OPENAI_API_KEY: "explicit",
+        },
+        brokerSecrets: {},
+        providerAuthModes: { openai: "provider_account", xai: "api_key", anthropic: "api_key" },
+      })
+    ).toEqual({ OPENAI_OAUTH_MANAGED: "1", OPENINSPECT_USER_OPENAI_API_KEY: "explicit" });
+  });
+
+  it("adds no prefixed name when the user supplied no API key", () => {
+    expect(
+      prepareManagedProviderEnv({
+        harness: "opencode",
+        exposedSecrets: { USER_BUILD_VAR: "keep" },
+        brokerSecrets: {},
+        providerAuthModes: { openai: "provider_account", xai: "api_key", anthropic: "api_key" },
+      })
+    ).toEqual({ OPENAI_OAUTH_MANAGED: "1", USER_BUILD_VAR: "keep" });
   });
 });
 

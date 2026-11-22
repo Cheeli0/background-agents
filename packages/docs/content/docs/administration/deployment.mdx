@@ -148,17 +148,17 @@ Workspace fallback does not bypass `requireTeamOnCreate` or other creation check
 
 ## Keeping a deployment current
 
-On the Cloudflare/Vercel path, updating means pulling the latest code, rebuilding the shared package if it changed, and applying Terraform again; it only changes what differs. If the web app is on Vercel it is redeployed separately; on Cloudflare, Terraform rebuilds it. The self-hosting guide also documents an optional GitHub Actions workflow for applying deployments from CI. For the AWS control plane, follow the [AWS bring-up guide](https://github.com/ColeMurray/background-agents/blob/main/docs/AWS_BRING_UP.md).
+On the Cloudflare/Vercel path, updating means pulling the latest code, rebuilding the shared package if it changed, and applying Terraform again; it only changes what differs. If the web app is on Vercel it is redeployed separately; on Cloudflare, Terraform rebuilds it. The self-hosting guide also documents an optional GitHub Actions workflow for applying deployments from CI. For the AWS control plane, follow the [AWS bring-up guide](https://github.com/open-inspect/background-agents/blob/main/docs/AWS_BRING_UP.md).
 
 ## Where the runbooks are
 
-| Guide                                                                                                      | Use it for                                                                                                                                     |
-| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Self-hosting guide](https://github.com/ColeMurray/background-agents/blob/main/docs/GETTING_STARTED.md)    | The Cloudflare/Vercel deployment walkthrough: accounts, credentials, GitHub App, Terraform phases, bots, Owner bootstrap, verification, CI/CD. |
-| [AWS bring-up guide](https://github.com/ColeMurray/background-agents/blob/main/docs/AWS_BRING_UP.md)       | AWS-hosted control plane deployment and verification.                                                                                          |
-| [Setup guide](https://github.com/ColeMurray/background-agents/blob/main/docs/SETUP_GUIDE.md)               | Running the web app locally against an existing backend, contributing code, or the fastest path to a full stack.                               |
-| [Debugging playbook](https://github.com/ColeMurray/background-agents/blob/main/docs/DEBUGGING_PLAYBOOK.md) | Querying the structured JSON logs every service emits, and the correlation fields (trace, session, message IDs) that join them.                |
-| [How it works](https://github.com/ColeMurray/background-agents/blob/main/docs/HOW_IT_WORKS.md)             | Architecture, sandbox lifecycle, snapshots, and the security model in depth.                                                                   |
+| Guide                                                                                                        | Use it for                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Self-hosting guide](https://github.com/open-inspect/background-agents/blob/main/docs/GETTING_STARTED.md)    | The Cloudflare/Vercel deployment walkthrough: accounts, credentials, GitHub App, Terraform phases, bots, Owner bootstrap, verification, CI/CD. |
+| [AWS bring-up guide](https://github.com/open-inspect/background-agents/blob/main/docs/AWS_BRING_UP.md)       | AWS-hosted control plane deployment and verification.                                                                                          |
+| [Setup guide](https://github.com/open-inspect/background-agents/blob/main/docs/SETUP_GUIDE.md)               | Running the web app locally against an existing backend, contributing code, or the fastest path to a full stack.                               |
+| [Debugging playbook](https://github.com/open-inspect/background-agents/blob/main/docs/DEBUGGING_PLAYBOOK.md) | Querying the structured JSON logs every service emits, and the correlation fields (trace, session, message IDs) that join them.                |
+| [How it works](https://github.com/open-inspect/background-agents/blob/main/docs/HOW_IT_WORKS.md)             | Architecture, sandbox lifecycle, snapshots, and the security model in depth.                                                                   |
 
 <Callout type="warn" title="Keep configuration out of source control">
   Terraform variable files and deployment secret stores can hold credentials. Never commit

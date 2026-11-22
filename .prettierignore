@@ -30,6 +30,8 @@ yarn.lock
 
 # Generated files
 packages/docs/.source/
+packages/docs/.cloudflare/
+packages/docs/.vinext/
 *.d.ts
 *.min.js
 *.min.css

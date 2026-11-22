@@ -172,12 +172,12 @@ function TeamRow({
       <div className="min-w-0 flex-1">
         <Link
           href={`/teams/${encodeURIComponent(team.slug)}`}
-          className="break-words font-medium text-foreground hover:underline"
+          className="wrap-break-word font-medium text-foreground hover:underline"
         >
           {team.name}
         </Link>
         {team.description && (
-          <p className="mt-1 text-sm text-muted-foreground break-words">{team.description}</p>
+          <p className="mt-1 text-sm text-muted-foreground wrap-break-word">{team.description}</p>
         )}
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span>

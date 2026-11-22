@@ -34,7 +34,7 @@ export function PropertyRow({ label, children }: { label: string; children: Reac
   return (
     <div className="flex gap-3">
       <dt className="w-20 shrink-0 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 flex-1 text-foreground [overflow-wrap:anywhere]">{children}</dd>
+      <dd className="min-w-0 flex-1 text-foreground wrap-anywhere">{children}</dd>
     </div>
   );
 }

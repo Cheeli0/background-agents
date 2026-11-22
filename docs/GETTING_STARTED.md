@@ -136,8 +136,8 @@ npm install -g wrangler
 
 ## Step 1: Fork the Repository
 
-Fork [ColeMurray/background-agents](https://github.com/ColeMurray/background-agents) to your GitHub
-account or organization.
+Fork [open-inspect/background-agents](https://github.com/open-inspect/background-agents) to your
+GitHub account or organization.
 
 ```bash
 # Clone your fork
@@ -969,6 +969,13 @@ For the full runtime, lifecycle, and configuration model, see
 > **Important**: the Boat provider has no fleet-wide key of its own. Add the key for the models you
 > plan to use — `ANTHROPIC_API_KEY` for Claude — as a **global secret** in Settings > Secrets after
 > deploying. See [Secrets Management](SECRETS.md) for details.
+
+### EC2 (AWS-hosted control plane)
+
+When the control plane runs on AWS (see [AWS bring-up](AWS_BRING_UP.md)), sandboxes can run as EC2
+instances in the same account: one instance per session, stopped when idle and started again on the
+next prompt. Set `ec2_sandboxes` in the AWS Terraform environment, build the base AMI, and name it.
+See [EC2 Sandbox Provider](EC2_SANDBOX_PROVIDER.md).
 
 ---
 

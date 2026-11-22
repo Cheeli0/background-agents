@@ -1,0 +1,16 @@
+[Unit]
+Description=Open-Inspect sandbox runtime
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=|/etc/openinspect/bootstrap
+ConditionPathExists=|/etc/openinspect/session.json
+
+[Service]
+Type=exec
+ExecStart=/opt/openinspect/ec2/launcher.sh
+Restart=no
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

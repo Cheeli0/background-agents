@@ -47,7 +47,7 @@ export function SignInAllowlistRow({
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span
         className={cn(
-          "min-w-0 flex-1 break-words text-sm",
+          "min-w-0 flex-1 wrap-break-word text-sm",
           revoked ? "text-muted-foreground line-through" : "text-foreground"
         )}
       >
@@ -63,7 +63,7 @@ export function SignInAllowlistRow({
               role="img"
               tabIndex={0}
               aria-label={`Set by deployment: ${group.environment} / ${group.terraform}`}
-              className="flex h-[26px] w-[26px] items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-[26px] w-[26px] items-center justify-center rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
               <LockIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
             </span>

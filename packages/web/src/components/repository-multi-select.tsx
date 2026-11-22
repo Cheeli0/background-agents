@@ -83,7 +83,7 @@ export function RepositoryMultiSelect({
           type="button"
           disabled={disabled}
           className={cn(
-            "flex items-center gap-2 rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground transition hover:border-foreground/20 focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50",
+            "flex items-center gap-2 rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground transition hover:border-foreground/20 focus-visible:border-ring focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50",
             triggerClassName
           )}
           aria-label="Repository selection"
@@ -100,7 +100,7 @@ export function RepositoryMultiSelect({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="w-[min(34rem,calc(100vw-2rem))] p-0 sm:w-[var(--radix-popover-trigger-width)]"
+        className="w-[min(34rem,calc(100vw-2rem))] p-0 sm:w-(--radix-popover-trigger-width)"
       >
         <div className="border-b border-border-muted p-2">
           <div className="relative">

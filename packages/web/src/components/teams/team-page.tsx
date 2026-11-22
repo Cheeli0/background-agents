@@ -123,12 +123,12 @@ function TeamContent({ initialTeam, slug }: { initialTeam: TeamResponse; slug: s
       <div className="mt-4 mb-6">
         <h1
           id="team-heading"
-          className="break-words text-2xl font-semibold text-foreground sm:text-3xl"
+          className="wrap-break-word text-2xl font-semibold text-foreground sm:text-3xl"
         >
           {team.name}
         </h1>
         {team.description && (
-          <p className="mt-2 break-words text-sm text-muted-foreground">{team.description}</p>
+          <p className="mt-2 wrap-break-word text-sm text-muted-foreground">{team.description}</p>
         )}
         <p className="mt-2 text-xs text-muted-foreground">
           {team.memberCount} {team.memberCount === 1 ? "member" : "members"} /{" "}

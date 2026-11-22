@@ -1,8 +1,14 @@
+import { messageSourceSchema } from "@open-inspect/shared/types/sessions";
 import { z } from "zod";
 
 /** Non-secret identity needed to attribute work initiated by the active prompt. */
 export const activePromptAuthorSchema = z.object({
   userId: z.string(),
+  /**
+   * Where the active prompt came from. Caller-chosen for public prompt sources, so it is only
+   * meaningful together with `userId`, which comes from the enqueuing principal.
+   */
+  source: messageSourceSchema.optional(),
   canonicalUserId: z.string().nullable().optional(),
   mcpEligible: z.boolean().optional(),
   scmUserId: z.string().nullable(),

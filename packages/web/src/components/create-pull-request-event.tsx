@@ -143,7 +143,7 @@ function PullRequestBody({ body }: { body: string }) {
           />
         </div>
         {bodyNeedsClamp && !showFullBody && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-card to-transparent" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-linear-to-t from-card to-transparent" />
         )}
       </div>
       {bodyNeedsClamp && (
@@ -285,9 +285,7 @@ function PullRequestCard({
           <ErrorIcon className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <div className="font-medium">Couldn&apos;t create pull request</div>
-            <div className="mt-1 text-muted-foreground [overflow-wrap:anywhere]">
-              {presentation.detail}
-            </div>
+            <div className="mt-1 text-muted-foreground wrap-anywhere">{presentation.detail}</div>
           </div>
         </div>
       </div>
@@ -334,7 +332,7 @@ function PullRequestCard({
       {body && <PullRequestBody body={body} />}
 
       <div className="flex items-center justify-between gap-3 border-t border-border-muted p-3">
-        <span className="min-w-0 text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+        <span className="min-w-0 text-[11px] text-muted-foreground wrap-anywhere">
           {presentation.footer}
         </span>
         {safeUrl && presentation.action && (
@@ -343,7 +341,7 @@ function PullRequestCard({
       </div>
 
       {presentation.rawOutput !== undefined && (
-        <pre className="max-h-48 overflow-auto border-t border-border-muted p-3 text-xs text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
+        <pre className="max-h-48 overflow-auto border-t border-border-muted p-3 text-xs text-foreground whitespace-pre-wrap wrap-anywhere">
           {presentation.rawOutput}
         </pre>
       )}
@@ -396,7 +394,7 @@ export function CreatePullRequestEvent({
       </button>
 
       {isExpanded && (
-        <div className="mt-2 min-w-0 w-full max-w-full sm:ml-5 sm:w-[calc(100%_-_1.25rem)]">
+        <div className="mt-2 min-w-0 w-full max-w-full sm:ml-5 sm:w-[calc(100%-1.25rem)]">
           <PullRequestCard event={event} presentation={presentation} />
         </div>
       )}

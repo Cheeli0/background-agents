@@ -54,3 +54,13 @@ variable "github_deploy" {
   })
   default = null
 }
+
+variable "ec2_sandboxes" {
+  description = "Run sandboxes as EC2 instances in this account instead of on Modal; see docs/EC2_SANDBOX_PROVIDER.md. `{}` creates the sandbox network the base AMI is built in; adding `ami_id` switches the deployment to it."
+  type = object({
+    ami_id        = optional(string)
+    instance_type = optional(string)
+    subnet_cidr   = optional(string)
+  })
+  default = null
+}

@@ -222,3 +222,18 @@ variable "compose_plugin_sha256" {
   type        = string
   default     = "a1f85584584d0c3c489f31f015c97eb543f1f0949fdc5ce3ded88c05a5188729"
 }
+
+variable "ec2_sandboxes" {
+  description = "EC2 sandboxes in this account (SANDBOX_PROVIDER=ec2; docs/EC2_SANDBOX_PROVIDER.md). Null creates nothing. `{}` creates the sandbox subnet, security group and instance profile, which the AMI build needs. Setting `ami_id` (built by `npm run sandbox:images -- build --provider ec2`) also grants the control plane its EC2 permissions and switches the deployment to the ec2 provider. `instance_type` overrides the provider's default for every sandbox. `subnet_cidr` overrides the sandbox subnet, which otherwise is `cidrsubnet(vpc_cidr, 8, 2)`; set it when `vpc_cidr` or `subnet_cidr` is customised."
+  type = object({
+    ami_id        = optional(string)
+    instance_type = optional(string)
+    subnet_cidr   = optional(string)
+  })
+  default = null
+
+  validation {
+    condition     = var.ec2_sandboxes == null || try(var.ec2_sandboxes.ami_id == null || can(regex("^ami-[0-9a-f]+$", var.ec2_sandboxes.ami_id)), false)
+    error_message = "ec2_sandboxes.ami_id must be an AMI id (ami-...)."
+  }
+}

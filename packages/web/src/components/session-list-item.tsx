@@ -240,7 +240,7 @@ export function SessionListItem({
                   handleCancelRename();
                 }
               }}
-              className="w-full text-sm bg-transparent text-foreground outline-none focus:ring-inset focus:ring-ring font-medium pr-8"
+              className="w-full text-sm bg-transparent text-foreground outline-hidden focus:ring-inset focus:ring-ring font-medium pr-8"
             />
             <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
               <span>{relativeTime}</span>
@@ -301,7 +301,7 @@ export function SessionListItem({
               {environmentName && (
                 <>
                   <span>·</span>
-                  <BoxIcon className="w-3 h-3 flex-shrink-0" />
+                  <BoxIcon className="w-3 h-3 shrink-0" />
                   <span className="truncate">{environmentName}</span>
                 </>
               )}
@@ -314,7 +314,7 @@ export function SessionListItem({
               {session.baseBranch && session.baseBranch !== "main" && (
                 <>
                   <span>·</span>
-                  <BranchIcon className="w-3 h-3 flex-shrink-0" />
+                  <BranchIcon className="w-3 h-3 shrink-0" />
                   <span className="truncate">{session.baseBranch}</span>
                 </>
               )}

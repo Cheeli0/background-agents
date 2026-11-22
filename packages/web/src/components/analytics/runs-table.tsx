@@ -27,7 +27,7 @@ export function AnalyticsRunsTable({
       id: "title",
       header: "Run",
       cell: (run) => (
-        <span className="block min-w-[12rem] max-w-[24rem]">
+        <span className="block min-w-48 max-w-[24rem]">
           <Link
             href={`/session/${run.rootSessionId}`}
             className="block truncate font-medium hover:text-accent hover:underline"

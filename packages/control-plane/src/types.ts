@@ -8,6 +8,7 @@ import type { Jobs } from "./jobs";
 import type { FetchClient, QueueMetricsSource } from "./platform-ports";
 import type { SessionRuntimeDispatch } from "./session/runtime-client";
 import type { ObjectStorage } from "./storage/object-storage";
+import type { Ec2SandboxApi } from "./sandbox/ec2-api";
 
 /**
  * The deployment's configuration: variables and secrets, every one a string,
@@ -43,6 +44,13 @@ export interface EnvConfig {
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_INSTALLATION_ID?: string;
 
+  // Optional second GitHub App whose installation token submits code reviews,
+  // brokered to review sandboxes by GET /sessions/:id/review-token. All three
+  // unset means the deployment runs no reviewer App.
+  GITHUB_REVIEWER_APP_ID?: string;
+  GITHUB_REVIEWER_APP_PRIVATE_KEY?: string;
+  GITHUB_REVIEWER_APP_INSTALLATION_ID?: string;
+
   // GitLab secrets (for git operations and API access when SCM_PROVIDER=gitlab)
   GITLAB_ACCESS_TOKEN?: string;
   GITLAB_NAMESPACE?: string; // Group namespace to scope repository listing
@@ -60,7 +68,7 @@ export interface EnvConfig {
   ALLOWED_GITHUB_ORGS?: string;
   UNSAFE_ALLOW_ALL_USERS?: string;
   CF_ACCOUNT_ID?: string; // Cloudflare account ID
-  SANDBOX_PROVIDER?: string; // "modal" (default), "modal-vm", "daytona", "vercel", "e2b", or "boat"
+  SANDBOX_PROVIDER?: string; // "modal" (default), "modal-vm", "daytona", "vercel", "e2b", "boat", or "ec2"
   MODAL_WORKSPACE?: string; // Modal workspace name
   MODAL_ENVIRONMENT?: string; // Modal environment name for dashboard URLs
   MODAL_ENVIRONMENT_WEB_SUFFIX?: string; // Modal environment web suffix for endpoint URLs
@@ -95,6 +103,14 @@ export interface EnvConfig {
   BOAT_ORG?: string; // Optional Boat organization wallet sandboxes are billed to
   BOAT_SANDBOX_TYPE?: string; // Machine size when a session requests no resources: small, default (default), large, xlarge
 
+  EC2_SANDBOX_REGION?: string; // AWS region sandboxes launch in
+  EC2_SANDBOX_AMI_ID?: string; // Base AMI built by packages/ec2-infra
+  EC2_SANDBOX_INSTANCE_TYPE?: string; // Instance type for every sandbox; defaults to DEFAULT_EC2_SANDBOX_INSTANCE_TYPE
+  EC2_SANDBOX_SUBNET_ID?: string; // Subnet sandboxes launch into
+  EC2_SANDBOX_SECURITY_GROUP_ID?: string; // Security group for sandboxes
+  EC2_SANDBOX_INSTANCE_PROFILE_ARN?: string; // Instance profile for sandboxes; its role grants nothing
+  EC2_SANDBOX_CONTROL_PLANE_PRIVATE_HOST?: string; // DNS name resolving, inside the sandboxes' VPC, to the control plane's private address
+
   // Sandbox lifecycle configuration
   SANDBOX_INACTIVITY_TIMEOUT_MS?: string; // Inactivity timeout in ms; defaults to DEFAULT_INACTIVITY_CONFIG.timeoutMs
   SANDBOX_UNATTENDED_INACTIVITY_TIMEOUT_MS?: string; // Unattended inactivity timeout in ms; defaults to DEFAULT_INACTIVITY_CONFIG.unattendedTimeoutMs
@@ -122,6 +138,8 @@ export interface Platform {
   REPOS_CACHE: CacheStore;
   /** Media artifacts: screenshots, uploads, session media. */
   MEDIA_BUCKET: ObjectStorage;
+  /** EC2 control for the `ec2` sandbox provider; the Node host supplies it when that provider is selected. */
+  EC2_SANDBOXES?: Ec2SandboxApi;
   /** The slack-bot service, when deployed. */
   SLACK_BOT?: FetchClient;
   /** The linear-bot service, when deployed. */

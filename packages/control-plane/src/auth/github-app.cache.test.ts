@@ -98,6 +98,43 @@ describe("installation token scopes", () => {
     expect(new Set([canonical, ...others]).size).toBe(others.length + 1);
   });
 
+  it("keys a permission-narrowed token apart from a broader token for the same scope", async () => {
+    const scope: TokenScope = { kind: "repositories", repositoryIds: [2] };
+    const broad = await auth.getInstallationTokenCacheKey(config(), scope);
+    const narrow = await auth.getInstallationTokenCacheKey(config(), scope, {
+      pull_requests: "write",
+      metadata: "read",
+    });
+
+    expect(narrow).not.toBe(broad);
+    expect(
+      await auth.getInstallationTokenCacheKey(config(), scope, {
+        metadata: "read",
+        pull_requests: "write",
+      })
+    ).toBe(narrow);
+    expect(
+      await auth.getInstallationTokenCacheKey(config(), scope, { pull_requests: "read" })
+    ).not.toBe(
+      await auth.getInstallationTokenCacheKey(config(), scope, { pull_requests: "write" })
+    );
+  });
+
+  it("requests the narrowed permissions in the token exchange", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(mintResponse("narrow"));
+
+    const token = await auth.getCachedInstallationToken(config(), undefined, {
+      scope: { kind: "repositories", repositoryIds: [2] },
+      permissions: { pull_requests: "write" },
+    });
+
+    expect(token).toBe("narrow");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      repository_ids: [2],
+      permissions: { pull_requests: "write" },
+    });
+  });
+
   it("mints repository scopes with their canonical ids and installation scopes without a body", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => mintResponse());
     await auth.getCachedInstallationToken(config(), undefined, {

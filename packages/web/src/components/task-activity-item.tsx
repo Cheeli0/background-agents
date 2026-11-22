@@ -42,14 +42,14 @@ function TaskDisclosure({
         className="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-left text-muted-foreground hover:text-foreground transition-colors"
       >
         <ChevronRightIcon
-          className={`w-3.5 h-3.5 flex-shrink-0 text-secondary-foreground transition-transform duration-200 ${
+          className={`w-3.5 h-3.5 shrink-0 text-secondary-foreground transition-transform duration-200 ${
             isExpanded ? "rotate-90" : ""
           }`}
         />
         {label}
       </button>
       {isExpanded && (
-        <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap border-t border-border-muted px-3 py-2 text-xs text-foreground [overflow-wrap:anywhere]">
+        <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap border-t border-border-muted px-3 py-2 text-xs text-foreground wrap-anywhere">
           {content}
         </pre>
       )}
@@ -97,7 +97,7 @@ export function TaskActivityItem({
         {isRunning && (
           <span
             aria-hidden="true"
-            className="mt-1.5 inline-block h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-accent"
+            className="mt-1.5 inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent"
           />
         )}
         <TimelineRowContent time={formatSessionEventTime(event.timestamp)}>

@@ -6,8 +6,6 @@ type MarkdownRouteContext = {
   params: Promise<{ slug?: string[] }>;
 };
 
-export const revalidate = false;
-
 export async function GET(_request: Request, { params }: MarkdownRouteContext) {
   const { slug = [] } = await params;
   if (slug.at(-1) !== "content.md") notFound();

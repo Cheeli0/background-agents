@@ -123,7 +123,7 @@ function PersonCell({ entry }: { entry: AnalyticsBreakdownEntry }) {
   const unknown = entry.key === ANALYTICS_UNKNOWN_USER_KEY;
   const name = entry.displayName ?? entry.key;
   return (
-    <span className="flex min-w-[10rem] items-center gap-2.5">
+    <span className="flex min-w-40 items-center gap-2.5">
       <span
         aria-hidden="true"
         className={cn(

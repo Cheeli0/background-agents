@@ -43,31 +43,33 @@
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "@types/node": "^24.0.0",
+    "@vitest/coverage-istanbul": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.0",
     "esbuild": "^0.28.1",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-react": "^7.37.4",
-    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^15.14.0",
     "husky": "^9.1.7",
-    "knip": "^6.41.0",
+    "knip": "^6.45.0",
     "lint-staged": "^17.6.0",
     "prettier": "^3.9.10",
     "typescript": "^5.8.0",
-    "typescript-eslint": "^8.71.2",
-    "wrangler": "^4.151.3"
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.160.0"
   },
   "engines": {
     "node": ">=24.0.0"
   },
   "overrides": {
-    "minimatch": "^10.2.6",
+    "minimatch": "^11.0.4",
     "undici": "^7.29.1",
     "sharp": "^0.35.5",
     "postcss-selector-parser": "^7.1.6",
-    "@node-minify/core": {
-      "glob": "^10.5.0"
-    }
+    "glob": "^14.0.3",
+    "fflate": "^0.7.5"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -77,7 +79,7 @@
     "*.{js,jsx,json,md,yaml,yml,css}": [
       "prettier --write"
     ],
-    "packages/{boat-infra,daytona-infra,e2b-infra,modal-infra,sandbox-runtime,sandbox-images}/**/*.py": [
+    "packages/{boat-infra,daytona-infra,e2b-infra,ec2-infra,modal-infra,sandbox-runtime,sandbox-images}/**/*.py": [
       "uv run --project packages/modal-infra --extra dev ruff check --fix",
       "uv run --project packages/modal-infra --extra dev ruff format"
     ]

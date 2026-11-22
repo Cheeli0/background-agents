@@ -52,7 +52,10 @@ different paid account.
 
 Choose an OpenAI model when creating a session and use the **OpenAI authentication** selector to
 choose provider policy, a specific connected account, or **Use API key**. Account mode overrides
-`OPENAI_API_KEY` for that session.
+`OPENAI_API_KEY` for that session: the sandbox does not receive that variable. If an application
+your repository starts in the sandbox needs the key, read it from `OPENINSPECT_USER_OPENAI_API_KEY`,
+which carries the same value whenever account mode withholds it. A secret you store under that name
+yourself is left as it is, and the withheld key is then not exposed.
 
 Automation editors expose the same choices for every subscription provider. **Use defaults when each
 run starts** resolves current policy for every run; selecting an account or API-key mode pins that

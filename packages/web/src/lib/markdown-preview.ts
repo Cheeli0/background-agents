@@ -49,7 +49,7 @@ export function previewMarkdownDocument(patch: string): MarkdownPreviewDocument 
  */
 function parsePatchFilesStrictly(patch: string) {
   try {
-    return parsePatchFiles(patch, undefined, true).flatMap((parsed) => parsed.files);
+    return parsePatchFiles(patch, { throwOnError: true }).flatMap((parsed) => parsed.files);
   } catch {
     return [];
   }

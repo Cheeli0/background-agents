@@ -53,7 +53,7 @@ export function AnalyticsRankedBars({
                 <span className="shrink-0 tabular-nums text-foreground">
                   {row.display}
                   {row.secondary !== undefined ? (
-                    <span className="ml-2 inline-block min-w-[2.75rem] text-right text-xs text-muted-foreground">
+                    <span className="ml-2 inline-block min-w-11 text-right text-xs text-muted-foreground">
                       {row.secondary}
                     </span>
                   ) : null}
@@ -78,7 +78,7 @@ export function AnalyticsRankedBars({
                   aria-controls={controls}
                   onClick={() => onSelect(row.key)}
                   className={cn(
-                    "block w-full rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring",
+                    "block w-full rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring",
                     selected === row.key ? "bg-accent-muted" : "hover:bg-muted"
                   )}
                 >

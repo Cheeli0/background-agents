@@ -140,7 +140,7 @@ export function ToolCallItem({ event, isExpanded, onToggle, showTime = true }: T
       </button>
 
       {isExpanded && (
-        <div className="mt-2 min-w-0 w-full max-w-full sm:ml-5 sm:w-[calc(100%_-_1.25rem)]">
+        <div className="mt-2 min-w-0 w-full max-w-full sm:ml-5 sm:w-[calc(100%-1.25rem)]">
           {renderer?.renderDetails?.(event) ?? <ToolCallDetails event={event} />}
         </div>
       )}

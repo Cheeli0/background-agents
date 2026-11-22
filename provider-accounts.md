@@ -607,8 +607,13 @@ Provider selection determines authentication mode:
 An explicitly selected account and a resolved provider default both create a provider-account auth
 row. Explicit or policy-selected API-key mode creates an API-key auth row without an account ID. The
 control plane removes or suppresses the corresponding provider API key from the sandbox environment
-when account mode applies so OpenCode cannot bypass the selected subscription. API keys for other
-providers are unchanged.
+when account mode applies so OpenCode cannot bypass the selected subscription. The one exception is
+deliberate: a key the user supplied stays in the sandbox under `OPENINSPECT_USER_<KEY>`, a name no
+harness reads as a credential, unless the user already stored a secret under that name, which is
+kept and leaves the withheld key unexposed. Every process in the sandbox inherits that variable,
+including repository hooks and commands the agent runs, so the guarantee is that the harness does
+not authenticate with the key, not that the key is absent. API keys for other providers are
+unchanged.
 
 This precedence applies to the initial model and later per-prompt model changes. Account selection
 is not inferred from the mere presence of an API key.
@@ -764,10 +769,14 @@ cross the control-plane boundary.
 Sandbox environment preparation reads the complete resolved session auth snapshot from D1.
 `prepareManagedProviderEnv` owns the `PROVIDER_ENV` registry of API-key, managed-marker, and legacy
 refresh-token names. For account mode, preparation sets the managed-auth marker and strips the API
-key and legacy refresh token. It does the same for legacy mode only when the resolved secrets
-contain the matching legacy refresh token; otherwise it preserves the API key as the compatibility
-fallback. API-key mode receives no managed marker and retains existing injection behavior. D1 read
-failures and incomplete snapshots fail closed rather than falling back to API-key exposure.
+key and legacy refresh token. A stripped user-supplied API key stays in the sandbox as
+`OPENINSPECT_USER_<KEY>` (for example `OPENINSPECT_USER_OPENAI_API_KEY`), a name no harness reads,
+so an application the repository hooks start can still be handed it. A secret the user already
+stored under that name is kept as is. It does the same for legacy mode only when the resolved
+secrets contain the matching legacy refresh token; otherwise it preserves the API key as the
+compatibility fallback. API-key mode receives no managed marker and retains existing injection
+behavior. D1 read failures and incomplete snapshots fail closed rather than falling back to API-key
+exposure.
 
 Suppression happens before `CreateSandboxConfig` reaches a sandbox provider, but provider-specific
 environment layering must obey the same result. Add cross-provider create and restore conformance

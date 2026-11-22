@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNow } from "@/hooks/use-now";
 import { toast } from "sonner";
 import {
   isPersonalAccessTokenGrantable,
@@ -420,7 +421,8 @@ function TokenRow({
   expiresAt: number;
   onRevoke: () => void;
 }) {
-  const now = Date.now();
+  // Expiry labels only need minute-level precision.
+  const now = useNow();
   const expired = expiresAt <= now;
   return (
     <li className="rounded-md border border-border bg-card px-4 py-3">

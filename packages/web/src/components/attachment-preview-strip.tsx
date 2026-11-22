@@ -14,7 +14,7 @@ function AttachmentPreview({
 }) {
   return (
     <div
-      className="group/attachment relative w-16 h-16 border border-border bg-muted overflow-hidden flex-shrink-0"
+      className="group/attachment relative w-16 h-16 border border-border bg-muted overflow-hidden shrink-0"
       title={attachment.file.name}
     >
       <img
@@ -26,7 +26,7 @@ function AttachmentPreview({
         <button
           type="button"
           onClick={() => onRemove(attachment.id)}
-          className="absolute top-0.5 right-0.5 p-0.5 bg-background/80 text-secondary-foreground hover:text-foreground opacity-0 group-hover/attachment:opacity-100 focus-visible:opacity-100 transition"
+          className="absolute top-0.5 right-0.5 p-0.5 bg-background/80 text-secondary-foreground hover:text-foreground opacity-0 group-hover/attachment:opacity-100 [@media(hover:none)]:opacity-100 focus-visible:opacity-100 transition"
           title={`Remove ${attachment.file.name}`}
           aria-label={`Remove ${attachment.file.name}`}
         >

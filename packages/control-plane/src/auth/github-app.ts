@@ -37,8 +37,16 @@ const INSTALLATION_TOKEN_CACHE_KEY_PREFIX = "github:installation-token:v2";
 
 export type TokenScope = CredentialScope;
 
+/**
+ * GitHub App permissions to request for an installation token, narrowing it
+ * below the installation's grant. Omitted, the token carries every permission
+ * the installation has.
+ */
+export type InstallationTokenPermissions = Readonly<Record<string, "read" | "write">>;
+
 interface InstallationTokenOptions {
   scope: TokenScope;
+  permissions?: InstallationTokenPermissions;
   forceRefresh?: boolean;
 }
 
@@ -265,9 +273,15 @@ async function getInstallationTokenWithMetadata(
   jwt: string,
   installationId: string,
   userAgent: string,
-  scope: TokenScope
+  scope: TokenScope,
+  permissions: InstallationTokenPermissions | undefined
 ): Promise<InstallationTokenResponse> {
   const url = `https://api.github.com/app/installations/${installationId}/access_tokens`;
+  const body = {
+    ...(scope.kind === "repositories" ? { repository_ids: scope.repositoryIds } : {}),
+    ...(permissions ? { permissions } : {}),
+  };
+  const hasBody = Object.keys(body).length > 0;
 
   const response = await fetchWithTimeout(url, {
     method: "POST",
@@ -276,11 +290,9 @@ async function getInstallationTokenWithMetadata(
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": userAgent,
-      ...(scope.kind === "repositories" ? { "Content-Type": "application/json" } : {}),
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
     },
-    ...(scope.kind === "repositories"
-      ? { body: JSON.stringify({ repository_ids: scope.repositoryIds }) }
-      : {}),
+    ...(hasBody ? { body: JSON.stringify(body) } : {}),
   });
 
   if (!response.ok) {
@@ -307,16 +319,27 @@ async function getInstallationTokenWithMetadata(
   return parsed.data;
 }
 
+/**
+ * The cache key for one installation token. A token minted with narrowed
+ * permissions gets a key of its own, so it never collides with (or is served
+ * in place of) a token for the same repositories carrying broader permissions.
+ */
 export async function getInstallationTokenCacheKey(
   config: GitHubAppConfig,
-  scope: TokenScope
+  scope: TokenScope,
+  permissions?: InstallationTokenPermissions
 ): Promise<string> {
   let scopeHash = "all";
   if (scope.kind === "repositories") {
     const ids = repositoryCredentialScope(scope.repositoryIds).repositoryIds;
     scopeHash = await sha256Hex(JSON.stringify(ids));
   }
-  return `${INSTALLATION_TOKEN_CACHE_KEY_PREFIX}:${config.appId}:${config.installationId}:${scopeHash}`;
+  const key = `${INSTALLATION_TOKEN_CACHE_KEY_PREFIX}:${config.appId}:${config.installationId}:${scopeHash}`;
+  if (!permissions) return key;
+  const canonical = Object.keys(permissions)
+    .sort()
+    .map((name) => [name, permissions[name]]);
+  return `${key}:permissions:${await sha256Hex(JSON.stringify(canonical))}`;
 }
 
 function isTokenUsable(cached: CachedInstallationToken, nowEpochMs = Date.now()): boolean {
@@ -406,7 +429,8 @@ async function refreshInstallationToken(
   config: GitHubAppConfig,
   env: InstallationTokenCacheBindings | undefined,
   cacheKey: string,
-  scope: TokenScope
+  scope: TokenScope,
+  permissions: InstallationTokenPermissions | undefined
 ): Promise<CachedInstallationToken> {
   const nowEpochMs = Date.now();
   const jwt = await generateAppJwt(config.appId, config.privateKey);
@@ -414,7 +438,8 @@ async function refreshInstallationToken(
     jwt,
     config.installationId,
     resolveUserAgent(env),
-    scope
+    scope,
+    permissions
   );
   const cached: CachedInstallationToken = {
     token: tokenData.token,
@@ -436,7 +461,7 @@ async function getOrRefreshCachedInstallationToken(
     options.scope.kind === "all"
       ? options.scope
       : repositoryCredentialScope(options.scope.repositoryIds);
-  const cacheKey = await getInstallationTokenCacheKey(config, scope);
+  const cacheKey = await getInstallationTokenCacheKey(config, scope, options.permissions);
   const forceRefresh = options.forceRefresh ?? false;
 
   const pending = installationTokenRefreshInFlight.get(cacheKey);
@@ -470,7 +495,7 @@ async function getOrRefreshCachedInstallationToken(
         return persistentCached;
       }
     }
-    return refreshInstallationToken(config, env, cacheKey, scope);
+    return refreshInstallationToken(config, env, cacheKey, scope, options.permissions);
   })().finally(() => {
     if (installationTokenRefreshInFlight.get(cacheKey)?.promise === refreshPromise) {
       installationTokenRefreshInFlight.delete(cacheKey);
@@ -797,4 +822,28 @@ export function getGitHubAppConfig(env: {
     privateKey: env.GITHUB_APP_PRIVATE_KEY!,
     installationId: env.GITHUB_APP_INSTALLATION_ID!,
   };
+}
+
+/**
+ * The optional second GitHub App whose installation token submits code
+ * reviews, so a review of a pull request the main App itself opened can
+ * approve rather than only comment.
+ *
+ * Null when the deployment runs no separate reviewer App. The review-token
+ * route then 404s, and github-bot treats the main App as the reviewing
+ * identity, so a review of that App's own pull request stays a comment.
+ */
+export function getGitHubReviewerAppConfig(env: {
+  GITHUB_REVIEWER_APP_ID?: string;
+  GITHUB_REVIEWER_APP_PRIVATE_KEY?: string;
+  GITHUB_REVIEWER_APP_INSTALLATION_ID?: string;
+}): GitHubAppConfig | null {
+  const appId = env.GITHUB_REVIEWER_APP_ID;
+  const privateKey = env.GITHUB_REVIEWER_APP_PRIVATE_KEY;
+  const installationId = env.GITHUB_REVIEWER_APP_INSTALLATION_ID;
+  if (!appId || !privateKey || !installationId) {
+    return null;
+  }
+
+  return { appId, privateKey, installationId };
 }

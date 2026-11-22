@@ -66,12 +66,12 @@ export function MemoryCard({
             (record.scope.type === "environment" ? (
               <a
                 href={memorySettingsLink(record.scope, record.id)}
-                className="block break-words text-xs text-muted-foreground underline"
+                className="block wrap-break-word text-xs text-muted-foreground underline"
               >
                 {memoryScopeLabel(record.scope)}
               </a>
             ) : (
-              <p className="break-words text-xs text-muted-foreground">
+              <p className="wrap-break-word text-xs text-muted-foreground">
                 {memoryScopeLabel(record.scope)}
               </p>
             ))}
@@ -91,7 +91,7 @@ export function MemoryCard({
         </div>
       </div>
       <p className="text-sm text-muted-foreground">{record.description}</p>
-      <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words text-sm">
+      <pre className="max-h-60 overflow-auto whitespace-pre-wrap wrap-break-word text-sm">
         {record.content}
       </pre>
       {record.archiveKind && (

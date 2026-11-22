@@ -48,6 +48,9 @@ const OPENAI_MODELS = [
   "openai/gpt-6-astra",
   "openai/gpt-6-sol",
   "openai/gpt-6.1-sol",
+  "openai/gpt-6.1-terra",
+  "openai/gpt-6.2-astra",
+  "openai/gpt-6.2-sol",
   "openai/gpt-6-luna",
 ] as const;
 
@@ -62,6 +65,9 @@ const ZEN_MODELS = [
   "opencode/glm-5",
   "opencode/glm-5.1",
   "opencode/glm-5.2",
+  "opencode/gemini-4-carbon",
+  "opencode/gemini-4-argon",
+  "opencode/gemini-3.8-flash",
   "opencode/muse-spark-1.3-contributor-free",
   "opencode/big-pickle",
 ] as const;
@@ -69,6 +75,7 @@ const ZEN_MODELS = [
 const GO_MODELS = [
   "opencode-go/grok-4.6",
   "opencode-go/gpt-5.6-luna",
+  "opencode-go/gemini-4-argon",
   "opencode-go/glm-5.3-flash",
   "opencode-go/glm-5.3",
   "opencode-go/glm-5.2",
@@ -117,6 +124,28 @@ const OLLAMA_CLOUD_MODELS = [
   "ollama-cloud/kimi-k2.5",
   "ollama-cloud/minimax-m2.7",
 ] as const;
+
+it("keeps the OpenCode gateway wire-test efforts aligned with the catalog", () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../sandbox-runtime/tests/fixtures/opencode-gateway-efforts.json",
+        import.meta.url
+      ),
+      "utf8"
+    )
+  );
+  const expected = Object.fromEntries(
+    MODEL_CATALOG.flatMap((group) => group.models)
+      .filter(
+        (model) =>
+          (model.id.startsWith("opencode/") || model.id.startsWith("opencode-go/")) &&
+          "reasoning" in model
+      )
+      .map((model) => [model.id, [...model.reasoning.efforts]])
+  );
+  expect(fixture).toEqual(expected);
+});
 
 it.each([
   "../../../docs/AVAILABLE_MODELS.md",
@@ -529,6 +558,16 @@ describe("model utilities", () => {
       efforts: ["low", "medium", "high", "xhigh", "max"],
       default: "medium",
     });
+    expect(getReasoningConfig("openai/gpt-6.1-terra")).toEqual({
+      efforts: ["none", "low", "medium", "high", "xhigh", "max"],
+      default: "medium",
+    });
+    for (const model of ["openai/gpt-6.2-astra", "openai/gpt-6.2-sol"]) {
+      expect(getReasoningConfig(model)).toEqual({
+        efforts: ["low", "medium", "high", "xhigh", "max"],
+        default: "medium",
+      });
+    }
     expect(getReasoningConfig("openai/gpt-5.6-sol")).toEqual({
       efforts: ["none", "low", "medium", "high", "xhigh"],
       default: "medium",
@@ -570,26 +609,19 @@ describe("model utilities", () => {
       });
     }
 
-    for (const model of [
-      "opencode/muse-spark-1.3-contributor-free",
-      "opencode-go/muse-spark-1.3-contributor",
-    ]) {
-      expect(getReasoningConfig(model)).toEqual({
-        efforts: ["minimal", "low", "medium", "high", "xhigh"],
-        default: "xhigh",
-      });
-    }
+    expect(getReasoningConfig("opencode-go/muse-spark-1.3-contributor")).toEqual({
+      efforts: ["low", "medium", "high", "xhigh"],
+      default: "xhigh",
+    });
+    expect(getReasoningConfig("opencode/muse-spark-1.3-contributor-free")).toBeUndefined();
 
-    for (const model of [
-      "opencode-go/deepseek-v4.1-flash",
-      "opencode-go/deepseek-v4-flash",
-      "opencode-go/deepseek-v4-flash-vision-exp",
-    ]) {
-      expect(getReasoningConfig(model)).toEqual({
-        efforts: ["low", "high", "max"],
-        default: "high",
-      });
-    }
+    expect(getReasoningConfig("opencode-go/deepseek-v4.1-flash")).toEqual({
+      efforts: ["low", "high", "max"],
+      default: "high",
+    });
+    // The models.dev catalog lists no efforts for these, so OpenCode sends none.
+    expect(getReasoningConfig("opencode-go/deepseek-v4-flash")).toBeUndefined();
+    expect(getReasoningConfig("opencode-go/deepseek-v4-flash-vision-exp")).toBeUndefined();
 
     expect(getReasoningConfig("opencode/big-pickle")).toBeUndefined();
   });
@@ -617,6 +649,12 @@ describe("model utilities", () => {
     expect(isValidReasoningEffort("openai/gpt-6-sol", "max")).toBe(true);
     expect(isValidReasoningEffort("openai/gpt-6.1-sol", "max")).toBe(true);
     expect(isValidReasoningEffort("openai/gpt-6.1-sol", "none")).toBe(false);
+    expect(isValidReasoningEffort("openai/gpt-6.1-terra", "none")).toBe(true);
+    expect(isValidReasoningEffort("openai/gpt-6.1-terra", "max")).toBe(true);
+    expect(isValidReasoningEffort("openai/gpt-6.2-astra", "max")).toBe(true);
+    expect(isValidReasoningEffort("openai/gpt-6.2-astra", "none")).toBe(false);
+    expect(isValidReasoningEffort("openai/gpt-6.2-sol", "max")).toBe(true);
+    expect(isValidReasoningEffort("openai/gpt-6.2-sol", "none")).toBe(false);
     expect(isValidReasoningEffort("openai/gpt-6-luna", "none")).toBe(true);
     expect(isValidReasoningEffort("openai/gpt-6-luna", "max")).toBe(true);
     expect(isValidReasoningEffort("openai/gpt-5.6-sol", "xhigh")).toBe(true);
@@ -633,12 +671,11 @@ describe("model utilities", () => {
     expect(isValidReasoningEffort("xai/grok-build-0.1", "xhigh")).toBe(false);
     expect(isValidReasoningEffort("deepseek/deepseek-v4-pro", "high")).toBe(false);
     expect(isValidReasoningEffort("opencode/muse-spark-1.3-contributor-free", "minimal")).toBe(
-      true
+      false
     );
     expect(isValidReasoningEffort("opencode-go/deepseek-v4.1-flash", "max")).toBe(true);
     expect(isValidReasoningEffort("opencode-go/deepseek-v4.1-flash", "medium")).toBe(false);
-    expect(isValidReasoningEffort("opencode-go/deepseek-v4-flash", "max")).toBe(true);
-    expect(isValidReasoningEffort("opencode-go/deepseek-v4-flash", "xhigh")).toBe(false);
+    expect(isValidReasoningEffort("opencode-go/deepseek-v4-flash", "max")).toBe(false);
     expect(isValidReasoningEffort("zai-coding-plan/glm-5.3", "max")).toBe(true);
     expect(isValidReasoningEffort("zai-coding-plan/glm-5.3", "medium")).toBe(false);
     expect(isValidReasoningEffort("opencode/big-pickle", "high")).toBe(false);

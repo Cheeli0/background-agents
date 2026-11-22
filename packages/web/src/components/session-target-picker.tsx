@@ -46,7 +46,7 @@ export function SessionTargetPicker({
         disabled={disabled || loadingRepos}
         triggerClassName="flex max-w-full items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
       >
-        <span className="truncate max-w-[12rem] sm:max-w-none">
+        <span className="truncate max-w-48 sm:max-w-none">
           {loadingRepos ? "Loading..." : displayTargetName}
         </span>
         <ChevronDownIcon className="w-3 h-3" />
@@ -109,7 +109,7 @@ export function SessionTargetPicker({
           disabled={disabled || loadingBranches || loadingRepos || !!selectionError}
           triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
         >
-          <span className="max-w-[9rem] truncate">
+          <span className="max-w-36 truncate">
             {loadingBranches ? "Loading..." : selectedBranch || "branch"}
           </span>
           <ChevronDownIcon className="w-3 h-3" />

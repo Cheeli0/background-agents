@@ -194,7 +194,7 @@ export function SidebarLayout({ children }: SidebarLayoutProps) {
                   } ${sidebar.isOpen ? "translate-x-0" : "-translate-x-full"}`
                 : `transition-all duration-200 ease-in-out ${
                     sidebar.isOpen ? "w-72" : "w-0"
-                  } flex-shrink-0 overflow-hidden`
+                  } shrink-0 overflow-hidden`
             }
             style={
               isMobile && !sidebar.isOpen && sidebarPull.dragDistance > 0

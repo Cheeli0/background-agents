@@ -7,7 +7,7 @@ shutdown authority. The [characterization matrix](sandbox-lifecycle-refactor-bas
 compatibility evidence and separate behavior gaps, not fixes claimed by extraction.
 
 T7's combined audit, real-storage wiring evidence and validation are supplied by
-[PR #2203](https://github.com/ColeMurray/background-agents/pull/2203). Command results and release
+[PR #2203](https://github.com/open-inspect/background-agents/pull/2203). Command results and release
 limits are in the [closure report](sandbox-lifecycle-refactor-verification.md). A green local suite
 is not deployment authorization or exhaustive interleaving safety.
 

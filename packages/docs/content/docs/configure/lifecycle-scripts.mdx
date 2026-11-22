@@ -146,7 +146,7 @@ Git operations inside a script authenticate through an on-demand credential help
 
 Private submodules, Git-backed package dependencies, and sibling-clone scripts therefore need their repositories included in the session target, such as an environment or ad-hoc multi-repository set. For team-owned sessions, those repositories also need the owning team's grants. Editing the environment later does not expand an existing session; create a new session with the updated set. Grant removal affects subsequent credential resolution, not immediate revocation of already-issued tokens.
 
-GitLab is an exception: its deployment-wide personal access token (PAT) is not narrowed per session. Do not interpret GitHub's token scoping as an equivalent GitLab credential boundary. See the canonical [credential boundaries](https://github.com/ColeMurray/background-agents/blob/main/docs/AUTH.md#repository-and-credential-boundaries) and the runtime [Git credentials](/reference/sandbox-environment#git-credentials) reference.
+GitLab is an exception: its deployment-wide personal access token (PAT) is not narrowed per session. Do not interpret GitHub's token scoping as an equivalent GitLab credential boundary. See the canonical [credential boundaries](https://github.com/open-inspect/background-agents/blob/main/docs/AUTH.md#repository-and-credential-boundaries) and the runtime [Git credentials](/reference/sandbox-environment#git-credentials) reference.
 
 ### Tunnel URLs
 

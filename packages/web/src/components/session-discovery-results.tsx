@@ -48,7 +48,7 @@ function SessionDiscoveryRow({
     <li>
       <Link
         href={buildSessionHref(session)}
-        className="block px-4 py-3 transition hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+        className="block px-4 py-3 transition hover:bg-muted focus-visible:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
       >
         <div className="flex items-start justify-between gap-3">
           <span className="flex min-w-0 items-center gap-1.5">

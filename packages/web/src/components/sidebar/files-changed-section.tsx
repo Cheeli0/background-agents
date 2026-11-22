@@ -68,7 +68,7 @@ function RepositoryGroup({
     >
       <summary
         title={label}
-        className="mb-1.5 cursor-pointer text-[11px] font-medium text-muted-foreground [overflow-wrap:anywhere]"
+        className="mb-1.5 cursor-pointer text-[11px] font-medium text-muted-foreground wrap-anywhere"
       >
         {label}
       </summary>
@@ -103,7 +103,7 @@ export function FilesChangedSection({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={`Filter ${fileCount} changed file${fileCount === 1 ? "" : "s"}`}
-          className="h-8 w-full rounded-md border border-border-muted bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="h-8 w-full rounded-md border border-border-muted bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
         />
       )}
       {normalizedQuery && !paths.some((path) => path.toLowerCase().includes(normalizedQuery)) && (
@@ -151,7 +151,7 @@ export function FilesChangedSection({
                       data-diff-path={file.path}
                       onClick={() => onSelect(repository, file)}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-sm border-l-2 px-2 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex w-full items-center gap-2 rounded-sm border-l-2 px-2 py-2 text-left text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
                         active
                           ? "border-accent bg-accent-muted text-foreground"
                           : "border-transparent text-foreground hover:bg-muted"

@@ -130,7 +130,7 @@ export function SlackNotifyEvent({
       </button>
 
       {isExpanded && (
-        <div className="mt-2 ml-0 overflow-hidden border border-border-muted bg-card p-3 text-xs [overflow-wrap:anywhere] sm:ml-5">
+        <div className="mt-2 ml-0 overflow-hidden border border-border-muted bg-card p-3 text-xs wrap-anywhere sm:ml-5">
           {success ? (
             <SlackNotifySuccessBody success={success} />
           ) : denial ? (

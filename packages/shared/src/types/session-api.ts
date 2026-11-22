@@ -298,6 +298,10 @@ export const createSessionInputSchema = createSessionRequestBaseSchema
     // sessions use the owner's personal memory only then; the control plane ignores it from
     // other callers.
     directMessage: z.boolean().optional(),
+    // Set by the GitHub bot when the session exists to submit a pull request review (a review
+    // request or auto-review). Only such sessions may mint the reviewer App's token; the control
+    // plane ignores it from other callers.
+    githubReview: z.boolean().optional(),
   })
   .refine(hasMatchingRepositoryIdentifiers, {
     message: "repoOwner and repoName must be provided together",

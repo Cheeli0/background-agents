@@ -40,13 +40,13 @@ export function MemoryHistory({
             <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
               <div>
                 <p className="font-medium">Before</p>
-                <pre className="whitespace-pre-wrap break-words bg-destructive/5 p-2">
+                <pre className="whitespace-pre-wrap wrap-break-word bg-destructive/5 p-2">
                   <del>{previous ? formatRevision(previous) : "No previous revision"}</del>
                 </pre>
               </div>
               <div>
                 <p className="font-medium">After</p>
-                <pre className="whitespace-pre-wrap break-words bg-accent/10 p-2">
+                <pre className="whitespace-pre-wrap wrap-break-word bg-accent/10 p-2">
                   <ins className="no-underline">{formatRevision(revision)}</ins>
                 </pre>
               </div>

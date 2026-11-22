@@ -31,7 +31,7 @@ export function ManagedSkillsSection({ sessionId }: { sessionId: string }) {
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">Selection</span>
-          <span className="max-w-[11rem] truncate text-foreground">{profileLabel}</span>
+          <span className="max-w-44 truncate text-foreground">{profileLabel}</span>
         </div>
         {provenance.skills.map((skill) => (
           <div key={skill.skillId} className="border-l border-border pl-3">

@@ -20,6 +20,20 @@ npm run typecheck -w @open-inspect/docs
 npm run build -w @open-inspect/docs
 ```
 
+## Cloudflare build and preview (vinext)
+
+The site can also be built for Cloudflare Workers with [vinext](https://vinext.dev), configured in
+`vite.config.ts` (which includes the `fumadocs-mdx` plugin) and `cloudflare.config.ts`:
+
+```bash
+npm run build:vinext -w @open-inspect/docs   # build the Worker
+npm run start:vinext -w @open-inspect/docs   # preview the built Worker locally
+npm run dev:vinext -w @open-inspect/docs     # vinext dev server on port 3001
+```
+
+The `deploy:vinext` script runs `vinext-cloudflare deploy` and needs `cf auth login` first. The
+production workflow below still deploys to Vercel.
+
 ## Content model
 
 Public pages live in `content/docs` as MDX, one folder per sidebar section (`getting-started`,

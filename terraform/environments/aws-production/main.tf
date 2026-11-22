@@ -38,14 +38,16 @@ module "control_plane" {
   secret_names    = var.secret_names
   alarm_topic_arn = var.alarm_topic_arn
   github_deploy   = var.github_deploy
+  ec2_sandboxes   = var.ec2_sandboxes
 
   config = merge({
     APP_NAME               = "Open-Inspect"
     LOG_LEVEL              = "info"
-    SANDBOX_PROVIDER       = "modal"
     UNSAFE_ALLOW_ALL_USERS = "false"
     TEAMS_ENFORCEMENT      = "shadow"
-  }, var.config)
+    },
+    try(var.ec2_sandboxes.ami_id, null) == null ? { SANDBOX_PROVIDER = "modal" } : {},
+  var.config)
 
   tags = { Environment = local.environment }
 }

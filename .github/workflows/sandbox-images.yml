@@ -29,6 +29,8 @@ jobs:
             base: amazonlinux:2023
           - provider: boat
             base: ubuntu:24.04
+          - provider: ec2
+            base: ubuntu:24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -43,8 +45,10 @@ jobs:
         run: |
           python3 packages/sandbox-images/cli.py lock --check
           uv run --frozen --project packages/sandbox-images --extra dev pytest packages/sandbox-images/tests
+      # Hosted runners live in Azure, so Ubuntu bases use the Azure archive
+      # rather than archive.ubuntu.com, which has had outages from these runners.
       - name: Build and verify the reference image on native amd64
         run: |
           bundle=$(python3 packages/sandbox-images/cli.py pack --provider ${{ matrix.provider }})
-          docker build --platform linux/amd64 --build-arg BASE_IMAGE=${{ matrix.base }} -f packages/sandbox-images/Dockerfile -t openinspect-image-contract "$bundle"
+          docker build --platform linux/amd64 --build-arg BASE_IMAGE=${{ matrix.base }} --build-arg OI_UBUNTU_MIRROR=http://azure.archive.ubuntu.com/ubuntu -f packages/sandbox-images/Dockerfile -t openinspect-image-contract "$bundle"
           docker run --rm --platform linux/amd64 openinspect-image-contract
