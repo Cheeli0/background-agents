@@ -54,11 +54,11 @@ describe("getSlackSettings", () => {
     expect(config.harness).toBe("opencode");
   });
 
-  it("drops an invalid default model", async () => {
-    const fetch = vi.fn().mockResolvedValue(settingsResponse({ model: "not-a-model" }));
+  it("keeps a retired default model so launches refuse it by name", async () => {
+    const fetch = vi.fn().mockResolvedValue(settingsResponse({ model: "claude-sonnet-4-6" }));
 
     const config = await getSlackSettings(makeEnv(fetch));
-    expect(config.defaultModel).toBeUndefined();
+    expect(config.defaultModel).toBe("anthropic/claude-sonnet-4-6");
   });
 
   it("returns no instructions when unset", async () => {

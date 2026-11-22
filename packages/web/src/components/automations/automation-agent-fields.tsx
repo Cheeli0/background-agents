@@ -28,6 +28,8 @@ interface AutomationAgentFieldsProps {
   enabledModelOptions: ModelCategory[];
   /** Why no listed model can be submitted, shown under the picker. */
   modelError?: string;
+  /** A non-blocking note about the saved model, shown under the picker. */
+  modelNotice?: string;
   onChange: (value: AutomationAgentDraft) => void;
 }
 
@@ -36,6 +38,7 @@ export function AutomationAgentFields({
   resolvedModel,
   enabledModelOptions,
   modelError = "",
+  modelNotice = "",
   onChange,
 }: AutomationAgentFieldsProps) {
   const reasoningConfig = getHarnessReasoningConfig(value.harness, resolvedModel);
@@ -131,6 +134,7 @@ export function AutomationAgentFields({
             {modelError}
           </p>
         )}
+        {modelNotice && <p className="mt-1 text-xs text-warning">{modelNotice}</p>}
       </div>
 
       <div>

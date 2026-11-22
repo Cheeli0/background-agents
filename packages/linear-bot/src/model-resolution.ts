@@ -52,8 +52,10 @@ const MODEL_LABEL_ALIASES = {
 
 /**
  * Extract model override from issue labels (e.g., "model:opus" → "anthropic/claude-opus-5-5").
+ * A label naming no supported model (often a retired one) is returned as written,
+ * so the webhook handler refuses it instead of ignoring it.
  */
-export function extractModelFromLabels(labels: Array<{ name: string }>): ValidModel | null {
+export function extractModelFromLabels(labels: Array<{ name: string }>): string | null {
   for (const label of labels) {
     const match = label.name.match(/^model:(.+)$/i);
     if (match) {
@@ -73,6 +75,7 @@ export function extractModelFromLabels(labels: Array<{ name: string }>): ValidMo
       // dotted catalog IDs (gpt-6.2-sol, glm-5.3-flash) are unaffected.
       const hyphenated = normalizeModelId(candidate.replace(/\./g, "-"));
       if (isValidModel(hyphenated)) return hyphenated;
+      return match[1];
     }
   }
   return null;

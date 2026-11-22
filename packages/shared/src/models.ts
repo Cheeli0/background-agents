@@ -546,7 +546,7 @@ export function resolveEnabledModel(options: {
   enabledModels?: readonly string[];
   fallbackModel?: string | null;
 }): ValidModel {
-  const fallback = getValidModelOrDefault(options.fallbackModel);
+  const fallback = getValidModel(options.fallbackModel) ?? DEFAULT_MODEL;
   const desired = getValidModel(options.model) ?? fallback;
   if (!options.enabledModels) return desired;
 

@@ -139,14 +139,14 @@ describe("extractModelFromLabels", () => {
   );
 
   it.each(["gpt-5.2", "gpt-5.2-codex", "opus-6"])(
-    "returns null for unsupported model:%s label",
+    "returns unsupported model:%s as written so the handler refuses it",
     (model) => {
-      expect(extractModelFromLabels([{ name: `model:${model}` }])).toBeNull();
+      expect(extractModelFromLabels([{ name: `model:${model}` }])).toBe(model);
     }
   );
 
-  it("returns null for unknown model label", () => {
-    expect(extractModelFromLabels([{ name: "model:unknown-model" }])).toBeNull();
+  it("returns an unknown model label as written", () => {
+    expect(extractModelFromLabels([{ name: "model:unknown-model" }])).toBe("unknown-model");
   });
 
   it("returns null when no model labels present", () => {

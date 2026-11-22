@@ -89,6 +89,21 @@ describe("resolveInlinePromptOptions", () => {
     });
   });
 
+  it("refuses overrides on a retired session or App Home model", () => {
+    for (const options of [{}, { reasoningEffort: "high" }, { model: "openai/gpt-6.2-sol" }]) {
+      expect(
+        resolveInlinePromptOptions(
+          options,
+          { model: "anthropic/claude-sonnet-4-6", reasoningEffort: "high" },
+          enabledModels
+        )
+      ).toEqual({
+        ok: false,
+        error: `Model "anthropic/claude-sonnet-4-6" is no longer supported. Choose a supported model. Start a new thread, or choose another model in the Slack app's Home tab.`,
+      });
+    }
+  });
+
   it("escapes Slack control tokens in validation errors", () => {
     expect(resolveInlinePromptOptions({ model: "<!channel>" }, defaults, enabledModels)).toEqual({
       ok: false,

@@ -8,6 +8,7 @@ import { ResourceTeamField } from "@/components/resource-team-field";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import { reconcileProviderSelectionsForHarness } from "@open-inspect/shared/harnesses";
 import { resolveHarnessModelSelection } from "@/lib/session-harness";
+import { isValidModel, UnsupportedModelError } from "@open-inspect/shared/models";
 import { SUBSCRIPTION_PROVIDER_IDS } from "@open-inspect/shared/types/provider-accounts";
 import { MAX_AUTOMATION_NAME_LENGTH } from "@open-inspect/shared/types/automations";
 import { useProviderAccounts } from "@/hooks/use-provider-accounts";
@@ -119,6 +120,13 @@ export function AutomationForm({
   const resolvedModel = modelSelection.model;
   const modelError =
     modelSelection.availability.status === "unavailable" ? modelSelection.availability.message : "";
+  // A saved model that was retired: the picker shows a supported one, and the
+  // automation keeps failing until it is saved with that choice.
+  const savedModel = initialValues?.model;
+  const retiredModelNotice =
+    mode === "edit" && savedModel && !isValidModel(savedModel)
+      ? `${new UnsupportedModelError(savedModel).message} Runs fail until you save a supported model.`
+      : "";
 
   // A harness switch drops pins the new harness cannot honour, so the form
   // never offers to save a configuration the server would refuse.
@@ -223,6 +231,7 @@ export function AutomationForm({
         resolvedModel={resolvedModel}
         enabledModelOptions={modelSelection.options}
         modelError={modelError}
+        modelNotice={retiredModelNotice}
         onChange={handleAgentChange}
       />
 

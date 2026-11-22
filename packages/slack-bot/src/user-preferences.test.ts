@@ -171,6 +171,33 @@ describe("updateUserPreferences", () => {
     expect(prefs?.reasoningEffort).toBe("none");
   });
 
+  it("keeps a retired stored model on unrelated preference updates", async () => {
+    const env = makeEnv();
+    await env.SLACK_KV.put(
+      "user_prefs:U123",
+      JSON.stringify({ userId: "U123", model: "anthropic/claude-sonnet-4-6", updatedAt: 1 })
+    );
+
+    await updateUserPreferences(env, "U123", { branch: "feature/test" });
+
+    expect(await getUserPreferences(env, "U123")).toEqual(
+      expect.objectContaining({ model: "anthropic/claude-sonnet-4-6", branch: "feature/test" })
+    );
+  });
+
+  it("updates preferences when the Slack default model is retired", async () => {
+    const env = makeEnv();
+
+    await updateUserPreferences(
+      env,
+      "U123",
+      { model: "anthropic/claude-haiku-4-5" },
+      { defaultModel: "anthropic/claude-sonnet-4-6" }
+    );
+
+    expect((await getUserPreferences(env, "U123"))?.model).toBe("anthropic/claude-haiku-4-5");
+  });
+
   it("preserves reasoning for the stored model on unrelated preference updates", async () => {
     const env = makeEnv();
     await env.SLACK_KV.put(
@@ -202,6 +229,16 @@ describe("resolveUserPreferences", () => {
     );
 
     expect(resolved.model).toBe("anthropic/claude-sonnet-5-5");
+    expect(resolved.modelOrigin).toBe("default");
+  });
+
+  it("keeps a retired Slack default as configured so launch refuses it", () => {
+    const resolved = resolveUserPreferences(
+      { userId: "U123", updatedAt: 1 },
+      "anthropic/claude-sonnet-4-6"
+    );
+
+    expect(resolved.model).toBe("anthropic/claude-sonnet-4-6");
     expect(resolved.modelOrigin).toBe("default");
   });
 

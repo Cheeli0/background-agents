@@ -1,6 +1,6 @@
 import type { SlackGlobalConfig } from "@open-inspect/shared/types/integrations";
 import { DEFAULT_HARNESS, harnessIdSchema, type HarnessId } from "@open-inspect/shared/harnesses";
-import { isValidModel } from "@open-inspect/shared/models";
+import { normalizeModelId } from "@open-inspect/shared/models";
 import { z } from "zod";
 import { signedControlPlaneFetch } from "./internal-auth";
 import { createLogger } from "./logger";
@@ -66,7 +66,8 @@ export async function getAuthoritativeSlackSettings(
     const { harness, model, sessionInstructions: instructions } = defaults;
     return {
       harness,
-      defaultModel: model && isValidModel(model) ? model : undefined,
+      // A retired default is kept as configured so launches refuse it by name.
+      defaultModel: model ? normalizeModelId(model) : undefined,
       sessionInstructions: instructions?.trim() ? instructions : undefined,
     };
   } catch (error) {

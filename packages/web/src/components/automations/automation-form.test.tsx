@@ -195,6 +195,27 @@ describe("automation cron submission", () => {
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("scheduleCron");
   });
 
+  it("warns that a saved retired model fails until a supported one is saved", () => {
+    render(
+      <AutomationForm
+        mode="edit"
+        submitting={false}
+        onSubmit={vi.fn()}
+        initialValues={{
+          name: "Nightly",
+          instructions: "Run tests",
+          repositories: singleRepository,
+          model: "anthropic/claude-sonnet-4-6",
+        }}
+      />
+    );
+    expect(
+      screen.getByText(
+        'Model "anthropic/claude-sonnet-4-6" is no longer supported. Choose a supported model. Runs fail until you save a supported model.'
+      )
+    ).toBeInTheDocument();
+  });
+
   it("allows editing instructions after a one-shot has fired without changing its time", () => {
     const onSubmit = vi.fn();
     const { container } = render(

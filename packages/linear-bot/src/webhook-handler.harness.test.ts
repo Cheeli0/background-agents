@@ -241,8 +241,18 @@ describe("handleAgentSessionEvent harness selection", () => {
   it.each([
     { source: "the deployment default", envDefaultModel: "openai/gpt-5" },
     { source: "integration settings", config: { model: "openai/gpt-5.3-codex-spark" } },
+    {
+      source: "a model label",
+      config: { allowLabelModelOverride: true },
+      labels: [{ id: "label-1", name: "model:sonnet-4-6" }],
+    },
   ])("refuses a retired model from $source instead of using another one", async (options) => {
-    const model = "envDefaultModel" in options ? options.envDefaultModel : options.config.model;
+    const model =
+      "labels" in options
+        ? "sonnet-4-6"
+        : "envDefaultModel" in options
+          ? options.envDefaultModel
+          : options.config.model;
     const { createBody, activities, paths } = await delegate({
       ...options,
       config: { harness: "opencode", ...("config" in options ? options.config : {}) },
