@@ -90,7 +90,7 @@ export function ModelReasoningSelector({
               <span className="hidden shrink-0 sm:inline">{harnessLabel}:</span>
             </>
           )}
-          <span className="max-w-[9rem] truncate sm:max-w-none">{modelLabel}</span>
+          <span className="max-w-36 truncate sm:max-w-none">{modelLabel}</span>
           {reasoningConfig && (
             <span className="shrink-0 text-secondary-foreground">{effortLabel}</span>
           )}

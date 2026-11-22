@@ -64,7 +64,7 @@ export function SessionAccessSelector({
           disabled={disabled}
           aria-label={`Session access: ${label}; team context: ${team?.name ?? "No team"}`}
           title={`Session access: ${label}. Team context: ${team?.name ?? "No team"}.`}
-          className="mt-2 flex max-w-full items-center gap-1.5 rounded-sm py-1 text-xs text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-2 flex max-w-full items-center gap-1.5 rounded-sm py-1 text-xs text-muted-foreground transition hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate">{label}</span>
@@ -130,7 +130,7 @@ export function SessionAccessSelector({
               aria-describedby={`${descriptionId}-context`}
               title="Groups the session; does not grant viewing access."
               density="compact"
-              className="w-auto min-w-0 max-w-[9.25rem] justify-start gap-1.5 border-0 bg-transparent px-0 text-xs"
+              className="w-auto min-w-0 max-w-37 justify-start gap-1.5 border-0 bg-transparent px-0 text-xs"
             >
               <UsersIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <SelectValue placeholder="Choose a team" />

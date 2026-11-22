@@ -62,6 +62,18 @@ which settings apply. The agent sees all clones side by side and can make coordi
 them; pushes and pull requests are per-repository, so one session can produce PRs in several
 repositories. The session sidebar lists every repository with its branch and any PR created for it.
 
+The supervisor writes a generated `/workspace/AGENTS.md` that lists the members, the working branch
+and, by absolute path, each member's own instructions (`AGENTS.md`, `CLAUDE.md`,
+`.claude/AGENTS.md`, `.claude/CLAUDE.md` and `.claude/rules/`). OpenCode, Codex, code-server and the
+web terminal start in `/workspace`. The Claude Agent harness starts in the primary checkout instead
+(or in `/workspace` if that checkout is missing), because Claude Code takes `.claude/settings.json`
+(hooks included) only from where it starts; the other members with a checkout are passed as
+`--add-dir` (one without is skipped), so their skills, commands and agents load too, as do the
+`enabledPlugins` and `extraKnownMarketplaces` keys of their settings. Hooks and other settings in
+non-primary members' `settings.json` don't run (a plugin a member enables brings its own hooks), and
+their `CLAUDE.md` files and rules don't load on their own: the agent reads them through the pointers
+in the generated `AGENTS.md`.
+
 GitHub-bot sessions open the webhook's repository, unless that repository's metadata names a default
 environment (`defaultEnvironmentId` via the repo-metadata API) — then a PR review or @mention opens
 that environment's full workspace, provided the environment still contains the trigger repository.
@@ -764,8 +776,10 @@ provider policy, select an active account, or choose API-key mode. Automations c
 choices or resolve current defaults each run. Child sessions copy their parent's D1 auth rows, and
 later default changes do not move existing sessions between accounts.
 
-In account mode, the sandbox receives only a managed marker. Provider API keys and legacy OAuth
-fields for that provider are suppressed. The runtime plugin calls the sandbox-authenticated
+In account mode, the sandbox receives a managed marker in place of the provider's credentials.
+Provider API keys and legacy OAuth fields for that provider are suppressed, except that a
+user-supplied API key stays readable by sandbox processes under `OPENINSPECT_USER_<KEY>`, a name no
+harness authenticates with. The runtime plugin calls the sandbox-authenticated
 `POST /sessions/:id/provider-auth/:provider/access-token` endpoint; the control plane reads the
 trusted D1 session binding using the sandbox-authenticated session ID, refreshes the encrypted
 account credential, and returns short-lived access with `Cache-Control: no-store`. Sandbox startup

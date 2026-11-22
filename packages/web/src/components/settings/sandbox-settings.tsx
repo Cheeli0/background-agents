@@ -1,7 +1,7 @@
 "use client";
 
 import { useRepos } from "@/hooks/use-repos";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronDownIcon, PlusIcon } from "@/components/ui/icons";
 import { Combobox, FIELD_COMBOBOX_TRIGGER_CLASS } from "@/components/ui/combobox";
@@ -70,6 +70,8 @@ interface SandboxScopeModel {
  *   overrides, mirroring what its sessions resolve beneath the environment
  *   layer.
  */
+const SAVE_SUCCESS_DISPLAY_MS = 2000;
+
 function useSandboxSettingsScope(
   scope: "global" | "repo" | "environment",
   owner?: string,
@@ -164,6 +166,12 @@ export function SandboxSettingsEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // Hide the saved confirmation after a moment, and drop the timer if the editor unmounts first.
+  useEffect(() => {
+    if (!success) return;
+    const timer = setTimeout(() => setSuccess(false), SAVE_SUCCESS_DISPLAY_MS);
+    return () => clearTimeout(timer);
+  }, [success]);
 
   const { values, hasChanges, result } = resolveSandboxSettingsDraft({
     isGlobal,
@@ -226,7 +234,6 @@ export function SandboxSettingsEditor({
       await mutate();
       setDraft({});
       setSuccess(true);
-      setTimeout(() => setSuccess(false), 2000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
@@ -705,7 +712,7 @@ export function SandboxSettingsPage() {
           )}
         >
           <span className="truncate">{displayRepoName}</span>
-          <ChevronDownIcon className="w-3 h-3 flex-shrink-0" />
+          <ChevronDownIcon className="w-3 h-3 shrink-0" />
         </Combobox>
       </div>
 

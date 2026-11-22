@@ -30,7 +30,7 @@ on:
       # Unit tests hold the Worker's cron triggers and queue consumers equal
       # to what Terraform declares, so a Terraform-only change must run them.
       - "terraform/environments/production/**"
-      - "vitest.workspace.ts"
+      - "vitest.config.ts"
       - "!**/*.md"
       # Keep README translation checks active for documentation-only changes.
       - "README.md"
@@ -71,7 +71,7 @@ on:
       # Unit tests hold the Worker's cron triggers and queue consumers equal
       # to what Terraform declares, so a Terraform-only change must run them.
       - "terraform/environments/production/**"
-      - "vitest.workspace.ts"
+      - "vitest.config.ts"
       - "!**/*.md"
       # Keep README translation checks active for documentation-only changes.
       - "README.md"
@@ -233,6 +233,9 @@ jobs:
 
       - name: Build docs package
         run: npm run build -w @open-inspect/docs
+
+      - name: Build docs package for Cloudflare (vinext)
+        run: npm run build:vinext -w @open-inspect/docs
 
   test-cp-unit:
     name: Test (control-plane unit)

@@ -178,6 +178,7 @@ describe("ModelsSettings", () => {
   it("uses external cache updates for both the switches and the next save", async () => {
     let updateCache!: ReturnType<typeof useSWRConfig>["mutate"];
     function CacheAccess() {
+      // eslint-disable-next-line react-hooks/globals -- test harness captures SWR mutate for the assertions below.
       updateCache = useSWRConfig().mutate;
       return <ModelsSettings />;
     }

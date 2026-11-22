@@ -176,11 +176,11 @@ export function AuditEventCard({ event }: { event: AuditEvent }) {
         <dl className="mt-3 grid min-w-0 gap-x-5 gap-y-2 text-xs sm:grid-cols-2">
           <div className="min-w-0">
             <dt className="text-muted-foreground">Actor</dt>
-            <dd className="break-words font-mono text-foreground">{actorSummary(event)}</dd>
+            <dd className="wrap-break-word font-mono text-foreground">{actorSummary(event)}</dd>
           </div>
           <div className="min-w-0">
             <dt className="text-muted-foreground">Resource</dt>
-            <dd className="break-words font-mono text-foreground">{resourceSummary(event)}</dd>
+            <dd className="wrap-break-word font-mono text-foreground">{resourceSummary(event)}</dd>
           </div>
           <div className="min-w-0">
             <dt className="text-muted-foreground">Request</dt>
@@ -188,12 +188,12 @@ export function AuditEventCard({ event }: { event: AuditEvent }) {
           </div>
           <div className="min-w-0">
             <dt className="text-muted-foreground">Reason</dt>
-            <dd className="break-words font-mono text-foreground">{event.reasonCode}</dd>
+            <dd className="wrap-break-word font-mono text-foreground">{event.reasonCode}</dd>
           </div>
           {interpretation.kind === "authorization_decision" && (
             <div className="min-w-0">
               <dt className="text-muted-foreground">HTTP response</dt>
-              <dd className="break-words font-mono text-foreground">
+              <dd className="wrap-break-word font-mono text-foreground">
                 {interpretation.httpStatus === null
                   ? "Not recorded"
                   : formatHttpStatus(interpretation.httpStatus)}
@@ -203,10 +203,10 @@ export function AuditEventCard({ event }: { event: AuditEvent }) {
         </dl>
 
         <details className="mt-3 text-xs">
-          <summary className="w-fit cursor-pointer rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+          <summary className="w-fit cursor-pointer rounded-sm text-muted-foreground outline-hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
             Structured details
           </summary>
-          <pre className="mt-2 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-[11px] leading-5 text-foreground">
+          <pre className="mt-2 max-w-full overflow-x-auto whitespace-pre-wrap wrap-break-word rounded-md bg-muted p-3 font-mono text-[11px] leading-5 text-foreground">
             {JSON.stringify(
               {
                 eventId: event.id,
@@ -296,7 +296,7 @@ export function AuditLogSettings() {
         ref={headingRef}
         id="audit-log-heading"
         tabIndex={-1}
-        className="mb-1 rounded-sm text-xl font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="mb-1 rounded-sm text-xl font-semibold text-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       >
         Audit log
       </h2>

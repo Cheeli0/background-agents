@@ -23,14 +23,14 @@ describe("repository links", () => {
 
   it("opens the GitHub editor, not the file view, on the published branch", () => {
     expect(editOnGitHubUrl("getting-started/quickstart.mdx")).toBe(
-      "https://github.com/ColeMurray/background-agents/edit/main/packages/docs/content/docs/getting-started/quickstart.mdx"
+      "https://github.com/open-inspect/background-agents/edit/main/packages/docs/content/docs/getting-started/quickstart.mdx"
     );
   });
 
   it("pre-fills a documentation feedback issue", () => {
     const url = new URL(feedbackIssueUrl("Quickstart"));
     expect(url.origin + url.pathname).toBe(
-      "https://github.com/ColeMurray/background-agents/issues/new"
+      "https://github.com/open-inspect/background-agents/issues/new"
     );
     expect(url.searchParams.get("title")).toBe("Docs feedback: Quickstart");
     expect(url.searchParams.get("labels")).toBe("documentation");

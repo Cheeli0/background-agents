@@ -67,7 +67,7 @@ export function AnalyticsSessionSources({ entries }: { entries: AnalyticsSession
             aria-controls={usersId}
             onClick={() => setSelected(null)}
             className={cn(
-              "rounded px-1.5 py-0.5 text-xs font-medium text-accent hover:bg-accent-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring",
+              "rounded px-1.5 py-0.5 text-xs font-medium text-accent hover:bg-accent-muted focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring",
               active === null && "bg-accent-muted"
             )}
           >
@@ -99,7 +99,7 @@ export function AnalyticsSessionSources({ entries }: { entries: AnalyticsSession
           aria-label={`Users for ${sourceLabel}`}
           // Focusable so keyboard users can scroll a long list.
           tabIndex={0}
-          className="mt-2 max-h-72 overflow-y-auto rounded px-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+          className="mt-2 max-h-72 overflow-y-auto rounded px-2 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
         >
           {users.map((user) => (
             <li
@@ -107,7 +107,7 @@ export function AnalyticsSessionSources({ entries }: { entries: AnalyticsSession
               className="flex items-baseline justify-between gap-3 border-b border-border-muted py-1.5 text-sm last:border-0"
             >
               <span className="min-w-0">
-                <span className="block break-words">{user.name}</span>
+                <span className="block wrap-break-word">{user.name}</span>
                 {user.key === ANALYTICS_UNKNOWN_USER_KEY || (nameCounts.get(user.name) ?? 0) > 1 ? (
                   <span className="block break-all text-xs text-muted-foreground">
                     {user.key === ANALYTICS_UNKNOWN_USER_KEY ? "No recorded user" : user.key}
@@ -116,7 +116,7 @@ export function AnalyticsSessionSources({ entries }: { entries: AnalyticsSession
               </span>
               <span className="shrink-0 tabular-nums">
                 {formatAnalyticsCount(user.sessions)}
-                <span className="ml-2 inline-block min-w-[2.75rem] text-right text-xs text-muted-foreground">
+                <span className="ml-2 inline-block min-w-11 text-right text-xs text-muted-foreground">
                   {formatAnalyticsRatio(user.sessions / selectedTotal)}
                 </span>
               </span>
@@ -132,7 +132,7 @@ export function AnalyticsSessionSources({ entries }: { entries: AnalyticsSession
 export function AnalyticsAttributionNote() {
   return (
     <details>
-      <summary className="w-fit cursor-pointer rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+      <summary className="w-fit cursor-pointer rounded focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring">
         How attribution works
       </summary>
       <p className="mt-2 leading-5">

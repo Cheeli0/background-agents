@@ -8,17 +8,28 @@ import { createLogger, parseLogLevel } from "../logger";
 import { readEnvConfig, readNodeHostSettings } from "./config";
 import { startNodeHost } from "./host";
 import { createS3ObjectStorage, readS3ObjectStorageConfig } from "./s3-object-storage";
+import { createEc2SandboxApi } from "./ec2-sandbox-api";
+import { resolveSandboxBackendName } from "../sandbox/provider-name";
 
 /** Past the drain budget, how much longer the process gets before it is forced down. */
 const FORCE_EXIT_GRACE_MS = 5_000;
 
 const log = createLogger("node-main", {}, parseLogLevel(process.env.LOG_LEVEL));
 
+function requireEc2SandboxRegion(region: string | undefined): string {
+  if (!region?.trim()) throw new Error("EC2_SANDBOX_REGION is required when SANDBOX_PROVIDER=ec2");
+  return region.trim();
+}
+
 async function main(): Promise<void> {
   const settings = readNodeHostSettings(process.env);
   const config = readEnvConfig(process.env);
   const objectStorage = createS3ObjectStorage(readS3ObjectStorageConfig(process.env));
-  const host = await startNodeHost({ config, settings, objectStorage });
+  const ec2Sandboxes =
+    resolveSandboxBackendName(config.SANDBOX_PROVIDER) === "ec2"
+      ? createEc2SandboxApi(requireEc2SandboxRegion(config.EC2_SANDBOX_REGION))
+      : undefined;
+  const host = await startNodeHost({ config, settings, objectStorage, ec2Sandboxes });
 
   const stop = (signal: NodeJS.Signals): void => {
     log.info("node_host.signal", { event: "node_host.signal", signal });

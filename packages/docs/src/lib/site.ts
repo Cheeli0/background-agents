@@ -4,10 +4,10 @@ export const site = {
   description: "Learn how to delegate, monitor, review, and operate background coding agents.",
   url: "https://docs.backgroundagents.dev",
   productUrl: "https://backgroundagents.dev",
-  repositoryUrl: "https://github.com/ColeMurray/background-agents",
+  repositoryUrl: "https://github.com/open-inspect/background-agents",
   /** The one place that knows where public content lives in the repository. */
   repository: {
-    owner: "ColeMurray",
+    owner: "open-inspect",
     name: "background-agents",
     branch: "main",
     contentDirectory: "packages/docs/content/docs",

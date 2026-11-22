@@ -7,7 +7,7 @@
       "entry": [
         "scripts/cf-logs.ts",
         "scripts/merge-split-users.ts",
-        "vitest.workspace.ts",
+        "vitest.config.ts",
         "packages/sandbox-runtime/src/sandbox_runtime/bin/upload-media.js",
         "packages/sandbox-runtime/src/sandbox_runtime/plugins/codex-auth-plugin.js",
         "packages/sandbox-runtime/src/sandbox_runtime/plugins/inspect-plugin.js",

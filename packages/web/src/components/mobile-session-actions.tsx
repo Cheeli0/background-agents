@@ -64,7 +64,7 @@ export function MobileSessionActions({
               ref={triggerRef}
               variant="outline"
               size="sm"
-              className="!px-2"
+              className="px-2!"
               aria-label="Session actions"
             >
               <MoreIcon className="w-4 h-4" />
@@ -79,7 +79,7 @@ export function MobileSessionActions({
                   >
                     <span
                       aria-hidden="true"
-                      className={`h-2 w-2 flex-shrink-0 rounded-full ${sandbox.presentation.dot}${sandbox.presentation.pulse ? " animate-pulse motion-reduce:animate-none" : ""}`}
+                      className={`h-2 w-2 shrink-0 rounded-full ${sandbox.presentation.dot}${sandbox.presentation.pulse ? " animate-pulse motion-reduce:animate-none" : ""}`}
                     />
                     Sandbox {sandbox.presentation.label}
                   </span>
@@ -92,7 +92,7 @@ export function MobileSessionActions({
                     </span>
                   )}
                   {sandbox.reason && (
-                    <span className="mt-1.5 block max-h-24 max-w-64 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-muted p-2 font-mono text-[11px] leading-4 text-destructive">
+                    <span className="mt-1.5 block max-h-24 max-w-64 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-sm bg-muted p-2 font-mono text-[11px] leading-4 text-destructive">
                       {sandbox.reason}
                     </span>
                   )}

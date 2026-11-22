@@ -41,7 +41,7 @@ function TrendTooltip({
   // The newest bucket covers only part of today.
   const partial = date === new Date().toISOString().slice(0, 10);
   return (
-    <div className="min-w-[10rem] rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md">
+    <div className="min-w-40 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md">
       <div className="mb-1.5 text-muted-foreground">
         {TOOLTIP_DATE_FORMATTER.format(new Date(`${date}T00:00:00Z`))}
         {partial ? " · today so far" : null}

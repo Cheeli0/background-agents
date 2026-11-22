@@ -52,3 +52,8 @@ output "github_oidc_provider_arn" {
   description = "Pass to the other environment's `github_deploy.oidc_provider_arn`; the provider is one per account."
   value       = module.control_plane.github_oidc_provider_arn
 }
+
+output "ec2_sandbox_image_build_env" {
+  description = "Environment for building the EC2 sandbox base AMI; null unless ec2_sandboxes is set."
+  value       = module.control_plane.ec2_sandbox_image_build_env
+}

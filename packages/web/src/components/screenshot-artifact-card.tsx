@@ -62,7 +62,7 @@ function ArtifactPreview({
   const [hasError, setHasError] = useState(false);
 
   return (
-    <div className="relative aspect-[16/10] overflow-hidden bg-muted">
+    <div className="relative aspect-16/10 overflow-hidden bg-muted">
       {!hasError && isVideo ? (
         <video
           src={mediaUrl}
@@ -98,8 +98,8 @@ function ArtifactPreview({
       ) : null}
       {isVideo && !hasError && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-background/80 text-foreground shadow-sm">
-            <span className="ml-0.5 h-0 w-0 border-y-[7px] border-l-[11px] border-y-transparent border-l-current" />
+          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-background/80 text-foreground shadow-xs">
+            <span className="ml-0.5 h-0 w-0 border-y-[7px] border-l-11 border-y-transparent border-l-current" />
           </span>
         </div>
       )}

@@ -6,6 +6,21 @@ export DEBIAN_FRONTEND=noninteractive
 audio_library=libasound2
 if [[ "$ID" == ubuntu && "$VERSION_ID" == 24.04 ]]; then audio_library=libasound2t64; fi
 install -d -m 1777 /tmp
+# Retry transient archive failures, and make `apt-get update` fail when an index
+# cannot be fetched instead of warning and failing later with "no installation
+# candidate". OI_UBUNTU_MIRROR (e.g. a cloud-local archive) replaces
+# archive.ubuntu.com; security.ubuntu.com is left alone.
+cat > /etc/apt/apt.conf.d/80openinspect-network <<'APT'
+Acquire::Retries "5";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+APT::Update::Error-Mode "any";
+APT
+if [[ "$ID" == ubuntu && -n "${OI_UBUNTU_MIRROR:-}" ]]; then
+  for sources in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+    if [[ -f "$sources" ]]; then sed -i "s#http://archive.ubuntu.com/ubuntu#${OI_UBUNTU_MIRROR%/}#g" "$sources"; fi
+  done
+fi
 apt-get update
 apt-get install -y --no-install-recommends git curl build-essential ca-certificates gnupg openssh-client jq unzip \
   passwd adduser sysvinit-utils procps util-linux xz-utils ffmpeg xvfb fluxbox x11vnc \

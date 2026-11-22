@@ -27,18 +27,19 @@
     "version": "152.0.7977.82",
     "sha256": "0704631fb3e4f741092e08f55272f90abc3e307f991f05f332924364415b02e0"
   },
-  "opencode": "1.18.29",
+  "opencode": "1.19.5",
   "opencodeMinimum": "1.18.15",
   "opencodeMinimumReason": "Earlier releases order turns by wrapped message IDs rather than creation time.",
   "agentBrowser": "0.37.0",
   "agentBrowserSha256": "78e0c5a14a7fa1f3d1ae2acdbdcc94a047b435b998a8c505fcc49d7fa4935a49",
   "pnpm": "10.34.5",
-  "bun": "1.4.2",
+  "bun": "1.4.5",
   "zod": "4.6.6",
   "npmOverrides": {
-    "toml": "5.0.1"
+    "toml": "5.0.1",
+    "zod": "4.6.6"
   },
-  "npmOverridesReason": "effect@4.0.0-beta.83, pinned by @opencode-ai/plugin, requires toml ^4, and toml before 5.0.1 has toml.parse() CPU DoS advisories.",
+  "npmOverridesReason": "effect@4.0.0-beta.83, pinned by @opencode-ai/plugin, requires toml ^4, and toml before 5.0.1 has toml.parse() CPU DoS advisories. @opencode-ai/plugin pins zod 4.1.8, which is affected by a memory exhaustion advisory fixed in 4.6.6.",
   "python": "3.12.12",
   "uv": {
     "version": "0.9.7",
@@ -55,6 +56,10 @@
   "codeServer": {
     "version": "4.109.5",
     "sha256": "15ca7472e4522f214e01143673559938536571d7152c5fca3cb42966e79a688b"
+  },
+  "ripgrep": {
+    "version": "15.2.0",
+    "sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c"
   },
   "ttyd": {
     "version": "1.7.7",
@@ -77,7 +82,7 @@
     "sha256": "5066103959ef4e9b10f37e5a148627360dd8414e4cf8a7db92bdbd022e728aaa"
   },
   "codex": {
-    "version": "0.163.0",
-    "sha256": "582646c6bf0561eb0de540f7fc85b9121b0091a826bc6e96830b7f1722122182"
+    "version": "0.170.0",
+    "sha256": "a77ff87be7ba809d715728270a78f5ce3527dc07529416d1ef8929b90b8475eb"
   }
 }

@@ -320,7 +320,7 @@ export function EnvironmentsSettings({
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
                     {prebuildsSupported && (access.canManage || access.canViewImage) && (
                       <>
                         {access.canViewImage && (

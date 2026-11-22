@@ -22,7 +22,7 @@ relatedCode:
 
 Mention or assign the Linear Agent on an issue to start a session, then use Linear for progress, results, and follow-ups.
 
-This page is for people using Linear day to day. Installing the Linear OAuth app and deploying the worker is operator work; see the [Linear bot setup guide](https://github.com/ColeMurray/background-agents/blob/main/packages/linear-bot/README.md) in the repository.
+This page is for people using Linear day to day. Installing the Linear OAuth app and deploying the worker is operator work; see the [Linear bot setup guide](https://github.com/open-inspect/background-agents/blob/main/packages/linear-bot/README.md) in the repository.
 
 ## Quick start
 
@@ -111,7 +111,7 @@ Please handle this in acme/billing-api.
 
 If OpenInspect asks for clarification, reply with `owner/repo`; that answer is used on the next attempt.
 
-Administrators can map Linear projects or teams to repositories, and those mappings can point at an environment instead of a single repository, so an issue opens the environment's full workspace. Mapping setup is in the [Linear bot setup guide](https://github.com/ColeMurray/background-agents/blob/main/packages/linear-bot/README.md).
+Administrators can map Linear projects or teams to repositories, and those mappings can point at an environment instead of a single repository, so an issue opens the environment's full workspace. Mapping setup is in the [Linear bot setup guide](https://github.com/open-inspect/background-agents/blob/main/packages/linear-bot/README.md).
 
 If the resolved repository is outside the Linear **Repository Scope**, Linear shows an error and no session starts.
 
@@ -202,7 +202,7 @@ Claude Agent sessions started from Linear are automated sessions: they use the d
   <Accordion title="The agent does not appear in Linear">
     The Linear OAuth app must be installed in the workspace with the agent scopes needed for
     mentions and assignment. That is operator setup; see the [Linear bot setup
-    guide](https://github.com/ColeMurray/background-agents/blob/main/packages/linear-bot/README.md).
+    guide](https://github.com/open-inspect/background-agents/blob/main/packages/linear-bot/README.md).
 
 </Accordion>
   <Accordion title="A request does not start">
@@ -210,7 +210,7 @@ Claude Agent sessions started from Linear are automated sessions: they use the d
     a repository OpenInspect can access. If nothing starts even then, an operator can check the
     worker logs for a client-credentials failure; the diagnosis steps are in the repository's
     [Linear integration
-    guide](https://github.com/ColeMurray/background-agents/blob/main/docs/integrations/LINEAR.md).
+    guide](https://github.com/open-inspect/background-agents/blob/main/docs/integrations/LINEAR.md).
 
 </Accordion>
   <Accordion title="OpenInspect asks which repository to use">
@@ -229,7 +229,7 @@ Claude Agent sessions started from Linear are automated sessions: they use the d
     same Agent session to produce a new terminal activity, or start a new Agent session if the
     mapping has expired. The log-based diagnosis for operators is in the repository's [Linear
     integration
-    guide](https://github.com/ColeMurray/background-agents/blob/main/docs/integrations/LINEAR.md).
+    guide](https://github.com/open-inspect/background-agents/blob/main/docs/integrations/LINEAR.md).
 
 </Accordion>
   <Accordion title="The wrong model was used">

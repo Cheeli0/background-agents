@@ -1,6 +1,7 @@
 import { getLLMText, source } from "@/lib/source";
 
-export const revalidate = false;
+// Prerendered at build time. Not `revalidate = false`: vinext reads that as ISR.
+export const dynamic = "force-static";
 
 export async function GET() {
   const content = await Promise.all(source.getPages().map(getLLMText));

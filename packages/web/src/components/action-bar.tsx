@@ -122,7 +122,7 @@ export function ActionBar({
         {/* More menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="!px-2" aria-label="More session actions">
+            <Button variant="outline" size="sm" className="px-2!" aria-label="More session actions">
               <MoreIcon className="w-4 h-4" />
             </Button>
           </DropdownMenuTrigger>

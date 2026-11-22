@@ -36,6 +36,10 @@ def build_image(root: Path, provider: str) -> dict[str, Any]:
             root / "packages/boat-infra",
             ["uv", "run", "--frozen", "python", "build-template.py"],
         ),
+        "ec2": (
+            root / "packages/ec2-infra",
+            ["uv", "run", "--frozen", "python", "build-ami.py"],
+        ),
     }
     if provider == "vercel":
         subprocess.run(["npm", "run", "build", "-w", "@open-inspect/shared"], cwd=root, check=True)

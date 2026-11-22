@@ -348,7 +348,7 @@ export function SessionChangesPanel({
           onClose();
         }
       }}
-      className="flex h-full min-h-0 min-w-0 flex-col bg-background outline-none"
+      className="flex h-full min-h-0 min-w-0 flex-col bg-background outline-hidden"
     >
       <div className="flex min-h-12 shrink-0 items-center gap-3 border-b border-border px-3">
         <button

@@ -61,7 +61,7 @@ const unrelated = [
   "ruff.toml",
   ".prettierrc",
   ".prettierignore",
-  "vitest.workspace.ts",
+  "vitest.config.ts",
   "scripts/lint-complexity.mjs",
   "scripts/lint-sql-portability.test.mjs",
   "scripts/sql-portability-baseline.json",

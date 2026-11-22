@@ -171,7 +171,7 @@ export function ImagesSettings() {
                   </span>
                 </div>
 
-                <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+                <div className="flex items-center gap-3 shrink-0 ml-4">
                   <ImageBuildStatus
                     isEnabled={isEnabled}
                     image={
@@ -241,7 +241,7 @@ function ImagesSettingsSkeleton({ showRebuild }: { showRebuild: boolean }) {
               <div className="h-5 w-9 shrink-0 bg-muted rounded-full" />
               <div className="h-4 w-44 bg-muted rounded" />
             </div>
-            <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+            <div className="flex items-center gap-3 shrink-0 ml-4">
               <div className="h-3 w-16 bg-muted rounded" />
               {showRebuild && <div className="size-7 bg-muted rounded" />}
             </div>

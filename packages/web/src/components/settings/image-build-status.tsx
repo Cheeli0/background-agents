@@ -39,7 +39,7 @@ export function ImageBuildStatus({
     return (
       <div className="text-right">
         <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-success flex-shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-success shrink-0" />
           <span className="text-xs text-foreground">
             Ready {formatRelativeTime(image.createdAt)}
           </span>
@@ -54,7 +54,7 @@ export function ImageBuildStatus({
   if (image.status === "building") {
     return (
       <div className="flex items-center gap-1.5">
-        <span className="w-2 h-2 rounded-full bg-warning animate-pulse flex-shrink-0" />
+        <span className="w-2 h-2 rounded-full bg-warning animate-pulse shrink-0" />
         <span className="text-xs text-foreground">
           Building... {formatRelativeTime(image.createdAt)}
         </span>
@@ -66,7 +66,7 @@ export function ImageBuildStatus({
     return (
       <div className="text-right">
         <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-destructive flex-shrink-0" />
+          <span className="w-2 h-2 rounded-full bg-destructive shrink-0" />
           <span className="text-xs text-foreground">Failed</span>
         </div>
         {image.errorMessage && (
@@ -76,7 +76,7 @@ export function ImageBuildStatus({
                 {image.errorMessage}
               </span>
             </TooltipTrigger>
-            <TooltipContent className="max-w-md overflow-visible whitespace-pre-wrap break-words">
+            <TooltipContent className="max-w-md overflow-visible whitespace-pre-wrap wrap-break-word">
               {image.errorMessage}
             </TooltipContent>
           </Tooltip>

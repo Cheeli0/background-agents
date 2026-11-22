@@ -843,14 +843,14 @@ export function McpServersSettings() {
                     disabled={!canManage}
                   >
                     <ChevronRightIcon
-                      className={`w-3 h-3 text-muted-foreground flex-shrink-0 transition-transform ${
+                      className={`w-3 h-3 text-muted-foreground shrink-0 transition-transform ${
                         isExpanded ? "rotate-90" : ""
                       }`}
                     />
                     {server.type === "remote" ? (
-                      <GlobeIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      <GlobeIcon className="w-4 h-4 text-muted-foreground shrink-0" />
                     ) : (
-                      <TerminalIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      <TerminalIcon className="w-4 h-4 text-muted-foreground shrink-0" />
                     )}
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-foreground truncate">
@@ -873,7 +873,7 @@ export function McpServersSettings() {
                   </button>
 
                   {canManage && (
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className="flex items-center gap-1 shrink-0">
                       <Switch
                         checked={server.enabled}
                         onCheckedChange={() => handleToggle(server)}

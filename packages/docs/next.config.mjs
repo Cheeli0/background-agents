@@ -3,8 +3,8 @@ import { createMDX } from "fumadocs-mdx/next";
 const withMDX = createMDX();
 
 /**
- * The docs site is built and served by Vercel (`vercel build` then
- * `vercel deploy --prebuilt`), so it needs no `output: "standalone"` bundle.
+ * `next dev` and `next build` still work. For Cloudflare, vinext builds the same app
+ * through `vite.config.ts` and `cloudflare.config.ts` (`npm run build:vinext`).
  * Turbopack finds the monorepo root on its own from the root `package-lock.json`.
  *
  * @type {import("next").NextConfig}

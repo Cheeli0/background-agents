@@ -348,6 +348,8 @@ export async function handleCreateSession(
     vncEnabled,
     sandboxSettings,
     spawnSource,
+    // Only the GitHub bot's own service principal can mark a review session.
+    githubReview: spawnSource === "github-bot" && body.githubReview === true,
     managedSkills: resolvedPin(managedSkillsManifest),
     providerAuth,
   };

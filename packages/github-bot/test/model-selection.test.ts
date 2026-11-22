@@ -11,7 +11,7 @@ const enabledModels = [
   "anthropic/claude-sonnet-4-6",
   "anthropic/claude-haiku-4-5",
   "openai/gpt-5.6-sol",
-  "opencode/kimi-k3",
+  "opencode/kimi-k2.6",
 ] satisfies ValidModel[];
 
 describe("applyInlineModelOverrides", () => {
@@ -88,7 +88,7 @@ describe("applyInlineModelOverrides", () => {
     });
     expect(
       applyInlineModelOverrides(
-        { model: "opencode/kimi-k3", reasoningEffort: "high" },
+        { model: "opencode/kimi-k2.6", reasoningEffort: "high" },
         defaults,
         enabledModels,
         harness
@@ -96,7 +96,7 @@ describe("applyInlineModelOverrides", () => {
     ).toEqual({
       ok: false,
       message:
-        "Reasoning effort `high` is not valid for `opencode/kimi-k3`. This model does not support reasoning controls.",
+        "Reasoning effort `high` is not valid for `opencode/kimi-k2.6`. This model does not support reasoning controls.",
     });
   });
 

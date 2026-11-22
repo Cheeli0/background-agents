@@ -173,7 +173,7 @@ export function AutomationTargetPicker({
             <button
               id="automation-repository-configuration"
               type="button"
-              className="flex w-full items-center gap-2 rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground transition hover:border-foreground/20 focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+              className="flex w-full items-center gap-2 rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground transition hover:border-foreground/20 focus-visible:border-ring focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40"
               aria-labelledby="automation-repository-configuration-label"
             >
               {selectedEnvironmentIds.length > 0 && selectedRepoNames.length === 0 ? (
@@ -194,7 +194,7 @@ export function AutomationTargetPicker({
           </PopoverTrigger>
           <PopoverContent
             align="start"
-            className="w-[min(34rem,calc(100vw-2rem))] p-0 sm:w-[var(--radix-popover-trigger-width)]"
+            className="w-[min(34rem,calc(100vw-2rem))] p-0 sm:w-(--radix-popover-trigger-width)"
           >
             <AutomationTargetPickerMenu
               query={query}

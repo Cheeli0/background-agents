@@ -20,3 +20,8 @@ control_plane_image_tag = "latest"
 #   ALLOWED_GITHUB_ORGS = "your-org"
 #   WEB_APP_URL         = "https://staging-app.example.com"
 # }
+
+# Optional: run sandboxes as EC2 instances in this account instead of on Modal.
+# Apply with `{}` first, build the AMI with `terraform output
+# ec2_sandbox_image_build_env`, then name it. docs/EC2_SANDBOX_PROVIDER.md.
+# ec2_sandboxes = { ami_id = "ami-0123456789abcdef0" }

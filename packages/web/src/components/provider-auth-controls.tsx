@@ -114,7 +114,7 @@ export function ProviderAuthControls({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className={`rounded p-1 transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${value ? "text-accent" : "text-muted-foreground"}`}
+            className={`rounded p-1 transition hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${value ? "text-accent" : "text-muted-foreground"}`}
             aria-label={`${providerName} authentication options, ${triggerSelectionLabel}`}
             title={`${providerName} authentication`}
             disabled={disabled}

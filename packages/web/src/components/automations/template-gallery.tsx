@@ -21,7 +21,7 @@ import {
   SlackIcon,
 } from "@/components/ui/icons";
 
-const ICON_CLASS = "w-4 h-4 flex-shrink-0";
+const ICON_CLASS = "w-4 h-4 shrink-0";
 
 const TRIGGER_LABELS: Record<string, string> = {
   schedule: "Schedule",

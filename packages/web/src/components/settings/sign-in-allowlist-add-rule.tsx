@@ -73,7 +73,7 @@ export function SignInAllowlistAddRule({
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          className="h-11 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed"
+          className="h-11 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus-visible:outline-hidden disabled:cursor-not-allowed"
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onChange={(event) => {

@@ -245,6 +245,8 @@ export async function startSession(
         scmLogin: sender.login,
         scmUserId: String(sender.id),
         scmAvatarUrl: sender.avatar_url,
+        // Comment and review-thread sessions answer a mention; only these submit a review.
+        githubReview: action === "review" || action === "auto_review",
       });
       if (!creation.ok) {
         const { status, code, body } = creation;

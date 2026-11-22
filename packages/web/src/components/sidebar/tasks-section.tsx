@@ -38,20 +38,20 @@ function TaskStatusIcon({ status }: { status: Task["status"] }) {
   switch (status) {
     case "in_progress":
       return (
-        <span className="mt-0.5 flex-shrink-0">
+        <span className="mt-0.5 shrink-0">
           <ClockIcon className="w-4 h-4 text-accent animate-pulse" />
         </span>
       );
     case "completed":
       return (
-        <span className="mt-0.5 flex-shrink-0">
+        <span className="mt-0.5 shrink-0">
           <CheckCircleIcon className="w-4 h-4 text-success" />
         </span>
       );
     case "pending":
     default:
       return (
-        <span className="mt-0.5 flex-shrink-0">
+        <span className="mt-0.5 shrink-0">
           <EmptyCircleIcon className="w-4 h-4 text-secondary-foreground" />
         </span>
       );

@@ -112,6 +112,8 @@ class TestBuildPromptRequestBody:
             ("claude-haiku-4-5", "high"),
             ("anthropic/claude-opus-5", "xhigh"),
             ("openai/gpt-5.6-sol", "none"),
+            ("opencode/glm-5.2", "max"),
+            ("opencode-go/qwen3.8-max", "xhigh"),
         ],
     )
     def test_reasoning_effort_uses_variant(self, bridge: AgentBridge, model: str, effort: str):
@@ -153,10 +155,10 @@ class TestBuildPromptRequestBody:
         [
             ("zai-coding-plan/glm-5.3-flash", "high"),
             ("opencode-go/glm-5.3-flash", "max"),
-            ("opencode/muse-spark-1.3-contributor-free", "minimal"),
+            ("opencode/muse-spark-1.3-contributor-free", "low"),
             ("opencode-go/muse-spark-1.3-contributor", "xhigh"),
-            ("opencode-go/deepseek-v4-flash", "low"),
-            ("opencode-go/deepseek-v4-flash-vision-exp", "max"),
+            ("opencode-go/deepseek-v4.1-flash", "low"),
+            ("opencode-go/deepseek-v4-pro", "max"),
         ],
     )
     def test_with_catalog_reasoning_variant(self, bridge: AgentBridge, model: str, effort: str):

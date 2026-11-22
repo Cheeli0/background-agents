@@ -140,6 +140,7 @@ export class ChildSessionsHandler {
       ? author
       : Response.json({
           ...toActivePromptAuthor(author),
+          source: this.messageRepository.getProcessingMessageAuthor()?.source,
           promptAccountUserId: this.messageRepository.getProcessingPromptAccount(),
         } satisfies ActivePromptAuthor);
   }

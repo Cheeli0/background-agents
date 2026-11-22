@@ -33,11 +33,11 @@ PRICE = ModelPrice.parse(
         (
             {
                 "type": "openPage",
-                "url": "https://github.com/ColeMurray/background-agents/pull/2134",
+                "url": "https://github.com/open-inspect/background-agents/pull/2134",
             },
-            "https://github.com/ColeMurray/background-agents/pull/2134",
+            "https://github.com/open-inspect/background-agents/pull/2134",
             "webfetch",
-            {"url": "https://github.com/ColeMurray/background-agents/pull/2134"},
+            {"url": "https://github.com/open-inspect/background-agents/pull/2134"},
         ),
         (
             {"type": "findInPage", "url": "https://example.com", "pattern": "release"},

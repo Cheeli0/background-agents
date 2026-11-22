@@ -85,6 +85,8 @@ export interface SessionInitInput {
   spawnDepth?: number;
   automationId?: string | null;
   automationRunId?: string | null;
+  /** The GitHub bot started this session to submit a PR review; see `SessionIndexStore.isGitHubReview`. */
+  githubReview?: boolean;
   /** Memory selection, resolved for a root session or copied from the parent. */
   memory: SessionMemoryPin;
   /** Managed skills, resolved for a root session or copied from the parent. */
@@ -191,6 +193,7 @@ export async function initializeSession(
     spawnDepth: input.spawnDepth,
     automationId: input.automationId,
     automationRunId: input.automationRunId,
+    githubReview: input.githubReview,
     scmLogin: input.scmLogin || null,
     userId: input.platformUserId,
     ownerTeamId: input.ownerTeamId,

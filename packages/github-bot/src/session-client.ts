@@ -27,6 +27,8 @@ export async function createSession(
     scmLogin: string;
     scmUserId: string;
     scmAvatarUrl: string;
+    /** The session submits a PR review, so it may mint the reviewer App's token. */
+    githubReview: boolean;
   }
 ): Promise<SessionCreationResult> {
   const body: Record<string, unknown> = {
@@ -37,6 +39,7 @@ export async function createSession(
     harness: params.harness,
     scmLogin: params.scmLogin,
     scmAvatarUrl: params.scmAvatarUrl,
+    githubReview: params.githubReview,
   };
   if (params.reasoningEffort) {
     body.reasoningEffort = params.reasoningEffort;

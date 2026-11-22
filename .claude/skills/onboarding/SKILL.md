@@ -69,7 +69,7 @@ Execute these commands (substitute values from Phase 1):
 mkdir -p {directory_path}
 gh repo create {github_account}/open-inspect-{name} --private --description "Open-Inspect deployment"
 cd {directory_path}
-git clone git@github.com:ColeMurray/background-agents.git .
+git clone git@github.com:open-inspect/background-agents.git .
 git remote rename origin upstream
 git remote add origin git@github.com:{github_account}/open-inspect-{name}.git
 git push -u origin main

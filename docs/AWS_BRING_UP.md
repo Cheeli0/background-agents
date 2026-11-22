@@ -476,3 +476,8 @@ variation rather than a requirement.
 - **The bots.** The Slack, GitHub and Linear bots remain Cloudflare Workers. A deployment with no
   Cloudflare account runs the control plane and the web app, and does without them, until that
   transport lands.
+
+## Sandboxes in this account
+
+The environments run sandboxes on Modal by default. To run them as EC2 instances in this account
+instead, see [EC2 Sandbox Provider](EC2_SANDBOX_PROVIDER.md).

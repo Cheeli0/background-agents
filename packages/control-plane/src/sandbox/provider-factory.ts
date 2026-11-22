@@ -12,6 +12,8 @@ import { resolveSandboxBackendName, type SandboxBackendName } from "./provider-n
 import type { SandboxProvider } from "./provider";
 import { createBoatProvider, type BoatSandboxProvider } from "./providers/boat-provider";
 import { createDaytonaProvider, type DaytonaSandboxProvider } from "./providers/daytona-provider";
+import { createEc2Provider, type Ec2SandboxProvider } from "./providers/ec2-provider";
+import type { SandboxBootstrapStore } from "./bootstrap";
 import {
   createE2BProvider,
   DEFAULT_E2B_AUTO_PAUSE,
@@ -183,6 +185,43 @@ function createBoatProviderFromEnv(env: Env): BoatSandboxProvider {
   });
 }
 
+export const DEFAULT_EC2_SANDBOX_INSTANCE_TYPE = "m7i.large";
+
+const EC2_REQUIRED_SETTINGS = [
+  "EC2_SANDBOX_AMI_ID",
+  "EC2_SANDBOX_SUBNET_ID",
+  "EC2_SANDBOX_SECURITY_GROUP_ID",
+  "EC2_SANDBOX_INSTANCE_PROFILE_ARN",
+] as const;
+
+function createEc2ProviderFromEnv(
+  env: Env,
+  bootstrapStore: SandboxBootstrapStore | undefined
+): Ec2SandboxProvider {
+  if (!env.EC2_SANDBOXES) {
+    throw new Error(
+      "SANDBOX_PROVIDER=ec2 requires the Node host, which supplies EC2 access from its instance role"
+    );
+  }
+  const missing = EC2_REQUIRED_SETTINGS.filter((name) => !env[name]?.trim());
+  if (missing.length > 0) {
+    throw new Error(`${missing.join(", ")} required when SANDBOX_PROVIDER=ec2`);
+  }
+  if (!bootstrapStore) {
+    throw new Error("SANDBOX_PROVIDER=ec2 requires a session bootstrap store");
+  }
+  return createEc2Provider(env.EC2_SANDBOXES, bootstrapStore, {
+    scmProvider: resolveScmProviderFromEnv(env.SCM_PROVIDER),
+    imageId: env.EC2_SANDBOX_AMI_ID!.trim(),
+    instanceType: env.EC2_SANDBOX_INSTANCE_TYPE?.trim() || DEFAULT_EC2_SANDBOX_INSTANCE_TYPE,
+    subnetId: env.EC2_SANDBOX_SUBNET_ID!.trim(),
+    securityGroupId: env.EC2_SANDBOX_SECURITY_GROUP_ID!.trim(),
+    instanceProfileArn: env.EC2_SANDBOX_INSTANCE_PROFILE_ARN!.trim(),
+    deploymentName: env.DEPLOYMENT_NAME,
+    controlPlanePrivateHost: env.EC2_SANDBOX_CONTROL_PLANE_PRIVATE_HOST?.trim() || undefined,
+  });
+}
+
 export function createSandboxProviderFromEnv(env: Env, backend: "boat"): BoatSandboxProvider;
 export function createSandboxProviderFromEnv(env: Env, backend: "daytona"): DaytonaSandboxProvider;
 export function createSandboxProviderFromEnv(env: Env, backend: "e2b"): E2BSandboxProvider;
@@ -193,13 +232,22 @@ export function createSandboxProviderFromEnv(
 export function createSandboxProviderFromEnv(env: Env, backend: "vercel"): VercelSandboxProvider;
 export function createSandboxProviderFromEnv(
   env: Env,
-  backend?: SandboxBackendName
+  backend: "ec2",
+  bootstrapStore: SandboxBootstrapStore
+): Ec2SandboxProvider;
+export function createSandboxProviderFromEnv(
+  env: Env,
+  backend?: SandboxBackendName,
+  bootstrapStore?: SandboxBootstrapStore
 ): SandboxProvider;
 export function createSandboxProviderFromEnv(
   env: Env,
-  backend: SandboxBackendName = resolveSandboxBackendName(env.SANDBOX_PROVIDER)
+  backend: SandboxBackendName = resolveSandboxBackendName(env.SANDBOX_PROVIDER),
+  bootstrapStore?: SandboxBootstrapStore
 ): SandboxProvider {
   switch (backend) {
+    case "ec2":
+      return createEc2ProviderFromEnv(env, bootstrapStore);
     case "boat":
       return createBoatProviderFromEnv(env);
     case "daytona":

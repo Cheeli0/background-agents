@@ -22,7 +22,7 @@ interface MediaLightboxProps {
 }
 
 const navButtonClassName =
-  "rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40";
+  "rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40";
 
 /** Arrow keys inside these elements keep their native behavior (e.g. video seeking). */
 function isArrowKeyOwner(target: EventTarget | null): boolean {
@@ -92,7 +92,7 @@ export function MediaLightbox({
         } gap-4 overflow-hidden border-border-muted bg-background p-4`}
       >
         <DialogClose
-          className="absolute right-3 top-3 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="absolute right-3 top-3 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Close media viewer"
         >
           <XIcon className="h-5 w-5" />

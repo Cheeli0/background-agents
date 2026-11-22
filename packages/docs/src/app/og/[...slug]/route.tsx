@@ -17,8 +17,6 @@ const {
   accentForeground: accent,
 } = brand.light;
 
-export const revalidate = false;
-
 export async function GET(_request: Request, { params }: SocialCardRouteContext) {
   const { slug } = await params;
   if (slug.at(-1) !== "image.png") notFound();

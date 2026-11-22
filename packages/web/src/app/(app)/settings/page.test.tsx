@@ -125,8 +125,7 @@ beforeEach(() => {
   mocks.authorization.permissions = [...PERMISSION_IDS];
   window.history.replaceState(null, "", "/settings");
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-    callback(0);
-    return 1;
+    return window.setTimeout(() => callback(0), 0);
   });
 });
 
@@ -296,7 +295,7 @@ describe("SettingsPage mobile navigation", () => {
 
     await user.click(screen.getByRole("button", { name: /Appearance/ }));
 
-    expect(await screen.findByRole("heading", { name: "Appearance" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Appearance" })).toHaveFocus());
     expect(await screen.findByText("Appearance panel")).toBeInTheDocument();
     expect(window.location.href).toContain("/settings?tab=appearance");
     expect(window.history.state).toMatchObject({ openInspectSettingsDetail: true });
@@ -306,7 +305,7 @@ describe("SettingsPage mobile navigation", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
-    expect(screen.getByRole("button", { name: /Appearance/ })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Appearance/ })).toHaveFocus());
     expect(window.location.pathname).toBe("/settings");
     expect(window.location.search).toBe("");
 
@@ -319,7 +318,7 @@ describe("SettingsPage mobile navigation", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
-    expect(screen.getByRole("heading", { name: "Appearance" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Appearance" })).toHaveFocus());
     expect(screen.getByText("Appearance panel")).toBeInTheDocument();
   });
 
@@ -350,7 +349,7 @@ describe("SettingsPage mobile navigation", () => {
 
     await user.click(screen.getByRole("button", { name: "Back to settings" }));
 
-    expect(screen.getByRole("heading", { name: "Settings" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Settings" })).toHaveFocus());
     expect(window.location.pathname).toBe("/settings");
     expect(window.location.search).toBe("");
   });
@@ -416,22 +415,25 @@ describe("SettingsPage mobile navigation", () => {
     });
 
     expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveValue("theme");
-    expect(screen.getByRole("button", { name: /Appearance/ })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Appearance/ })).toHaveFocus());
   });
 
   it.each([
     { description: "invalid", tab: "bogus", repoImagesEnabled: true },
     { description: "unavailable", tab: "images", repoImagesEnabled: false },
-  ])("returns focus to the list for an $description history tab", ({ tab, repoImagesEnabled }) => {
-    mocks.repoImagesEnabled = repoImagesEnabled;
-    renderSettingsPage();
+  ])(
+    "returns focus to the list for an $description history tab",
+    async ({ tab, repoImagesEnabled }) => {
+      mocks.repoImagesEnabled = repoImagesEnabled;
+      renderSettingsPage();
 
-    act(() => {
-      window.history.replaceState(null, "", `/settings?tab=${tab}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    });
+      act(() => {
+        window.history.replaceState(null, "", `/settings?tab=${tab}`);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
 
-    expect(screen.getByRole("heading", { name: "Settings" })).toHaveFocus();
-    expect(screen.getByRole("searchbox", { name: "Search settings" })).toBeInTheDocument();
-  });
+      await waitFor(() => expect(screen.getByRole("heading", { name: "Settings" })).toHaveFocus());
+      expect(screen.getByRole("searchbox", { name: "Search settings" })).toBeInTheDocument();
+    }
+  );
 });

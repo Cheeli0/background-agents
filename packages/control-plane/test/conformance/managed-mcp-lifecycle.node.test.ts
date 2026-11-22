@@ -173,7 +173,7 @@ async function createFixture(db: SqlDatabase, backgroundTasks: TestBackgroundTas
   };
 }
 
-describe.sequential("managed MCP connection lifecycle", () => {
+describe("managed MCP connection lifecycle", { concurrent: false }, () => {
   let raw: DatabaseSync;
   let backgroundTasks: TestBackgroundTasks;
   let f: Awaited<ReturnType<typeof createFixture>>;

@@ -1,0 +1,11 @@
+[project]
+name = "open-inspect-ec2"
+version = "0.1.0"
+description = "EC2 sandbox base AMI build for Open-Inspect coding agent"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.40.0",
+]
+
+[tool.uv]
+package = false

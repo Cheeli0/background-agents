@@ -235,7 +235,7 @@ export function SessionHeader({
     : null;
 
   return (
-    <header className="border-b border-border-muted flex-shrink-0">
+    <header className="border-b border-border-muted shrink-0">
       <div className="flex h-12 items-center justify-between gap-1 px-2 md:h-auto md:gap-4 md:px-4 md:py-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {!isOpen && <CollapsedSidebarControls />}
@@ -257,7 +257,7 @@ export function SessionHeader({
                     setIsRenaming(false);
                   }
                 }}
-                className="w-full truncate bg-transparent text-center text-sm font-medium text-foreground outline-none focus:ring-inset focus:ring-ring md:text-left"
+                className="w-full truncate bg-transparent text-center text-sm font-medium text-foreground outline-hidden focus:ring-inset focus:ring-ring md:text-left"
               />
             ) : (
               <h1 className="flex min-w-0 items-center justify-center text-sm font-medium text-foreground md:justify-start">
@@ -363,7 +363,7 @@ function ConnectionStatusIcon({
             role="status"
             aria-label={`Connection status: ${label}`}
             tabIndex={0}
-            className="flex h-8 w-8 items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-8 w-8 items-center justify-center rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
             <span
               aria-hidden="true"
@@ -453,7 +453,7 @@ function SandboxStatusDetail({
           <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{failedPhaseSummary}</p>
         )}
         {reason && (
-          <p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-muted p-2 font-mono text-[11px] leading-4 text-destructive">
+          <p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-sm bg-muted p-2 font-mono text-[11px] leading-4 text-destructive">
             {reason}
           </p>
         )}
@@ -486,7 +486,7 @@ function SandboxStatusIcon(props: SandboxStatusProps) {
         <button
           type="button"
           aria-label={`Sandbox status: ${presentation.label}`}
-          className={`relative flex h-8 w-8 items-center justify-center rounded-sm border border-border ${presentation.color} transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+          className={`relative flex h-8 w-8 items-center justify-center rounded-sm border border-border ${presentation.color} transition hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring`}
         >
           <BoxIcon className="h-4 w-4" />
           <span
@@ -537,7 +537,7 @@ function MobileStatusStrip({
         >
           <span
             aria-hidden="true"
-            className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${connectionPresentation.dot}${connectionPresentation.pulse ? " animate-pulse motion-reduce:animate-none" : ""}`}
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${connectionPresentation.dot}${connectionPresentation.pulse ? " animate-pulse motion-reduce:animate-none" : ""}`}
           />
           {connectionPresentation.label}
         </p>
@@ -557,14 +557,14 @@ function MobileSandboxStatus({ resolved }: { resolved: ResolvedSandboxStatus }) 
           <button
             type="button"
             aria-label={`Show sandbox status: ${presentation.label}`}
-            className={`flex w-full items-center gap-2 border-t border-border-muted px-3 py-2 text-left text-xs ${presentation.color} transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
+            className={`flex w-full items-center gap-2 border-t border-border-muted px-3 py-2 text-left text-xs ${presentation.color} transition hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
           >
             <span
               aria-hidden="true"
-              className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${presentation.dot}`}
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${presentation.dot}`}
             />
             <span className="min-w-0 flex-1 truncate">Sandbox {presentation.label}</span>
-            <ChevronRightIcon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+            <ChevronRightIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           </button>
         </PopoverTrigger>
         <PopoverContent

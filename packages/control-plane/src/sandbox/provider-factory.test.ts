@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createTestEnv } from "../router.test-support";
 import type { Env } from "../types";
 import { createSandboxProviderFromEnv } from "./provider-factory";
+import type { SandboxBootstrapStore } from "./bootstrap";
+import type { Ec2SandboxApi } from "./ec2-api";
 
 function createEnv(overrides: Partial<Env>): Env {
   return createTestEnv({ TOKEN_ENCRYPTION_KEY: "test-token-key", ...overrides });
@@ -111,5 +113,47 @@ describe("createSandboxProviderFromEnv", () => {
     expect(() => createSandboxProviderFromEnv(env, "e2b")).toThrow(
       "E2B_AUTO_PAUSE must be a valid boolean"
     );
+  });
+
+  describe("ec2", () => {
+    const ec2Sandboxes: Ec2SandboxApi = {
+      launchInstance: vi.fn(),
+      describeInstance: vi.fn(),
+      startInstance: vi.fn(),
+      stopInstance: vi.fn(),
+      terminateInstance: vi.fn(),
+    };
+    const bootstrapStore: SandboxBootstrapStore = { put: vi.fn(), consume: vi.fn() };
+    const ec2Settings = {
+      EC2_SANDBOX_AMI_ID: "ami-1",
+      EC2_SANDBOX_SUBNET_ID: "subnet-1",
+      EC2_SANDBOX_SECURITY_GROUP_ID: "sg-1",
+      EC2_SANDBOX_INSTANCE_PROFILE_ARN: "profile",
+    };
+
+    it.each([
+      ["the Node host's EC2 binding", {}, bootstrapStore, "requires the Node host"],
+      [
+        "a session bootstrap store",
+        { EC2_SANDBOXES: ec2Sandboxes },
+        undefined,
+        "requires a session bootstrap store",
+      ],
+    ])("needs %s", (_name, overrides, store, message) => {
+      const env = createEnv({ ...ec2Settings, ...overrides });
+      expect(() => createSandboxProviderFromEnv(env, "ec2", store)).toThrow(message);
+    });
+
+    it("names every missing setting", () => {
+      const env = createEnv({ EC2_SANDBOXES: ec2Sandboxes, EC2_SANDBOX_AMI_ID: "ami-1" });
+      expect(() => createSandboxProviderFromEnv(env, "ec2", bootstrapStore)).toThrow(
+        "EC2_SANDBOX_SUBNET_ID, EC2_SANDBOX_SECURITY_GROUP_ID, EC2_SANDBOX_INSTANCE_PROFILE_ARN required"
+      );
+    });
+
+    it("creates the provider from complete configuration", () => {
+      const env = createEnv({ EC2_SANDBOXES: ec2Sandboxes, ...ec2Settings });
+      expect(createSandboxProviderFromEnv(env, "ec2", bootstrapStore).name).toBe("ec2");
+    });
   });
 });

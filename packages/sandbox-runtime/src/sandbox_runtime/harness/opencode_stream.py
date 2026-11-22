@@ -39,6 +39,12 @@ if TYPE_CHECKING:
 # yet (their message.updated may arrive after their first parts).
 MAX_PENDING_PART_EVENTS: Final = 2000
 CONTEXT_OVERFLOW_ERROR_NAME: Final = "ContextOverflowError"
+# Providers whose models take the requested reasoning effort as an OpenCode
+# variant. OpenCode Zen and Go route each model to its own SDK, but OpenCode
+# derives the variants from the catalog either way.
+VARIANT_REASONING_PROVIDERS: Final = frozenset(
+    {"anthropic", "openai", "xai", "opencode", "opencode-go", "zai-coding-plan"}
+)
 
 OPENCODE_DEFAULT_TITLE_RE: Final = re.compile(
     r"^(new session|child session) - " r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$",
@@ -868,14 +874,7 @@ class OpenCodePromptStream:
                 "modelID": model_id,
             }
 
-            if reasoning_effort and provider_id in {
-                "anthropic",
-                "openai",
-                "xai",
-                "opencode",
-                "opencode-go",
-                "zai-coding-plan",
-            }:
+            if reasoning_effort and provider_id in VARIANT_REASONING_PROVIDERS:
                 request_body["variant"] = reasoning_effort
 
             request_body["model"] = model_spec

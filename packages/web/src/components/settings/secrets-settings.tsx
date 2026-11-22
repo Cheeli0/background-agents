@@ -79,7 +79,7 @@ export function SecretsSettings() {
           }
         >
           <span className="truncate">{displayRepoName}</span>
-          <ChevronDownIcon className="w-3 h-3 flex-shrink-0" />
+          <ChevronDownIcon className="w-3 h-3 shrink-0" />
         </Combobox>
       </div>
 
