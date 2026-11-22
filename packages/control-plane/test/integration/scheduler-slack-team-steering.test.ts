@@ -64,7 +64,7 @@ async function seedSteerableSession(
     `INSERT INTO automations
        (id, owner_team_id, name, instructions, trigger_type, model, created_by, user_id,
         created_at, updated_at, event_type, trigger_config)
-     VALUES (?, ?, 'Slack steering', 'Fixture only', 'slack_event', 'anthropic/claude-sonnet-4-6',
+     VALUES (?, ?, 'Slack steering', 'Fixture only', 'slack_event', 'anthropic/claude-sonnet-5-5',
        ?, ?, ?, ?, 'message.posted', ?)`
   )
     .bind(

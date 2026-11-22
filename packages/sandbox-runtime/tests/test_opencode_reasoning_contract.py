@@ -20,6 +20,7 @@ Source SHA-256: 4f9cc07fff594ef0745e8c243fc0c5a0b68b2279b0d062cca5c8a3df6382e0ed
 GPT-6.2 Astra and GPT-6.2 Sol added from the 2026-11-17 retrieval.
 Source SHA-256: d5d6ff2fff92fcfe45566f38f9c559c71ecc63a1b400b2e305ef7545b70a5c3a
 Subset SHA-256: 4625f538690cc7df8d4625660803b229979a03a234de6cfd0e660d170a8f7c5c
+Fork: superseded OpenCode Go models removed on 2026-11-22, so the subset no longer matches that hash.
 Reconcile this frozen fixture with shared model/effort definitions when changing
 models or the binary. Mocks verify serialization, not live provider acceptance.
 """

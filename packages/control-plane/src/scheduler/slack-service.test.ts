@@ -10,7 +10,7 @@ const mockStore = { getInvocationById: vi.fn(), getById: vi.fn() };
 const mockSessionStoreGet = vi.fn();
 const mockTeamChannelBindingGet = vi.fn();
 const getGlobal = vi.fn();
-const sampleSlackAutomation = { model: "anthropic/claude-sonnet-4-6", reasoning_effort: null };
+const sampleSlackAutomation = { model: "anthropic/claude-sonnet-5-5", reasoning_effort: null };
 
 function sampleRunRow(overrides: Partial<AutomationRunRow> = {}): AutomationRunRow {
   return {

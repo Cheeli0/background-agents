@@ -25,7 +25,7 @@ describe("session-scoped environment image lookup", () => {
       repoOwner: "acme",
       repoName: "web",
       baseBranch: "main",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
       reasoningEffort: null,
       status: "active",
       createdAt: 1,

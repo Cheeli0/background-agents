@@ -71,8 +71,8 @@ run "defaults_preserve_the_previously_hardcoded_models" {
   }
 
   assert {
-    condition     = module.linear_bot_worker[0].plain_text_bindings["DEFAULT_MODEL"] == "claude-sonnet-4-6"
-    error_message = "The Linear bot's default model binding must stay claude-sonnet-4-6."
+    condition     = module.linear_bot_worker[0].plain_text_bindings["DEFAULT_MODEL"] == "anthropic/claude-sonnet-5-5"
+    error_message = "The Linear bot's default model binding must stay anthropic/claude-sonnet-5-5."
   }
 }
 
@@ -82,23 +82,23 @@ run "overrides_reach_each_bot_binding" {
   command = plan
 
   variables {
-    github_bot_default_model = "anthropic/claude-opus-4-5"
-    slack_bot_default_model  = "openai/gpt-5.4"
-    linear_bot_default_model = "claude-sonnet-5"
+    github_bot_default_model = "anthropic/claude-opus-5-5"
+    slack_bot_default_model  = "openai/gpt-6.2-sol"
+    linear_bot_default_model = "claude-fable-5-1"
   }
 
   assert {
-    condition     = module.github_bot_worker[0].plain_text_bindings["DEFAULT_MODEL"] == "anthropic/claude-opus-4-5"
+    condition     = module.github_bot_worker[0].plain_text_bindings["DEFAULT_MODEL"] == "anthropic/claude-opus-5-5"
     error_message = "An overridden github_bot_default_model must reach the GitHub bot's DEFAULT_MODEL binding."
   }
 
   assert {
-    condition     = module.slack_bot_worker[0].plain_text_bindings["DEFAULT_MODEL"] == "openai/gpt-5.4"
+    condition     = module.slack_bot_worker[0].plain_text_bindings["DEFAULT_MODEL"] == "openai/gpt-6.2-sol"
     error_message = "An overridden slack_bot_default_model must reach the Slack bot's DEFAULT_MODEL binding."
   }
 
   assert {
-    condition     = module.linear_bot_worker[0].plain_text_bindings["DEFAULT_MODEL"] == "claude-sonnet-5"
+    condition     = module.linear_bot_worker[0].plain_text_bindings["DEFAULT_MODEL"] == "claude-fable-5-1"
     error_message = "An overridden linear_bot_default_model must reach the Linear bot's DEFAULT_MODEL binding."
   }
 
@@ -209,7 +209,7 @@ run "rejects_a_leading_space_before_the_provider" {
   command = plan
 
   variables {
-    linear_bot_default_model = " anthropic/claude-sonnet-4-6"
+    linear_bot_default_model = " anthropic/claude-sonnet-5-5"
   }
 
   expect_failures = [var.linear_bot_default_model]

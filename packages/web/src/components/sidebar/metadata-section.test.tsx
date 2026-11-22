@@ -46,7 +46,7 @@ describe("MetadataSection", () => {
     render(
       <MetadataSection
         createdAt={Date.now()}
-        model="anthropic/claude-opus-4-6"
+        model="anthropic/claude-opus-5-5"
         baseBranch="main"
         branchName={branchName}
         repoOwner={repoOwner}
@@ -70,14 +70,14 @@ describe("MetadataSection", () => {
     render(
       <MetadataSection
         createdAt={Date.now()}
-        model="anthropic/claude-opus-4-6"
+        model="anthropic/claude-opus-5-5"
         reasoningEffort="high"
         baseBranch="main"
       />
     );
 
     expect(screen.getByText("Model").nextElementSibling).toHaveTextContent(
-      "Claude Opus 4.6 · high"
+      "Claude Opus 5.5 · high"
     );
   });
 

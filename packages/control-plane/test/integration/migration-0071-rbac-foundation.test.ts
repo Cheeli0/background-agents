@@ -60,7 +60,7 @@ describe("migration 0071: RBAC foundation", () => {
       env.DB.prepare(
         `INSERT INTO automations
           (id, name, instructions, model, created_by, user_id, created_at, updated_at)
-         VALUES ('existing-automation', 'Existing', 'Run', 'anthropic/claude-sonnet-4-6',
+         VALUES ('existing-automation', 'Existing', 'Run', 'anthropic/claude-sonnet-5-5',
            'legacy-github-id', NULL, 100, 100)`
       ),
     ]);

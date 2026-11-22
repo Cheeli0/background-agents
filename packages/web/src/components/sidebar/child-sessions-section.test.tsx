@@ -39,7 +39,7 @@ function childSession(
     createdAt: 1000,
     updatedAt: 2000,
     harness: "opencode",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     spawnDepth: 1,
     automationId: null,

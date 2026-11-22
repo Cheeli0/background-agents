@@ -70,7 +70,7 @@ async function saveAutomation(
       `INSERT INTO automations
          (id, owner_team_id, name, instructions, trigger_type, event_type, trigger_config,
           model, enabled, consecutive_failures, created_by, user_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'github_event', ?, ?, 'anthropic/claude-sonnet-4-6', ?, 2, ?, ?, 1, 1)`
+       VALUES (?, ?, ?, ?, 'github_event', ?, ?, 'anthropic/claude-sonnet-5-5', ?, 2, ?, ?, 1, 1)`
     ).bind(
       id,
       ownerTeamId,

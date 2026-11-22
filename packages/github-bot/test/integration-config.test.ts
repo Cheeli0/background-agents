@@ -36,7 +36,7 @@ describe("getGitHubConfig", () => {
         new Response(
           JSON.stringify({
             config: {
-              model: "anthropic/claude-opus-4-6",
+              model: "anthropic/claude-opus-5-5",
               reasoningEffort: "high",
               autoReviewOnOpen: true,
               enabledRepos: null,
@@ -54,7 +54,7 @@ describe("getGitHubConfig", () => {
     const result = await getGitHubConfig(env, "acme/widgets", log);
 
     expect(result).toEqual({
-      model: "anthropic/claude-opus-4-6",
+      model: "anthropic/claude-opus-5-5",
       harness: "opencode",
       reasoningEffort: "high",
       autoReviewOnOpen: true,
@@ -72,7 +72,7 @@ describe("getGitHubConfig", () => {
         new Response(
           JSON.stringify({
             config: {
-              model: "anthropic/claude-opus-4-6",
+              model: "anthropic/claude-opus-5-5",
               harness: "claude",
               reasoningEffort: null,
               autoReviewOnOpen: true,
@@ -98,7 +98,7 @@ describe("getGitHubConfig", () => {
         new Response(
           JSON.stringify({
             config: {
-              model: "anthropic/claude-opus-4-6",
+              model: "anthropic/claude-opus-5-5",
               reasoningEffort: null,
               autoReviewOnOpen: true,
               enabledRepos: null,
@@ -300,14 +300,14 @@ describe("resolveModelSelection harness", () => {
       env,
       log,
       "trace-default-harness",
-      { model: "openai/gpt-5", harness: "opencode", reasoningEffort: null },
+      { model: "claude-sonnet-5-5", harness: "opencode", reasoningEffort: null },
       undefined
     );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Stale model canonicalizes; the default harness runs the canonical one.
-    expect(result.selection.model).toBe("anthropic/claude-sonnet-4-6");
+    // A bare model canonicalizes; the default harness runs the canonical one.
+    expect(result.selection.model).toBe("anthropic/claude-sonnet-5-5");
     expect(result.selection.harness).toBe("opencode");
     expect(log.warn).not.toHaveBeenCalled();
   });
@@ -318,7 +318,7 @@ describe("resolveModelSelection harness", () => {
       env,
       log,
       "trace-keep-harness",
-      { model: "anthropic/claude-opus-4-6", harness: "claude", reasoningEffort: null },
+      { model: "anthropic/claude-opus-5-5", harness: "claude", reasoningEffort: null },
       undefined
     );
 
@@ -333,7 +333,7 @@ describe("resolveModelSelection harness", () => {
       env,
       log,
       "trace-mismatch",
-      { model: "openai/gpt-5.4", harness: "claude", reasoningEffort: null },
+      { model: "openai/gpt-6.2-sol", harness: "claude", reasoningEffort: null },
       undefined
     );
 
@@ -341,12 +341,12 @@ describe("resolveModelSelection harness", () => {
       ok: false,
       reason: "harness_model_incompatible",
       message: expect.stringContaining(
-        'Model "openai/gpt-5.4" cannot run on the Claude Agent harness.'
+        'Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.'
       ),
     });
     expect(log.warn).not.toHaveBeenCalled();
   });
-  it("keeps Claude after canonicalizing a stale deployment model", async () => {
+  it("refuses a retired deployment model instead of using another one", async () => {
     const log = createMockLogger();
     const result = await resolveModelSelection(
       env,
@@ -356,21 +356,27 @@ describe("resolveModelSelection harness", () => {
       undefined
     );
     expect(result).toMatchObject({
-      ok: true,
-      selection: { model: "anthropic/claude-sonnet-4-6", harness: "claude", reasoningEffort: null },
+      ok: false,
+      reason: "harness_model_incompatible",
+      message: expect.stringContaining('Model "openai/gpt-5" is no longer supported.'),
     });
     expect(log.warn).not.toHaveBeenCalled();
   });
 
   it.each([
-    { model: "gpt-5.4", harness: "claude", compatible: false, canonical: "openai/gpt-5.4" },
+    { model: "gpt-6.2-sol", harness: "claude", compatible: false, canonical: "openai/gpt-6.2-sol" },
     {
-      model: "claude-opus-4-6",
+      model: "claude-opus-5-5",
       harness: "claude",
       compatible: true,
-      canonical: "anthropic/claude-opus-4-6",
+      canonical: "anthropic/claude-opus-5-5",
     },
-    { model: "gpt-5.4", harness: "opencode", compatible: true, canonical: "openai/gpt-5.4" },
+    {
+      model: "gpt-6.2-sol",
+      harness: "opencode",
+      compatible: true,
+      canonical: "openai/gpt-6.2-sol",
+    },
   ] as const)(
     "checks $harness against inline model override $model",
     async ({ model, harness, compatible, canonical }) => {
@@ -378,7 +384,7 @@ describe("resolveModelSelection harness", () => {
       const inlineEnv = createMockEnv(() =>
         Promise.resolve(
           Response.json({
-            enabledModels: ["openai/gpt-5.4", "anthropic/claude-opus-4-6"],
+            enabledModels: ["openai/gpt-6.2-sol", "anthropic/claude-opus-5-5"],
           })
         )
       );
@@ -386,7 +392,7 @@ describe("resolveModelSelection harness", () => {
         inlineEnv,
         log,
         "trace-inline-harness",
-        { model: "anthropic/claude-sonnet-4-6", harness, reasoningEffort: "low" },
+        { model: "anthropic/claude-sonnet-5-5", harness, reasoningEffort: "low" },
         parseInlinePromptFlags(`!model:${model} Review this`)
       );
       if (compatible) {
@@ -409,9 +415,8 @@ describe("resolveModelSelection harness", () => {
   );
 
   it.each([
-    { source: "integration config", configModel: "gpt-6-sol" },
+    { source: "integration config", configModel: "gpt-6.2-sol" },
     { source: "deployment default", configModel: null },
-    { source: "retired integration model", configModel: "openai/gpt-5.3-codex-spark" },
   ])(
     "checks the canonical model from $source without changing the configured harness",
     async ({ configModel }) => {
@@ -431,7 +436,7 @@ describe("resolveModelSelection harness", () => {
           })
         )
       );
-      configuredEnv.DEFAULT_MODEL = "gpt-6-sol";
+      configuredEnv.DEFAULT_MODEL = "gpt-6.2-sol";
       const log = createMockLogger();
       const config = await getGitHubConfig(configuredEnv, "acme/widgets", log);
 
@@ -442,7 +447,7 @@ describe("resolveModelSelection harness", () => {
         ok: false,
         reason: "harness_model_incompatible",
         message: expect.stringContaining(
-          'Model "openai/gpt-6-sol" cannot run on the Claude Agent harness.'
+          'Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.'
         ),
       });
       expect(log.warn).not.toHaveBeenCalled();

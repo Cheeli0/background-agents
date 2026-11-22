@@ -36,7 +36,7 @@ async function insertAutomation(id: string, userId: string, createdBy: string): 
   await env.DB.prepare(
     `INSERT INTO automations (
        id, name, instructions, model, created_by, user_id, created_at, updated_at
-     ) VALUES (?, ?, 'instructions', 'anthropic/claude-sonnet-5', ?, ?, ?, ?)`
+     ) VALUES (?, ?, 'instructions', 'anthropic/claude-sonnet-5-5', ?, ?, ?, ?)`
   )
     .bind(id, `automation-${id}`, createdBy, userId, SEED_NOW_MS, SEED_NOW_MS)
     .run();

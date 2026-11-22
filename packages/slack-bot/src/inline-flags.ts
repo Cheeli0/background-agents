@@ -5,6 +5,7 @@ import {
   isValidModel,
   isValidReasoningEffort,
   normalizeModelId,
+  UnsupportedModelError,
   type ReasoningEffort,
   type ValidModel,
 } from "@open-inspect/shared/models";
@@ -112,6 +113,14 @@ export function resolveInlinePromptOptions(
   defaults: { model: string; reasoningEffort?: string },
   enabledModels: readonly ValidModel[]
 ): ResolveInlinePromptOptionsResult {
+  if (!isValidModel(defaults.model)) {
+    // The thread's or App Home model was retired: refuse rather than resolve
+    // the turn against another model.
+    return {
+      ok: false,
+      error: `${escapeMrkdwnText(new UnsupportedModelError(defaults.model).message)} Start a new thread, or choose another model in the Slack app's Home tab.`,
+    };
+  }
   const { model: sessionModel, reasoningEffort: sessionReasoningEffort } =
     normalizeModelSelection(defaults);
   let modelOverride: ValidModel | undefined;

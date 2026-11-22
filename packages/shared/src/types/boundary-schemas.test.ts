@@ -45,7 +45,7 @@ describe("boundary schemas", () => {
     repoOwner: "open-inspect",
     repoName: "background-agents",
     harness: "opencode",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     baseBranch: "main",
     status: "active",
@@ -178,7 +178,7 @@ describe("boundary schemas", () => {
         repoOwner: "open-inspect",
         repoName: "background-agents",
         title: "Investigate issue",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         reasoningEffort: "high",
         branch: "main",
       });
@@ -189,7 +189,7 @@ describe("boundary schemas", () => {
     it("parses a valid repo-less session creation request", () => {
       const result = createSessionRequestSchema.safeParse({
         title: "Incident sweep",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
       });
 
       expect(result.success).toBe(true);
@@ -286,7 +286,7 @@ describe("boundary schemas", () => {
     it("parses valid stored preferences", () => {
       const result = userPreferencesSchema.safeParse({
         userId: "U123",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         reasoningEffort: "high",
         branch: "feature/test",
         updatedAt: 123,
@@ -506,7 +506,7 @@ describe("boundary schemas", () => {
       const result = sendPromptRequestSchema.safeParse({
         content: "Investigate the failure",
         source: "slack",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         reasoningEffort: "high",
         attachments: [{ attachmentId: "att-1", name: "screenshot.png" }],
         callbackContext: {
@@ -514,7 +514,7 @@ describe("boundary schemas", () => {
           channel: "C123",
           threadTs: "1710000000.000100",
           repoFullName: "open-inspect/background-agents",
-          model: "anthropic/claude-sonnet-4-6",
+          model: "anthropic/claude-sonnet-5-5",
           reactionMessageTs: "1710000000.000200",
         },
       });
@@ -563,7 +563,7 @@ describe("boundary schemas", () => {
       for (const extra of [
         { source: "web" },
         { authorId: "forged" },
-        { model: "openai/gpt-5.4" },
+        { model: "openai/gpt-6.2-sol" },
         { attachments: [] },
         { callbackContext: {} },
       ]) {
@@ -582,7 +582,7 @@ describe("boundary schemas", () => {
           channel: "C123",
           threadTs: "1710000000.000100",
           repoFullName: "open-inspect/background-agents",
-          model: "anthropic/claude-sonnet-4-6",
+          model: "anthropic/claude-sonnet-5-5",
         }).success
       ).toBe(true);
       expect(
@@ -592,7 +592,7 @@ describe("boundary schemas", () => {
           issueIdentifier: "OI-123",
           issueUrl: "https://linear.app/open-inspect/issue/OI-123/test",
           repoFullName: "open-inspect/background-agents",
-          model: "anthropic/claude-sonnet-4-6",
+          model: "anthropic/claude-sonnet-5-5",
           transitionIssueOnStart: false,
         }).success
       ).toBe(true);
@@ -628,7 +628,7 @@ describe("boundary schemas", () => {
       issueId: "issue-1",
       issueIdentifier: "OI-123",
       issueUrl: "https://linear.app/open-inspect/issue/OI-123/test",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
     };
 
     it("requires a complete completion callback and valid Linear context", () => {
@@ -906,7 +906,7 @@ describe("boundary schemas", () => {
         type: "prompt",
         clientRequestId: "0190cc3e-95ca-7dd8-b0a7-55ca8456ee31",
         content: "Investigate the failing build",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         reasoningEffort: "high",
         attachments: [
           {
@@ -1391,7 +1391,7 @@ describe("boundary schemas", () => {
         prompt: "Find and fix the failing test",
         repoOwner: "open-inspect",
         repoName: "background-agents",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         reasoningEffort: "high",
       });
 

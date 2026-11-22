@@ -18,7 +18,7 @@ export function makeAutomation(overrides?: Partial<AutomationRow>): AutomationRo
     schedule_once_at: null,
     schedule_tz: "UTC",
     harness: "opencode",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoning_effort: null,
     enabled: 1,
     next_run_at: now + 86_400_000,

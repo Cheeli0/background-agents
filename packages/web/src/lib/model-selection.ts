@@ -5,7 +5,7 @@ import {
 } from "@open-inspect/shared/harnesses";
 import {
   DEFAULT_MODEL,
-  getValidModelOrDefault,
+  getValidModel,
   resolveEnabledModel,
   type ReasoningEffort,
   type ValidModel,
@@ -32,7 +32,7 @@ export function resolveModelPreference(
         enabledModels,
         fallbackModel: DEFAULT_MODEL,
       })
-    : getValidModelOrDefault(preference.model);
+    : (getValidModel(preference.model) ?? DEFAULT_MODEL);
   // Efforts differ by harness (Codex offers `max` where the generic catalog does not).
   const reasoningConfig = getHarnessReasoningConfig(harness, model);
   return {

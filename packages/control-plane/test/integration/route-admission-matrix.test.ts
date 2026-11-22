@@ -73,7 +73,7 @@ function automation(id: string, userId: string): AutomationRow {
     event_type: null,
     trigger_config: null,
     trigger_auth_data: null,
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoning_effort: null,
     enabled: 1,
     next_run_at: null,

@@ -63,7 +63,7 @@ describe("handleSpawnChild repository grants", () => {
       repoName: hasRepository ? "web-app" : null,
       repoId: hasRepository ? repoId : null,
       harness: "opencode",
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
       reasoningEffort: null,
       sandboxTimeoutMs: 14_400_000,
       baseBranch: "main",

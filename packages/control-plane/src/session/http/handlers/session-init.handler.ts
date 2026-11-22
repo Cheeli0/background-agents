@@ -2,7 +2,6 @@ import { z } from "zod";
 import type { Logger } from "../../../logger";
 import type { RepositoryRef } from "@open-inspect/shared/types/repositories";
 import { getValidHarnessOrDefault, harnessIdSchema } from "@open-inspect/shared/harnesses";
-import { isValidModel } from "@open-inspect/shared/models";
 import { HarnessAdmissionError, resolveHarnessInitialization } from "../../../harness-admission";
 import type { SpawnSource } from "@open-inspect/shared/types/sessions";
 import { normalizeSandboxSettings } from "../../../sandbox/settings";
@@ -143,12 +142,6 @@ export class SessionInitHandler {
       throw cause;
     }
     const { model } = selection;
-    if (body.model && !isValidModel(body.model)) {
-      log.warn("Invalid model name, using default", {
-        requested_model: body.model,
-        default_model: model,
-      });
-    }
 
     const reasoningEffort = validateReasoningEffort(model, selection.reasoningEffort, log, harness);
     const baseBranch = hasRepoOwner

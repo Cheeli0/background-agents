@@ -212,10 +212,10 @@ it("renders the existing not-found path before cached session content or action 
 it.each([undefined, "high"])(
   "uses Codex fallback without overwriting explicit effort %s",
   (effort) => {
-    mocks.enabledModels = ["openai/gpt-5.6-sol", "openai/gpt-6.1-sol"];
+    mocks.enabledModels = ["openai/gpt-6.2-sol", "openai/gpt-6.2-astra"];
     Object.assign(mocks.snapshot!.session, {
       harness: "codex",
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: effort,
     });
     mocks.socket.mockReturnValue({
@@ -224,8 +224,8 @@ it.each([undefined, "high"])(
     });
     render(<SessionPage />);
     expect(mocks.prompt.mock.lastCall?.[4]).toBe(effort ?? "low");
-    act(() => mocks.composer.mock.lastCall?.[0].model.onModelChange("openai/gpt-6.1-sol"));
-    expect(mocks.prompt.mock.lastCall?.[3]).toBe("openai/gpt-6.1-sol");
+    act(() => mocks.composer.mock.lastCall?.[0].model.onModelChange("openai/gpt-6.2-astra"));
+    expect(mocks.prompt.mock.lastCall?.[3]).toBe("openai/gpt-6.2-astra");
     expect(mocks.prompt.mock.lastCall?.[4]).toBe("low");
     act(() => mocks.composer.mock.lastCall?.[0].model.onReasoningEffortChange("max"));
     expect(mocks.prompt.mock.lastCall?.[4]).toBe("max");

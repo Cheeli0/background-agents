@@ -115,7 +115,7 @@ describe("deliverMediaArtifacts", () => {
       sessionId: "session-1",
       repoId: "acme/app",
       repoFullName: "acme/app",
-      model: "openai/gpt-5.4",
+      model: "openai/gpt-6.2-sol",
       createdAt: 1,
       closed: true,
     });

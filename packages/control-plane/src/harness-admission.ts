@@ -10,6 +10,7 @@ import {
 } from "@open-inspect/shared/harnesses";
 import {
   getValidModelOrDefault,
+  UnsupportedModelError,
   isValidReasoningEffort,
   normalizeModelId,
   resolveEnabledModel,
@@ -33,12 +34,22 @@ export class HarnessAdmissionError extends Error {
   }
 }
 
+/** Reject a retired or unknown model as an admission error instead of a server error. */
+function admitModel<T>(resolve: () => T): T {
+  try {
+    return resolve();
+  } catch (cause) {
+    if (cause instanceof UnsupportedModelError) throw new HarnessAdmissionError(cause.message);
+    throw cause;
+  }
+}
+
 /** The internal session boundary must retain the public admission's exact native choice. */
 export function resolveHarnessInitialization(
   harness: HarnessId,
   input: { model?: string; reasoningEffort?: string | null }
 ): { model: string; reasoningEffort?: string } {
-  const model = resolveHarnessModel(harness, input.model);
+  const model = admitModel(() => resolveHarnessModel(harness, input.model));
   if (getHarnessCapabilities(harness).selectionPolicy === "legacy_fallback")
     return { model, reasoningEffort: input.reasoningEffort ?? undefined };
   const incompatible = checkHarnessCompatibility(harness, model, undefined, input.reasoningEffort);
@@ -60,7 +71,7 @@ export async function resolveHarnessSelection(
   enabledModels?: readonly ValidModel[]
 ): Promise<{ model: ValidModel; reasoningEffort: ReasoningEffort | null }> {
   if (getHarnessCapabilities(input.harness).selectionPolicy === "legacy_fallback") {
-    const model = getValidModelOrDefault(input.model);
+    const model = admitModel(() => getValidModelOrDefault(input.model));
     const incompatible = checkHarnessCompatibility(input.harness, model);
     if (incompatible) throw new HarnessAdmissionError(incompatible.message);
     return {
@@ -157,7 +168,7 @@ export async function resolveChildHarnessSelection(
   enabledModels: ValidModel[]
 ): Promise<{ model: ValidModel; reasoningEffort: ReasoningEffort | null }> {
   const strict = getHarnessCapabilities(parent.harness).selectionPolicy === "strict";
-  const inheritedModel = getValidModelOrDefault(requested.model ?? parent.model);
+  const inheritedModel = admitModel(() => getValidModelOrDefault(requested.model ?? parent.model));
   const compatible = strict ? filterModelsForHarness(parent.harness, enabledModels) : enabledModels;
   const model = strict
     ? (requested.model ?? compatible.find((model) => model === inheritedModel) ?? compatible[0])
@@ -201,7 +212,9 @@ export async function resolveHarnessAutomationUpdate(
   }
 ): Promise<{ model: string; reasoningEffort: string | null }> {
   const model =
-    input.model === undefined ? existing.model : resolveHarnessModel(input.harness, input.model);
+    input.model === undefined
+      ? existing.model
+      : admitModel(() => resolveHarnessModel(input.harness, input.model));
   if (getHarnessCapabilities(input.harness).selectionPolicy === "strict" && input.executionChanged)
     return resolveHarnessSelection(db, {
       harness: input.harness,

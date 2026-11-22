@@ -36,7 +36,7 @@ export function session(id: string, overrides: Partial<SessionEntry> = {}): Sess
     title: id,
     repoOwner: "open-inspect",
     repoName: "open-inspect",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: "high",
     baseBranch: "main",
     status: "completed",

@@ -15,7 +15,7 @@ const HARNESS_KEY = "open-inspect-last-selected-harness";
 const EFFORT_KEY = "open-inspect-last-selected-reasoning-effort";
 const LEGACY_PROVIDER_KEY = "open-inspect-last-provider-selections";
 const PROVIDER_KEY = "open-inspect-last-provider-selections:v1";
-const OPENAI_MODEL = "openai/gpt-6.1-sol";
+const OPENAI_MODEL = "openai/gpt-6.2-sol";
 const account: ModelProviderAccount = {
   id: "a".repeat(32),
   provider: "openai",

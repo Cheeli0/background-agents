@@ -77,7 +77,7 @@ const createConfig: CreateSandboxConfig = {
   sandboxAuthToken: "sandbox-auth-secret",
   harness: "opencode",
   provider: "anthropic",
-  model: "claude-sonnet-4-5",
+  model: "claude-sonnet-5-5",
   userEnvVars: { MY_SECRET: "repo-secret" },
   timeoutSeconds: 3600,
   generationCreatedAtMs: NOW - 1000,

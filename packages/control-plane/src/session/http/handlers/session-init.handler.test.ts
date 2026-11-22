@@ -64,7 +64,7 @@ describe("Codex durable initialization", () => {
         repoName: null,
         userId: "owner",
         harness: "codex",
-        model: "openai/gpt-5.6-sol",
+        model: "openai/gpt-6.2-sol",
         ...overrides,
       }),
     });
@@ -75,7 +75,7 @@ describe("Codex durable initialization", () => {
     expect(repository.upsertSession).toHaveBeenCalledWith(
       expect.objectContaining({
         harness: "codex",
-        model: "openai/gpt-5.6-sol",
+        model: "openai/gpt-6.2-sol",
         reasoningEffort: "max",
       })
     );
@@ -92,4 +92,20 @@ describe("Codex durable initialization", () => {
     expect(repository.transaction).not.toHaveBeenCalled();
     expect(scheduleWarmSandbox).not.toHaveBeenCalled();
   });
+  it.each(["opencode", "claude"] as const)(
+    "refuses a retired model on the %s harness instead of using the default",
+    async (harness) => {
+      const { handler, repository, scheduleWarmSandbox } = createHandler();
+      const response = await handler.init(
+        init({ harness, model: "anthropic/claude-sonnet-4-6", reasoningEffort: undefined })
+      );
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error:
+          'Model "anthropic/claude-sonnet-4-6" is no longer supported. Choose a supported model.',
+      });
+      expect(repository.transaction).not.toHaveBeenCalled();
+      expect(scheduleWarmSandbox).not.toHaveBeenCalled();
+    }
+  );
 });

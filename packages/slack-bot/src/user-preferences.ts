@@ -1,8 +1,6 @@
 import {
   DEFAULT_MODEL,
   getDefaultReasoningEffort,
-  getValidModelOrDefault,
-  getValidModelOrReplacement,
   isValidModel,
   isValidReasoningEffort,
   normalizeModelId,
@@ -31,7 +29,6 @@ type UserPreferences = z.infer<typeof slackUserPreferencesSchema>;
 
 export interface ResolvedUserPreferences {
   model: string;
-  /** Retired-model replacements still originate from the App Home preference. */
   modelOrigin: "app-home" | "default";
   reasoningEffort: string | undefined;
   branch: string | undefined;
@@ -64,9 +61,10 @@ function normalizeResolvedPreferences(
   },
   defaultModel: string | undefined
 ): ResolvedUserPreferences {
-  // Preserve disabled preferences; only new-session launches check enablement.
-  const preferredModel = getValidModelOrReplacement(preferences.model);
-  const model = preferredModel ?? getValidModelOrDefault(defaultModel);
+  // Preserve disabled and retired preferences as chosen; only new-session
+  // launches check them, and refuse rather than substitute another model.
+  const preferredModel = preferences.model ? normalizeModelId(preferences.model) : undefined;
+  const model = preferredModel ?? (defaultModel ? normalizeModelId(defaultModel) : DEFAULT_MODEL);
   const reasoningEffort =
     preferences.reasoningEffort && isValidReasoningEffort(model, preferences.reasoningEffort)
       ? preferences.reasoningEffort
@@ -96,9 +94,13 @@ function mergeUserPreferencesPatch(
   patch: UserPreferencesPatch,
   options: UserPreferenceResolutionOptions
 ): UserPreferences | null {
+  // An unrelated patch keeps a retired stored model as chosen; only an
+  // explicit model change replaces it.
   const model = hasPreferenceField(patch, "model")
     ? getNormalizedValidModel(patch.model)
-    : getNormalizedValidModel(current?.model);
+    : current?.model
+      ? normalizeModelId(current.model)
+      : undefined;
   let reasoningEffort = hasPreferenceField(patch, "reasoningEffort")
     ? patch.reasoningEffort
     : hasPreferenceField(patch, "model")
@@ -200,7 +202,9 @@ async function saveUserPreferences(
   options: UserPreferenceResolutionOptions = {}
 ): Promise<boolean> {
   try {
-    const model = getNormalizedValidModel(preferences.model);
+    // Saved as given: merging already validated a changed model, and a retired
+    // one kept from before stays until the user picks another.
+    const model = preferences.model ? normalizeModelId(preferences.model) : undefined;
     let reasoningEffort = preferences.reasoningEffort;
     const branch = normalizeBranchPreference(preferences.branch);
     if (branch && !isValidBranchName(branch)) {

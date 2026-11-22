@@ -38,7 +38,7 @@ function makeAutomation(overrides?: Partial<AutomationRow>): AutomationRow {
     schedule_once_at: null,
     schedule_tz: "UTC",
     harness: "opencode",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoning_effort: null,
     enabled: 1,
     next_run_at: now + 86400000,
@@ -70,7 +70,7 @@ describe("Scheduler (integration)", () => {
     const automation = makeAutomation({
       id: "codex-auth-missing",
       harness: "codex",
-      model: "openai/gpt-6.1-sol",
+      model: "openai/gpt-6.2-sol",
     });
     await new AutomationStore(env.DB).create(automation);
     expect(await resolveAutomationProviderAuth(env.DB, automation.id, "codex")).toContainEqual({

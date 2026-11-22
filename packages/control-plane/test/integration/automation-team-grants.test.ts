@@ -47,7 +47,7 @@ async function saveAutomation(
     `INSERT INTO automations
        (id, owner_team_id, name, instructions, trigger_type, schedule_cron, model,
         next_run_at, consecutive_failures, created_by, user_id, created_at, updated_at)
-     VALUES (?, ?, 'Current team grants', 'Run tests', ?, ?, 'anthropic/claude-sonnet-4-6', ?, 2, ?, ?, 1, 1)`
+     VALUES (?, ?, 'Current team grants', 'Run tests', ?, ?, 'anthropic/claude-sonnet-5-5', ?, 2, ?, ?, 1, 1)`
   )
     .bind(
       id,

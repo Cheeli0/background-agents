@@ -214,13 +214,13 @@ describe("Home team context", () => {
   });
 
   it("archives a draft on model change without creating its replacement until submit", async () => {
-    mocks.enabledModelsValue.push("openai/gpt-5.4");
+    mocks.enabledModelsValue.push("openai/gpt-6.2-sol");
     mocks.enabledModelOptionsValue.push({
       category: "OpenAI",
       models: [
         {
-          id: "openai/gpt-5.4",
-          name: "GPT-5.4",
+          id: "openai/gpt-6.2-sol",
+          name: "GPT-6.2 Sol",
           description: "",
         },
       ],
@@ -229,7 +229,7 @@ describe("Home team context", () => {
     render(<Home />);
     await user.type(screen.getByPlaceholderText("What do you want to build?"), "Ship it");
     await waitFor(() => expect(sessionCreateBody()).toBeDefined());
-    await user.click(screen.getByRole("button", { name: "Switch model to GPT-5.4" }));
+    await user.click(screen.getByRole("button", { name: "Switch model to GPT-6.2 Sol" }));
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith("/api/sessions/session-1/archive", expect.anything())
     );
@@ -240,7 +240,7 @@ describe("Home team context", () => {
     await waitFor(() => expect(mocks.routerPush).toHaveBeenCalledWith("/session/session-1"));
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url) === "/api/sessions");
     expect(calls).toHaveLength(2);
-    expect(JSON.parse(String(calls[1][1]?.body))).toMatchObject({ model: "openai/gpt-5.4" });
+    expect(JSON.parse(String(calls[1][1]?.body))).toMatchObject({ model: "openai/gpt-6.2-sol" });
   });
 
   it("falls back locally when the composer's team is no longer an active membership", async () => {

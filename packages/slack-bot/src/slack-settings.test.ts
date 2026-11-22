@@ -27,14 +27,14 @@ describe("getSlackSettings", () => {
   it("returns the default model and session instructions from one fetch", async () => {
     const fetch = vi.fn().mockResolvedValue(
       settingsResponse({
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         sessionInstructions: "Prefer minimal diffs.",
       })
     );
 
     await expect(getSlackSettings(makeEnv(fetch))).resolves.toEqual({
       harness: DEFAULT_HARNESS,
-      defaultModel: "anthropic/claude-sonnet-4-6",
+      defaultModel: "anthropic/claude-sonnet-5-5",
       sessionInstructions: "Prefer minimal diffs.",
     });
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -54,11 +54,11 @@ describe("getSlackSettings", () => {
     expect(config.harness).toBe("opencode");
   });
 
-  it("drops an invalid default model", async () => {
-    const fetch = vi.fn().mockResolvedValue(settingsResponse({ model: "not-a-model" }));
+  it("keeps a retired default model so launches refuse it by name", async () => {
+    const fetch = vi.fn().mockResolvedValue(settingsResponse({ model: "claude-sonnet-4-6" }));
 
     const config = await getSlackSettings(makeEnv(fetch));
-    expect(config.defaultModel).toBeUndefined();
+    expect(config.defaultModel).toBe("anthropic/claude-sonnet-4-6");
   });
 
   it("returns no instructions when unset", async () => {

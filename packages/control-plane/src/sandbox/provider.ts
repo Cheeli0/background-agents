@@ -116,7 +116,7 @@ export interface CreateSandboxConfig {
   harness: HarnessId;
   /** LLM provider (e.g., "anthropic") */
   provider: string;
-  /** LLM model (e.g., "claude-sonnet-4-5") */
+  /** LLM model (e.g., "claude-sonnet-5-5") */
   model: string;
   /** User-provided environment variables (repo secrets) */
   userEnvVars?: Record<string, string>;
@@ -233,7 +233,7 @@ export interface RestoreConfig {
   harness: HarnessId;
   /** LLM provider (e.g., "anthropic") */
   provider: string;
-  /** LLM model (e.g., "claude-sonnet-4-5") */
+  /** LLM model (e.g., "claude-sonnet-5-5") */
   model: string;
   /** User-provided environment variables (repo secrets) */
   userEnvVars?: Record<string, string>;

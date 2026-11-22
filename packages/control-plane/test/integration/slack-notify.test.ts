@@ -38,7 +38,7 @@ async function setupSession(opts?: {
     title: "Test session",
     repoOwner: "acme",
     repoName: "web-app",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     baseBranch: null,
     status: "active",

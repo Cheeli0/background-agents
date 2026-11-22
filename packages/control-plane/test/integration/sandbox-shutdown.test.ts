@@ -901,7 +901,7 @@ describe("sandbox graceful shutdown wiring", () => {
         {
           ...DEFAULT_LIFECYCLE_CONFIG,
           controlPlaneUrl: "https://control-plane.test",
-          model: "anthropic/claude-sonnet-4-5",
+          model: "anthropic/claude-sonnet-5-5",
         }
       );
       await manager.handleAlarm();

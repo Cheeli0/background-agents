@@ -89,7 +89,7 @@ async function delegate(options: {
             linearTeamId: "team-1",
             repoOwner: "acme",
             repoName: "backend",
-            model: "openai/gpt-6-sol",
+            model: "openai/gpt-6.2-sol",
             createdAt: Date.now(),
           }),
         }
@@ -197,12 +197,12 @@ describe("handleAgentSessionEvent harness selection", () => {
 
   it("creates Claude Agent sessions when Claude Agent is configured", async () => {
     const { createBody, activities } = await delegate({
-      config: { harness: "claude", model: "anthropic/claude-sonnet-4-6" },
+      config: { harness: "claude", model: "anthropic/claude-sonnet-5-5" },
     });
 
-    expect(createBody).toMatchObject({ harness: "claude", model: "anthropic/claude-sonnet-4-6" });
-    expect(activities).toContain("agent: Claude Agent, model: anthropic/claude-sonnet-4-6");
-    expect(activities).toContain("with **anthropic/claude-sonnet-4-6** (Claude Agent).");
+    expect(createBody).toMatchObject({ harness: "claude", model: "anthropic/claude-sonnet-5-5" });
+    expect(activities).toContain("agent: Claude Agent, model: anthropic/claude-sonnet-5-5");
+    expect(activities).toContain("with **anthropic/claude-sonnet-5-5** (Claude Agent).");
     expect(activities).not.toContain("Claude Code");
   });
 
@@ -210,14 +210,14 @@ describe("handleAgentSessionEvent harness selection", () => {
     const { createBody } = await delegate({
       config: {
         harness: "codex",
-        model: "openai/gpt-5.6-sol",
+        model: "openai/gpt-6.2-sol",
         reasoningEffort: "max",
       },
     });
 
     expect(createBody).toMatchObject({
       harness: "codex",
-      model: "openai/gpt-5.6-sol",
+      model: "openai/gpt-6.2-sol",
       reasoningEffort: "max",
     });
   });
@@ -226,7 +226,7 @@ describe("handleAgentSessionEvent harness selection", () => {
     const { createBody, activities, paths } = await delegate({
       config: {
         harness: "codex",
-        model: "openai/gpt-5.6-sol",
+        model: "openai/gpt-6-luna",
         reasoningEffort: "none",
       },
     });
@@ -234,52 +234,48 @@ describe("handleAgentSessionEvent harness selection", () => {
     expect(createBody).toBeNull();
     expect(paths.some((path) => path.startsWith("/sessions"))).toBe(false);
     expect(activities).toContain(
-      'Reasoning effort "none" cannot run on openai/gpt-5.6-sol with the Codex harness.'
+      'Reasoning effort "none" cannot run on openai/gpt-6-luna with the Codex harness.'
     );
   });
 
-  it("refuses a Codex-only configured effort inherited by OpenCode", async () => {
+  it.each([
+    { source: "the deployment default", envDefaultModel: "openai/gpt-5" },
+    { source: "integration settings", config: { model: "openai/gpt-5.3-codex-spark" } },
+    {
+      source: "a model label",
+      config: { allowLabelModelOverride: true },
+      labels: [{ id: "label-1", name: "model:sonnet-4-6" }],
+    },
+  ])("refuses a retired model from $source instead of using another one", async (options) => {
+    const model =
+      "labels" in options
+        ? "sonnet-4-6"
+        : "envDefaultModel" in options
+          ? options.envDefaultModel
+          : options.config.model;
     const { createBody, activities, paths } = await delegate({
-      config: {
-        harness: "opencode",
-        model: "openai/gpt-5.6-sol",
-        reasoningEffort: "max",
-      },
+      ...options,
+      config: { harness: "opencode", ...("config" in options ? options.config : {}) },
     });
 
     expect(createBody).toBeNull();
     expect(paths.some((path) => path.startsWith("/sessions"))).toBe(false);
-    expect(activities).toContain(
-      'Reasoning effort "max" cannot run on openai/gpt-5.6-sol with the OpenCode harness.'
-    );
-  });
-
-  it("checks compatibility after canonicalizing a stale deployment model", async () => {
-    const { createBody } = await delegate({
-      config: { harness: "claude" },
-      envDefaultModel: "openai/gpt-5",
-    });
-
-    expect(createBody).toMatchObject({ harness: "claude", model: "anthropic/claude-sonnet-4-6" });
+    expect(activities).toContain(`Model "${model}" is no longer supported.`);
   });
 
   it.each([
     {
       source: "a model label",
       config: { harness: "claude" },
-      labels: [{ id: "label-1", name: "model:gpt-6-sol" }],
+      labels: [{ id: "label-1", name: "model:gpt-6.2-sol" }],
     },
     {
       source: "the deployment default",
       config: { harness: "claude" },
-      envDefaultModel: "gpt-6-sol",
+      envDefaultModel: "gpt-6.2-sol",
     },
-    { source: "integration settings", config: { harness: "claude", model: "gpt-6-sol" } },
-    { source: "a user preference", config: { harness: "claude" }, userModel: "gpt-6-sol" },
-    {
-      source: "retired integration settings",
-      config: { harness: "claude", model: "openai/gpt-5.3-codex-spark" },
-    },
+    { source: "integration settings", config: { harness: "claude", model: "gpt-6.2-sol" } },
+    { source: "a user preference", config: { harness: "claude" }, userModel: "gpt-6.2-sol" },
   ] satisfies Array<Parameters<typeof delegate>[0] & { source: string }>)(
     "refuses an incompatible canonical model from $source",
     async (options) => {
@@ -295,7 +291,7 @@ describe("handleAgentSessionEvent harness selection", () => {
         {
           type: "error",
           body: expect.stringContaining(
-            'Model "openai/gpt-6-sol" cannot run on the Claude Agent harness.'
+            'Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.'
           ),
         },
       ]);
@@ -305,16 +301,16 @@ describe("handleAgentSessionEvent harness selection", () => {
   );
 
   it.each([
-    { userModel: "claude-sonnet-4-6" },
-    { userModel: "gpt-6-sol", labels: [{ id: "label-1", name: "model:claude-sonnet-4-6" }] },
+    { userModel: "claude-sonnet-5-5" },
+    { userModel: "gpt-6.2-sol", labels: [{ id: "label-1", name: "model:claude-sonnet-5-5" }] },
   ])("launches compatible overrides on Claude Agent (%j)", async (options) => {
     const { createBody, activities, issueSessionWrites } = await delegate({
-      config: { harness: "claude", model: "openai/gpt-6-sol" },
+      config: { harness: "claude", model: "openai/gpt-6.2-sol" },
       ...options,
     });
 
-    expect(createBody).toMatchObject({ harness: "claude", model: "anthropic/claude-sonnet-4-6" });
-    expect(activities).toContain("agent: Claude Agent, model: anthropic/claude-sonnet-4-6");
+    expect(createBody).toMatchObject({ harness: "claude", model: "anthropic/claude-sonnet-5-5" });
+    expect(activities).toContain("agent: Claude Agent, model: anthropic/claude-sonnet-5-5");
     expect(issueSessionWrites).toBe(1);
   });
 
@@ -322,15 +318,15 @@ describe("handleAgentSessionEvent harness selection", () => {
     const { createBody } = await delegate({
       config: {
         harness: "claude",
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         allowUserPreferenceOverride: false,
         allowLabelModelOverride: false,
       },
-      userModel: "gpt-6-sol",
-      labels: [{ id: "label-1", name: "model:gpt-6-sol" }],
+      userModel: "gpt-6.2-sol",
+      labels: [{ id: "label-1", name: "model:gpt-6.2-sol" }],
     });
 
-    expect(createBody).toMatchObject({ harness: "claude", model: "anthropic/claude-sonnet-4-6" });
+    expect(createBody).toMatchObject({ harness: "claude", model: "anthropic/claude-sonnet-5-5" });
   });
 
   it.each([undefined, "opencode"] as const)(
@@ -338,25 +334,25 @@ describe("handleAgentSessionEvent harness selection", () => {
     async (harness) => {
       const { createBody, activities } = await delegate({
         config: { harness },
-        labels: [{ id: "label-1", name: "model:gpt-6-sol" }],
+        labels: [{ id: "label-1", name: "model:gpt-6.2-sol" }],
       });
 
-      expect(createBody).toMatchObject({ harness: "opencode", model: "openai/gpt-6-sol" });
-      expect(activities).toContain("with **openai/gpt-6-sol** (OpenCode).");
+      expect(createBody).toMatchObject({ harness: "opencode", model: "openai/gpt-6.2-sol" });
+      expect(activities).toContain("with **openai/gpt-6.2-sol** (OpenCode).");
     }
   );
 
   it("keeps existing-session follow-ups unchanged despite incompatible current settings", async () => {
     const { createBody, promptBody, activities, paths, issueSessionWrites } = await delegate({
-      config: { harness: "claude", model: "openai/gpt-6-sol" },
+      config: { harness: "claude", model: "openai/gpt-6.2-sol" },
       existingSession: true,
-      userModel: "gpt-6-sol",
-      labels: [{ id: "label-1", name: "model:gpt-6-sol" }],
+      userModel: "gpt-6.2-sol",
+      labels: [{ id: "label-1", name: "model:gpt-6.2-sol" }],
     });
 
     expect(createBody).toBeNull();
     expect(paths).toContain("/sessions/session-xyz/prompt");
-    expect(promptBody).toMatchObject({ callbackContext: { model: "openai/gpt-6-sol" } });
+    expect(promptBody).toMatchObject({ callbackContext: { model: "openai/gpt-6.2-sol" } });
     expect(activities).toContain("Follow-up sent to existing session.");
     expect(activities).not.toContain("cannot run on");
     expect(issueSessionWrites).toBe(0);

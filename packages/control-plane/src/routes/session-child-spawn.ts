@@ -12,6 +12,7 @@ import {
 } from "@open-inspect/shared/types/integrations";
 import {
   getValidModelOrDefault,
+  UnsupportedModelError,
   isValidModel,
   type ValidModel,
   VALID_MODELS,
@@ -227,7 +228,11 @@ export async function handleSpawnChild(
   if (body.model !== undefined && !isValidModel(body.model)) {
     return error(`Invalid model "${body.model}". Valid models: ${VALID_MODELS.join(", ")}`, 400);
   }
-  const requestedModel = getValidModelOrDefault(body.model ?? spawnContext.model);
+  const inherited = body.model ?? spawnContext.model;
+  if (inherited && !isValidModel(inherited)) {
+    return error(new UnsupportedModelError(inherited).message, 400);
+  }
+  const requestedModel = getValidModelOrDefault(inherited);
   if (body.model !== undefined && !enabledModels.includes(requestedModel)) {
     return error(`Model "${body.model}" is not enabled`, 400);
   }

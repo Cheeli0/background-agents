@@ -256,7 +256,7 @@ linear_webhook_secret = ""   # Webhook Signing Secret from the application confi
 # Model the Linear bot uses when no repository config, user preference, or
 # "model:" issue label selects one. Accepts a canonical "provider/model" id or a
 # bare "claude-"/"gpt-" id.
-# linear_bot_default_model = "claude-sonnet-4-6"
+# linear_bot_default_model = "anthropic/claude-sonnet-5-5"
 
 # =============================================================================
 # API Keys

@@ -210,7 +210,7 @@ function sessionRow(overrides: Partial<SessionRow> = {}): SessionRow {
     current_sha: null,
     agent_session_id: null,
     harness: "opencode",
-    model: "anthropic/claude-sonnet-4-5",
+    model: "anthropic/claude-sonnet-5-5",
     reasoning_effort: null,
     status: "active",
     status_revision: 1,
@@ -716,7 +716,7 @@ describe("UserEnvResolver", () => {
         h.db.accountRow = row;
 
         await expect(
-          h.resolver.getProviderAuthenticationError("anthropic/claude-sonnet-4-6")
+          h.resolver.getProviderAuthenticationError("anthropic/claude-sonnet-5-5")
         ).resolves.toContain(fragment);
       }
     );
@@ -726,7 +726,7 @@ describe("UserEnvResolver", () => {
       h.db.providerAuthRows = providerAuthRows(API_KEY_MODES);
 
       await expect(
-        h.resolver.getProviderAuthenticationError("anthropic/claude-sonnet-4-5")
+        h.resolver.getProviderAuthenticationError("anthropic/claude-sonnet-5-5")
       ).resolves.toBeNull();
     });
   });

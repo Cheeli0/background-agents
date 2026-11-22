@@ -107,7 +107,7 @@ describe("buildAppHomeView", () => {
   describe("agent harness", () => {
     const models = [
       { label: "Claude Haiku", value: "anthropic/claude-haiku-4-5" },
-      { label: "GPT 5.4", value: "openai/gpt-5.4" },
+      { label: "GPT-6.2 Sol", value: "openai/gpt-6.2-sol" },
     ];
 
     function render(state: {
@@ -181,13 +181,13 @@ describe("buildAppHomeView", () => {
       const { model, texts } = render({
         userHarness: "claude",
         workspaceHarness: "opencode",
-        currentModel: "openai/gpt-5.4",
+        currentModel: "openai/gpt-6.2-sol",
       });
 
       expect(model?.initial_option).toBeUndefined();
       expect(model?.placeholder?.text).toBe("Choose a model");
       expect(texts).toContain(
-        "Your model `openai/gpt-5.4` can't run on Claude Agent, so new requests are refused until you choose a model above."
+        "Your model `openai/gpt-6.2-sol` can't run on Claude Agent, so new requests are refused until you choose a model above."
       );
     });
 
@@ -197,14 +197,14 @@ describe("buildAppHomeView", () => {
         const { model, texts, reasoning } = render({
           userHarness,
           workspaceHarness: "opencode",
-          currentModel: "anthropic/claude-sonnet-4-6",
+          currentModel: "anthropic/claude-sonnet-5-5",
         });
 
         expect(model?.initial_option).toBeUndefined();
         expect(model?.placeholder?.text).toBe("Choose a model");
         expect(reasoning).toBeUndefined();
         expect(texts).toContain(
-          "Your model `anthropic/claude-sonnet-4-6` is no longer enabled, so new requests are refused until you choose a model above."
+          "Your model `anthropic/claude-sonnet-5-5` is no longer enabled, so new requests are refused until you choose a model above."
         );
         expect(texts.at(-1)).toContain("model needs replacement");
       }
@@ -214,14 +214,14 @@ describe("buildAppHomeView", () => {
       const { model, texts, reasoning } = render({
         userHarness: "opencode",
         workspaceHarness: "opencode",
-        currentModel: "xai/grok-4.6",
+        currentModel: "xai/grok-4.7",
         availableModels: null,
       });
 
       expect(model).toBeUndefined();
       expect(reasoning?.initial_option?.value).toBe("high");
       expect(texts).toContain(
-        "*Model*\nModel preferences are temporarily unavailable. Your model `xai/grok-4.6` has not been changed. New sessions cannot start until model preferences are available. Please try again."
+        "*Model*\nModel preferences are temporarily unavailable. Your model `xai/grok-4.7` has not been changed. New sessions cannot start until model preferences are available. Please try again."
       );
       expect(texts.join(" ")).not.toContain("is no longer enabled");
       expect(texts.at(-1)).not.toContain("model needs replacement");
@@ -231,14 +231,14 @@ describe("buildAppHomeView", () => {
       const { model, texts, reasoning } = render({
         userHarness: "claude",
         workspaceHarness: "opencode",
-        currentModel: "anthropic/claude-sonnet-4-6",
+        currentModel: "anthropic/claude-sonnet-5-5",
         availableModels: [models[1]],
       });
 
       expect(model).toBeUndefined();
       expect(reasoning).toBeUndefined();
       expect(texts).toContain(
-        "*Model*\nYour model `anthropic/claude-sonnet-4-6` is no longer enabled. No enabled model can run on Claude Agent. Choose another agent harness, or ask an admin to enable a model it can run."
+        "*Model*\nYour model `anthropic/claude-sonnet-5-5` is no longer enabled. No enabled model can run on Claude Agent. Choose another agent harness, or ask an admin to enable a model it can run."
       );
     });
   });

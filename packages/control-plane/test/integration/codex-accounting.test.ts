@@ -5,7 +5,7 @@ import { initNamedSession, queryDO, seedMessage, waitForSandboxStatus } from "./
 async function initCodexSession() {
   const { stub } = await initNamedSession(`codex-accounting-${crypto.randomUUID()}`, {
     harness: "codex",
-    model: "openai/gpt-6.1-sol",
+    model: "openai/gpt-6.2-sol",
     sandboxSettings: { maxSessionCostUsd: 5 },
   });
   // Let the spawn attempt settle so a budget stop cannot race it.

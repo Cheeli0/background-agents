@@ -36,7 +36,7 @@ const automation = {
   scheduleCron: "0 9 * * *",
   scheduleOnceAt: null as number | null,
   scheduleTz: "UTC",
-  model: "anthropic/claude-sonnet-4-6",
+  model: "anthropic/claude-sonnet-5-5",
   reasoningEffort: null,
   enabled: true,
   nextRunAt: null,

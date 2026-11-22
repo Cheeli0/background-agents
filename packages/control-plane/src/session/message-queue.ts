@@ -22,6 +22,7 @@ import {
   DEFAULT_MODEL,
   getDefaultReasoningEffort,
   isValidModel,
+  UnsupportedModelError,
 } from "@open-inspect/shared/models";
 import type { SandboxEvent } from "@open-inspect/shared/types/sandbox-events";
 import { isSessionPromptable } from "@open-inspect/shared/types/session-activity";
@@ -452,7 +453,21 @@ export class SessionMessageQueue {
     const now = Date.now();
     const session = this.repository.getSession();
     const harness = getValidHarnessOrDefault(session?.harness);
-    const resolvedModel = resolveHarnessModel(harness, message.model || session?.model);
+    let resolvedModel: string;
+    try {
+      resolvedModel = resolveHarnessModel(harness, message.model || session?.model);
+    } catch (cause) {
+      if (!(cause instanceof UnsupportedModelError)) throw cause;
+      // The session's model was retired after this prompt was queued: fail the
+      // prompt rather than run it on another model.
+      this.log.warn("prompt.model_unsupported", { model: cause.model, message_id: message.id });
+      if (this.failMessage(message, cause.message, now, "pending")) {
+        this.broadcastPromptQueue();
+        await this.sessionStatus.reconcileAfterExecution(false);
+        await this.processMessageQueue();
+      }
+      return;
+    }
     const inheritedReasoningEffort = inheritReasoningEffort(
       harness,
       resolvedModel,
@@ -976,17 +991,23 @@ export class SessionMessageQueue {
 
     let messageModel: string | null = null;
     if (data.model) {
-      if (strictSelection || isValidModel(data.model)) {
-        // Preserve strict overrides so compatibility rejects them below,
-        // rather than silently substituting the session's model.
-        messageModel = data.model;
-      } else {
-        this.log.warn("Invalid message model, ignoring override", { model: data.model });
+      if (!strictSelection && !isValidModel(data.model)) {
+        // A retired or unknown override is refused, never swapped for the
+        // session's model.
+        throw new HarnessModelIncompatibleError(new UnsupportedModelError(data.model).message);
       }
+      // Strict overrides are kept so compatibility rejects them below.
+      messageModel = data.model;
     }
 
     const effectiveModelForEffort =
       messageModel || this.repository.getSession()?.model || DEFAULT_MODEL;
+    if (!strictSelection && !isValidModel(effectiveModelForEffort)) {
+      // The session was created on a model that has since been retired.
+      throw new HarnessModelIncompatibleError(
+        new UnsupportedModelError(effectiveModelForEffort).message
+      );
+    }
     const incompatibility = checkHarnessPromptCompatibility(
       harness,
       effectiveModelForEffort,

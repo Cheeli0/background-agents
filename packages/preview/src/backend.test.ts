@@ -104,7 +104,7 @@ describe("real authenticated preview backend", () => {
   }, 30_000);
   it("completes turns on every provider's models, not only the default Anthropic one", async () => {
     const b = await start();
-    for (const model of ["openai/gpt-5.5", "xai/grok-4.7"]) {
+    for (const model of ["openai/gpt-6.2-sol", "xai/grok-4.7"]) {
       const { sessionId } = await expectJson<{ sessionId: string }>(
         await b.request("/sessions", {
           method: "POST",

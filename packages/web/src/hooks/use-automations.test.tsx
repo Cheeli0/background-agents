@@ -26,7 +26,7 @@ function automation(id: string, name: string): AutomationListItem {
     scheduleCron: "0 9 * * *",
     scheduleOnceAt: null,
     scheduleTz: "UTC",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     enabled: true,
     nextRunAt: null,

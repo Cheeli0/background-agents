@@ -39,7 +39,7 @@ function mockRepo(id: number, owner: string, name: string, defaultBranch = "main
 }
 
 // Mutable per-test hook results; the hoisted mocks close over them.
-let enabledModelsValue: string[] = ["openai/gpt-5.4"];
+let enabledModelsValue: string[] = ["openai/gpt-6.2-sol"];
 let loadingModelsValue = false;
 
 let reposValue: MockRepo[] = [];
@@ -68,7 +68,7 @@ vi.mock("@/hooks/use-resource-teams", () => ({
 }));
 beforeEach(() => {
   scopeMocks.allowWorkspace = true;
-  enabledModelsValue = ["openai/gpt-5.4"];
+  enabledModelsValue = ["openai/gpt-6.2-sol"];
   loadingModelsValue = false;
 
   environmentsValue = [];
@@ -106,7 +106,7 @@ vi.mock("@/hooks/use-enabled-models", () => ({
     enabledModelOptions: [
       {
         category: "OpenAI",
-        models: [{ id: "openai/gpt-5.4", name: "GPT-5.4", description: "Test model" }],
+        models: [{ id: "openai/gpt-6.2-sol", name: "GPT-6.2 Sol", description: "Test model" }],
       },
     ],
     loading: loadingModelsValue,
@@ -193,6 +193,27 @@ describe("automation cron submission", () => {
       })
     );
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("scheduleCron");
+  });
+
+  it("warns that a saved retired model fails until a supported one is saved", () => {
+    render(
+      <AutomationForm
+        mode="edit"
+        submitting={false}
+        onSubmit={vi.fn()}
+        initialValues={{
+          name: "Nightly",
+          instructions: "Run tests",
+          repositories: singleRepository,
+          model: "anthropic/claude-sonnet-4-6",
+        }}
+      />
+    );
+    expect(
+      screen.getByText(
+        'Model "anthropic/claude-sonnet-4-6" is no longer supported. Choose a supported model. Runs fail until you save a supported model.'
+      )
+    ).toBeInTheDocument();
   });
 
   it("allows editing instructions after a one-shot has fired without changing its time", () => {
@@ -300,7 +321,7 @@ describe("automation cron submission", () => {
       initialValues: {
         name: "Provider pins",
         repositories: singleRepository,
-        model: "openai/gpt-5.4",
+        model: "openai/gpt-6.2-sol",
         instructions: "Run with pins.",
       },
     };
@@ -326,7 +347,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Provider pins",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Run with pins.",
           providerSelections,
         }}
@@ -348,7 +369,7 @@ describe("automation cron submission", () => {
           name: "Watch Sentry",
           triggerType: "sentry",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Triage the alert.",
         }}
       />
@@ -380,7 +401,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Daily review",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           scheduleCron: "0 9 * * *",
           scheduleTz: "UTC",
           instructions: "Review the repo.",
@@ -409,7 +430,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Daily review",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Review the repo.",
           triggerType: "schedule",
         }}
@@ -435,7 +456,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Daily review",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Review the repo.",
         }}
       />
@@ -455,7 +476,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Review new PRs",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Review incoming PRs for regressions.",
           triggerType: "github_event",
         }}
@@ -480,7 +501,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "CI watcher",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Look at the failing workflow.",
           triggerType: "github_event",
           eventType: "workflow_run.completed",
@@ -519,7 +540,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "CI watcher",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Look at the failing workflow.",
           triggerType: "github_event",
           eventType: "workflow_run.completed",
@@ -553,7 +574,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Check suite watcher",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Inspect failed check suites.",
           triggerType: "github_event",
           eventType: "check_suite.completed",
@@ -611,7 +632,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "CI watcher",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Look at the failing workflow.",
           triggerType: "github_event",
           eventType: "workflow_run.completed",
@@ -641,7 +662,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Daily review",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           scheduleCron: "0 9 * * *",
           scheduleTz: "UTC",
           maxRetries: 2,
@@ -669,7 +690,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Review PRs",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Review incoming PRs.",
           triggerType: "github_event",
           eventType: "pull_request.opened",
@@ -694,7 +715,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Review PRs",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Review incoming PRs.",
           triggerType: "github_event",
           eventType: "pull_request.opened",
@@ -720,7 +741,7 @@ describe("automation cron submission", () => {
         initialValues={{
           name: "Review PRs",
           repositories: singleRepository,
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Review incoming PRs.",
           triggerType: "github_event",
           eventType: "pull_request.opened",
@@ -739,7 +760,7 @@ describe("automation cron submission", () => {
 describe("environment binding", () => {
   const scheduleBase = {
     name: "Workspace review",
-    model: "openai/gpt-5.4",
+    model: "openai/gpt-6.2-sol",
     scheduleCron: "0 9 * * 1",
     scheduleTz: "UTC",
     instructions: "Review the workspace.",
@@ -1013,7 +1034,7 @@ describe("environment binding", () => {
 describe("repository selection", () => {
   const scheduleBase = {
     name: "Weekly review",
-    model: "openai/gpt-5.4",
+    model: "openai/gpt-6.2-sol",
     scheduleCron: "0 9 * * 1",
     scheduleTz: "UTC",
     instructions: "Review the repos.",
@@ -1206,7 +1227,7 @@ describe("repository selection", () => {
         onSubmit={vi.fn()}
         initialValues={{
           name: "Review new PRs",
-          model: "openai/gpt-5.4",
+          model: "openai/gpt-6.2-sol",
           instructions: "Review incoming PRs.",
         }}
       />
@@ -1281,7 +1302,7 @@ describe("slack_event automation", () => {
   const slackBase = {
     name: "Triage Slack reports",
     repositories: singleRepository,
-    model: "openai/gpt-5.4",
+    model: "openai/gpt-6.2-sol",
     instructions: "Triage the reported issue.",
     triggerType: "slack_event" as const,
   };
@@ -1496,7 +1517,7 @@ describe("instructions character counter", () => {
   const baseInitialValues = {
     name: "Daily review",
     repositories: singleRepository,
-    model: "openai/gpt-5.4",
+    model: "openai/gpt-6.2-sol",
     scheduleCron: "0 9 * * *",
     scheduleTz: "UTC",
   };
@@ -1543,7 +1564,7 @@ describe("model normalization", () => {
   const baseInitialValues = {
     name: "Daily review",
     repositories: singleRepository,
-    model: "openai/gpt-5.4",
+    model: "openai/gpt-6.2-sol",
     scheduleCron: "0 9 * * *",
     scheduleTz: "UTC",
     instructions: "Review the repo.",
@@ -1565,38 +1586,39 @@ describe("model normalization", () => {
   };
 
   it("coerces a disabled initial model to an enabled one before submit", () => {
-    const onSubmit = submitForm({ model: "anthropic/claude-opus-4-8" });
+    const onSubmit = submitForm({ model: "anthropic/claude-opus-5-5" });
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0].model).toBe("openai/gpt-5.4");
+    expect(onSubmit.mock.calls[0][0].model).toBe("openai/gpt-6.2-sol");
   });
 
   it("leaves an enabled initial model untouched", () => {
-    const onSubmit = submitForm({ model: "openai/gpt-5.4" });
-    expect(onSubmit.mock.calls[0][0].model).toBe("openai/gpt-5.4");
+    const onSubmit = submitForm({ model: "openai/gpt-6.2-sol" });
+    expect(onSubmit.mock.calls[0][0].model).toBe("openai/gpt-6.2-sol");
   });
 
   it("prefers the enabled default when the initial model is disabled", () => {
-    enabledModelsValue = [DEFAULT_MODEL, "openai/gpt-5.4"];
-    const onSubmit = submitForm({ model: "anthropic/claude-opus-4-8" });
+    enabledModelsValue = [DEFAULT_MODEL, "openai/gpt-6.2-sol"];
+    const onSubmit = submitForm({ model: "anthropic/claude-opus-5-5" });
     expect(onSubmit.mock.calls[0][0].model).toBe(DEFAULT_MODEL);
   });
 
   it("drops a reasoning effort the coerced model does not support", () => {
-    // gpt-5.4 supports none/low/medium/high/xhigh but not "max".
-    const onSubmit = submitForm({ model: "anthropic/claude-opus-4-8", reasoningEffort: "max" });
-    expect(onSubmit.mock.calls[0][0].model).toBe("openai/gpt-5.4");
+    // claude-haiku-4-5 supports high/max but not "xhigh".
+    enabledModelsValue = ["anthropic/claude-haiku-4-5"];
+    const onSubmit = submitForm({ model: "anthropic/claude-opus-5-5", reasoningEffort: "xhigh" });
+    expect(onSubmit.mock.calls[0][0].model).toBe("anthropic/claude-haiku-4-5");
     expect(onSubmit.mock.calls[0][0].reasoningEffort).toBeNull();
   });
 
   it("keeps a reasoning effort the coerced model supports", () => {
-    const onSubmit = submitForm({ model: "anthropic/claude-opus-4-8", reasoningEffort: "high" });
-    expect(onSubmit.mock.calls[0][0].model).toBe("openai/gpt-5.4");
+    const onSubmit = submitForm({ model: "anthropic/claude-opus-5-5", reasoningEffort: "high" });
+    expect(onSubmit.mock.calls[0][0].model).toBe("openai/gpt-6.2-sol");
     expect(onSubmit.mock.calls[0][0].reasoningEffort).toBe("high");
   });
 
   it("does not submit while enabled models are still loading", () => {
     loadingModelsValue = true;
-    const onSubmit = submitForm({ model: "anthropic/claude-opus-4-8" });
+    const onSubmit = submitForm({ model: "anthropic/claude-opus-5-5" });
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -1607,7 +1629,7 @@ describe("model normalization", () => {
         mode="edit"
         submitting={false}
         onSubmit={vi.fn()}
-        initialValues={{ ...baseInitialValues, model: "anthropic/claude-opus-4-8" }}
+        initialValues={{ ...baseInitialValues, model: "anthropic/claude-opus-5-5" }}
       />
     );
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
@@ -1618,7 +1640,7 @@ describe("agent harness", () => {
   const baseInitialValues = {
     name: "Daily review",
     repositories: singleRepository,
-    model: "openai/gpt-5.4",
+    model: "openai/gpt-6.2-sol",
     scheduleCron: "0 9 * * *",
     scheduleTz: "UTC",
     instructions: "Review the repo.",
@@ -1639,8 +1661,8 @@ describe("agent harness", () => {
   };
 
   it("offers Codex alongside the existing harnesses", () => {
-    enabledModelsValue = ["openai/gpt-5.6-sol"];
-    renderForm({ harness: "codex", model: "openai/gpt-5.6-sol" }, "edit");
+    enabledModelsValue = ["openai/gpt-6.2-sol"];
+    renderForm({ harness: "codex", model: "openai/gpt-6.2-sol" }, "edit");
     expect(screen.getByRole("combobox", { name: "Agent harness" })).toHaveTextContent("Codex");
     fireEvent.click(screen.getByRole("combobox", { name: "Agent harness" }));
     const picker = within(screen.getByRole("listbox"));
@@ -1650,12 +1672,12 @@ describe("agent harness", () => {
   });
 
   it("submits native Codex max with explicit API routing", () => {
-    enabledModelsValue = ["openai/gpt-5.6-sol"];
+    enabledModelsValue = ["openai/gpt-6.2-sol"];
 
     const { onSubmit, submit } = renderForm(
       {
         harness: "codex",
-        model: "openai/gpt-5.6-sol",
+        model: "openai/gpt-6.2-sol",
         reasoningEffort: "max",
         providerSelections: { openai: { mode: "api_key" } },
       },
@@ -1666,41 +1688,35 @@ describe("agent harness", () => {
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         harness: "codex",
-        model: "openai/gpt-5.6-sol",
+        model: "openai/gpt-6.2-sol",
         reasoningEffort: "max",
         providerSelections: { openai: { mode: "api_key" } },
       })
     );
   });
 
-  it.each([
-    { from: "opencode", effort: "none", to: "Codex", harness: "codex" },
-    { from: "codex", effort: "max", to: "OpenCode", harness: "opencode" },
-  ] as const)(
-    "shows and submits the model default after switching $from to $to with an unsupported effort",
-    ({ from, effort, to, harness }) => {
-      enabledModelsValue = ["openai/gpt-5.6-sol"];
-      const { onSubmit, submit } = renderForm(
-        {
-          harness: from,
-          model: "openai/gpt-5.6-sol",
-          reasoningEffort: effort,
-          providerSelections: { openai: { mode: "api_key" } },
-        },
-        "edit"
-      );
-      fireEvent.click(screen.getByRole("combobox", { name: "Agent harness" }));
-      fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: to }));
-      // The control shows what will be saved, never a blank value.
-      expect(screen.getByRole("combobox", { name: "Reasoning Effort" })).toHaveTextContent(
-        "Use model default"
-      );
-      submit();
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({ harness, reasoningEffort: null })
-      );
-    }
-  );
+  it("shows and submits the model default after switching to Codex with an unsupported effort", () => {
+    enabledModelsValue = ["openai/gpt-6.2-sol"];
+    const { onSubmit, submit } = renderForm(
+      {
+        harness: "opencode",
+        model: "openai/gpt-6.2-sol",
+        reasoningEffort: "none",
+        providerSelections: { openai: { mode: "api_key" } },
+      },
+      "edit"
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Agent harness" }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "Codex" }));
+    // The control shows what will be saved, never a blank value.
+    expect(screen.getByRole("combobox", { name: "Reasoning Effort" })).toHaveTextContent(
+      "Use model default"
+    );
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ harness: "codex", reasoningEffort: null })
+    );
+  });
 
   it("submits the built-in harness when none was chosen", () => {
     const { onSubmit, submit } = renderForm({}, "create");
@@ -1710,12 +1726,12 @@ describe("agent harness", () => {
 
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
       harness: DEFAULT_HARNESS,
-      model: "openai/gpt-5.4",
+      model: "openai/gpt-6.2-sol",
     });
   });
 
   it("loads an existing automation's harness and keeps the model inside it", () => {
-    enabledModelsValue = ["openai/gpt-5.4", DEFAULT_MODEL];
+    enabledModelsValue = ["openai/gpt-6.2-sol", DEFAULT_MODEL];
     const { onSubmit, submit } = renderForm({ harness: "claude" }, "edit");
     expect(screen.getByRole("combobox", { name: "Agent harness" })).toHaveTextContent(
       "Claude Agent"
@@ -1727,7 +1743,7 @@ describe("agent harness", () => {
   });
 
   it("submits a newly selected harness and coerces the model to one it can run", () => {
-    enabledModelsValue = ["openai/gpt-5.4", DEFAULT_MODEL];
+    enabledModelsValue = ["openai/gpt-6.2-sol", DEFAULT_MODEL];
     const { onSubmit, submit } = renderForm({}, "create");
 
     fireEvent.click(screen.getByRole("combobox", { name: "Agent harness" }));
@@ -1741,7 +1757,7 @@ describe("agent harness", () => {
   });
 
   it("drops a connected Anthropic account pin when the harness switches to OpenCode", () => {
-    enabledModelsValue = ["openai/gpt-5.4", DEFAULT_MODEL];
+    enabledModelsValue = ["openai/gpt-6.2-sol", DEFAULT_MODEL];
     const accountId = "b".repeat(32);
     const { onSubmit, submit } = renderForm(
       {
@@ -1765,7 +1781,7 @@ describe("agent harness", () => {
   });
 
   it("blocks submission and says so when the harness can run none of the enabled models", () => {
-    enabledModelsValue = ["openai/gpt-5.4"];
+    enabledModelsValue = ["openai/gpt-6.2-sol"];
     const { onSubmit, submit } = renderForm({ harness: "claude" }, "edit");
 
     expect(screen.getByRole("alert")).toHaveTextContent(

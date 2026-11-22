@@ -12,15 +12,15 @@ import {
 const REQUEST_ID = "00000000-0000-4000-8000-000000000001";
 const TURN_PLAN = {
   sessionDefaults: {
-    model: "anthropic/claude-sonnet-4-6" as const,
+    model: "anthropic/claude-sonnet-5-5" as const,
     reasoningEffort: "high" as const,
   },
   promptOverrides: {
-    model: "openai/gpt-5.6-sol" as const,
+    model: "openai/gpt-6.2-sol" as const,
     reasoningEffort: "high" as const,
   },
   effective: {
-    model: "openai/gpt-5.6-sol" as const,
+    model: "openai/gpt-6.2-sol" as const,
     reasoningEffort: "high" as const,
   },
 };
@@ -129,7 +129,7 @@ describe("pending request store", () => {
       ...request(),
       turnPlan: {
         ...TURN_PLAN,
-        effective: { model: "openai/gpt-5.4", reasoningEffort: "high" },
+        effective: { model: "openai/gpt-6.2-astra", reasoningEffort: "high" },
       },
     },
   ])("rejects malformed records: %j", async (record) => {
@@ -144,7 +144,7 @@ describe("pending request store", () => {
       userId: "U123",
       messageTs: "222.000003",
       threadContextSource: { threadTs: "111.222", beforeTs: "222.000003" },
-      inlinePromptOptions: { model: "openai/gpt-5.6-sol", reasoningEffort: "high" },
+      inlinePromptOptions: { model: "openai/gpt-6.2-sol", reasoningEffort: "high" },
     };
     mocks.get.mockResolvedValue(legacy);
 

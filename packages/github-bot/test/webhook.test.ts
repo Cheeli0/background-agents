@@ -989,7 +989,7 @@ describe("POST /webhooks/github", () => {
       const signature = await sign(SECRET, body);
       const env = makeEnv();
       const ctx = makeCtx();
-      env.DEFAULT_MODEL = "gpt-6-sol";
+      env.DEFAULT_MODEL = "gpt-6.2-sol";
       const cpFetch = vi.mocked(env.CONTROL_PLANE.fetch);
       cpFetch.mockImplementation(async (url) => {
         if (String(url).includes("/integration-settings/github/resolved/")) {
@@ -1032,7 +1032,7 @@ describe("POST /webhooks/github", () => {
       await flushWaitUntil(ctx, 1);
       expect(postIssueComment).toHaveBeenCalledTimes(commentsBefore + 2);
       expect(vi.mocked(postIssueComment).mock.calls.at(-1)?.[2]).toContain(
-        'Model "openai/gpt-6-sol" cannot run on the Claude Agent harness.'
+        'Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.'
       );
       expect(cpFetch.mock.calls.some(([url]) => String(url).includes("/sessions"))).toBe(false);
       expect(await env.GITHUB_KV.get("delivery-dispatch:delivery-refusal-retry")).toBe("processed");
@@ -1103,7 +1103,7 @@ describe("POST /webhooks/github", () => {
           if (builtin === "terminal skip" || compatibilityRefusal) {
             return Response.json({
               config: {
-                model: compatibilityRefusal ? "gpt-6-sol" : null,
+                model: compatibilityRefusal ? "gpt-6.2-sol" : null,
                 harness: compatibilityRefusal ? "claude" : "opencode",
                 reasoningEffort: null,
                 autoReviewOnOpen: true,
@@ -1188,7 +1188,7 @@ describe("POST /webhooks/github", () => {
       expect(postIssueComment).toHaveBeenCalledTimes(refusalCommentsBefore + (isRefusal ? 1 : 0));
       if (compatibilityRefusal) {
         expect(vi.mocked(postIssueComment).mock.calls.at(-1)?.[2]).toContain(
-          'Model "openai/gpt-6-sol" cannot run on the Claude Agent harness.'
+          'Model "openai/gpt-6.2-sol" cannot run on the Claude Agent harness.'
         );
       }
       expect(await env.GITHUB_KV.get("delivery-dispatch:delivery-forward-retry")).toBe(

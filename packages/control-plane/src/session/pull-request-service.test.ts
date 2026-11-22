@@ -49,7 +49,7 @@ function createTestHarness(
     current_sha: null,
     agent_session_id: null,
     harness: "opencode",
-    model: "anthropic/claude-sonnet-4-5",
+    model: "anthropic/claude-sonnet-5-5",
     reasoning_effort: null,
     status: "active",
     status_revision: 1,

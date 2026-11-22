@@ -23,8 +23,8 @@ const items = [
     category: "Anthropic",
     models: [
       {
-        id: "anthropic/claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
+        id: "anthropic/claude-sonnet-5-5",
+        name: "Claude Sonnet 5.5",
         description: "Balanced, fast coding",
       },
     ],
@@ -33,14 +33,19 @@ const items = [
     category: "OpenAI",
     models: [
       {
-        id: "openai/gpt-5.6-sol",
-        name: "GPT 5.6 Sol",
+        id: "openai/gpt-6.2-sol",
+        name: "GPT-6.2 Sol",
         description: "Frontier model",
       },
+    ],
+  },
+  {
+    category: "OpenCode",
+    models: [
       {
-        id: "openai/gpt-5.5",
-        name: "GPT 5.5",
-        description: "Latest flagship model",
+        id: "opencode/kimi-k3",
+        name: "Kimi K3",
+        description: "Moonshot AI",
       },
     ],
   },
@@ -48,8 +53,8 @@ const items = [
     category: "xAI",
     models: [
       {
-        id: "xai/grok-4.6",
-        name: "Grok 4.6",
+        id: "xai/grok-4.7",
+        name: "Grok 4.7",
         description: "Latest Grok model",
       },
     ],
@@ -60,7 +65,7 @@ describe("ModelReasoningSelector", () => {
   it("combines the selected model and effort in one trigger", () => {
     render(
       <ModelReasoningSelector
-        selectedModel="anthropic/claude-sonnet-4-6"
+        selectedModel="anthropic/claude-sonnet-5-5"
         reasoningEffort="high"
         items={items}
         onModelChange={vi.fn()}
@@ -69,7 +74,7 @@ describe("ModelReasoningSelector", () => {
     );
 
     const trigger = screen.getByRole("button", { name: /model and effort/i });
-    expect(trigger).toHaveTextContent("claude sonnet 4.6High");
+    expect(trigger).toHaveTextContent("claude sonnet 5.5High");
     expect(trigger.querySelectorAll("svg")).toHaveLength(1);
   });
 
@@ -77,7 +82,7 @@ describe("ModelReasoningSelector", () => {
     const onHarnessChange = vi.fn();
     render(
       <ModelReasoningSelector
-        selectedModel="anthropic/claude-sonnet-4-6"
+        selectedModel="anthropic/claude-sonnet-5-5"
         reasoningEffort="high"
         items={items}
         onModelChange={vi.fn()}
@@ -88,9 +93,9 @@ describe("ModelReasoningSelector", () => {
     );
 
     const trigger = screen.getByRole("button", {
-      name: "Agent, model and effort: Claude Agent, claude sonnet 4.6, High",
+      name: "Agent, model and effort: Claude Agent, claude sonnet 5.5, High",
     });
-    expect(trigger).toHaveTextContent("Claude Agent:claude sonnet 4.6High");
+    expect(trigger).toHaveTextContent("Claude Agent:claude sonnet 5.5High");
     expect(trigger.querySelector("svg title")).toHaveTextContent("Anthropic");
 
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
@@ -107,7 +112,7 @@ describe("ModelReasoningSelector", () => {
   it("keeps the agent prefix but offers no Agent row once the harness is fixed", async () => {
     render(
       <ModelReasoningSelector
-        selectedModel="anthropic/claude-sonnet-4-6"
+        selectedModel="anthropic/claude-sonnet-5-5"
         reasoningEffort="high"
         items={items}
         onModelChange={vi.fn()}
@@ -127,7 +132,7 @@ describe("ModelReasoningSelector", () => {
     const onHarnessChange = vi.fn();
     render(
       <ModelReasoningSelector
-        selectedModel="anthropic/claude-sonnet-4-6"
+        selectedModel="anthropic/claude-sonnet-5-5"
         reasoningEffort="high"
         items={items}
         onModelChange={vi.fn()}
@@ -151,7 +156,7 @@ describe("ModelReasoningSelector", () => {
     const onReasoningEffortChange = vi.fn();
     render(
       <ModelReasoningSelector
-        selectedModel="anthropic/claude-sonnet-4-6"
+        selectedModel="anthropic/claude-sonnet-5-5"
         reasoningEffort="high"
         items={items}
         onModelChange={onModelChange}
@@ -164,11 +169,11 @@ describe("ModelReasoningSelector", () => {
     const modelMenu = await screen.findByRole("menuitem", { name: /model/i });
     modelMenu.focus();
     fireEvent.keyDown(modelMenu, { key: "ArrowRight" });
-    const grokOption = await screen.findByRole("menuitemradio", { name: /grok 4.6/i });
+    const grokOption = await screen.findByRole("menuitemradio", { name: /grok 4.7/i });
     expect(grokOption.closest('[role="menu"]')).toHaveClass("max-h-56", "overflow-y-auto");
     expect(grokOption.closest('[role="menu"]')).toHaveAttribute("data-align", "end");
     fireEvent.click(grokOption);
-    expect(onModelChange).toHaveBeenCalledWith("xai/grok-4.6");
+    expect(onModelChange).toHaveBeenCalledWith("xai/grok-4.7");
 
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     const effortMenu = await screen.findByRole("menuitem", { name: /effort/i });
@@ -183,7 +188,7 @@ describe("ModelReasoningSelector", () => {
   it("shows the default effort when switching back from Grok", async () => {
     const { rerender } = render(
       <ModelReasoningSelector
-        selectedModel="xai/grok-4.6"
+        selectedModel="xai/grok-4.7"
         reasoningEffort="high"
         items={items}
         onModelChange={vi.fn()}
@@ -193,7 +198,7 @@ describe("ModelReasoningSelector", () => {
 
     rerender(
       <ModelReasoningSelector
-        selectedModel="openai/gpt-5.6-sol"
+        selectedModel="openai/gpt-6.2-sol"
         reasoningEffort={undefined}
         items={items}
         onModelChange={vi.fn()}
@@ -202,7 +207,7 @@ describe("ModelReasoningSelector", () => {
     );
 
     const trigger = screen.getByRole("button", { name: /model and effort/i });
-    expect(trigger).toHaveTextContent("gpt 5.6 solMedium");
+    expect(trigger).toHaveTextContent("gpt-6.2 solMedium");
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     const effortMenu = await screen.findByRole("menuitem", { name: /effort.*medium/i });
     effortMenu.focus();
@@ -217,7 +222,7 @@ describe("ModelReasoningSelector", () => {
     const onReasoningEffortChange = vi.fn();
     const { rerender } = render(
       <ModelReasoningSelector
-        selectedModel="openai/gpt-5.5"
+        selectedModel="opencode/kimi-k3"
         reasoningEffort="high"
         items={items}
         onModelChange={vi.fn()}
@@ -235,7 +240,7 @@ describe("ModelReasoningSelector", () => {
 
     rerender(
       <ModelReasoningSelector
-        selectedModel="openai/gpt-5.5"
+        selectedModel="opencode/kimi-k3"
         reasoningEffort={undefined}
         items={items}
         onModelChange={vi.fn()}
@@ -243,7 +248,7 @@ describe("ModelReasoningSelector", () => {
       />
     );
     expect(screen.getByRole("button", { name: /model and effort/i })).toHaveTextContent(
-      "gpt 5.5Default"
+      "kimi k3Default"
     );
   });
 
@@ -251,7 +256,7 @@ describe("ModelReasoningSelector", () => {
     mocks.isMobile = true;
     render(
       <ModelReasoningSelector
-        selectedModel="anthropic/claude-sonnet-4-6"
+        selectedModel="anthropic/claude-sonnet-5-5"
         reasoningEffort="high"
         items={items}
         onModelChange={vi.fn()}
@@ -267,7 +272,7 @@ describe("ModelReasoningSelector", () => {
     expect(screen.getByRole("menu").style.maxHeight).toBe(
       "min(14rem, var(--radix-dropdown-menu-content-available-height))"
     );
-    expect(screen.getByRole("menuitemradio", { name: /claude sonnet 4.6/i })).toHaveAttribute(
+    expect(screen.getByRole("menuitemradio", { name: /claude sonnet 5.5/i })).toHaveAttribute(
       "aria-checked",
       "true"
     );
@@ -280,7 +285,7 @@ it("offers Codex in the mobile agent picker", async () => {
   const change = vi.fn();
   render(
     <ModelReasoningSelector
-      selectedModel="openai/gpt-5.6-sol"
+      selectedModel="openai/gpt-6.2-sol"
       reasoningEffort="max"
       items={items}
       onModelChange={vi.fn()}

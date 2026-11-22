@@ -57,7 +57,7 @@ vi.mock("../sessions/session-launcher", () => ({
   loadAuthoritativeSlackLaunchSettings: vi.fn(),
   startSessionAndSendPrompt: vi.fn(async () => ({
     sessionId: "session-1",
-    sessionDefaults: { model: "openai/gpt-5.4", reasoningEffort: "high" },
+    sessionDefaults: { model: "openai/gpt-6.2-sol", reasoningEffort: "high" },
     differsFromUserDefaults: false,
   })),
 }));
@@ -80,15 +80,15 @@ const REQUEST_ID = "00000000-0000-4000-8000-000000000001";
 const CLARIFICATION_MESSAGE_TS = "333.444";
 const TURN_PLAN = {
   sessionDefaults: {
-    model: "anthropic/claude-sonnet-4-6" as const,
+    model: "anthropic/claude-sonnet-5-5" as const,
     reasoningEffort: "high" as const,
   },
   promptOverrides: {
-    model: "openai/gpt-5.6-sol" as const,
+    model: "openai/gpt-6.2-sol" as const,
     reasoningEffort: "high" as const,
   },
   effective: {
-    model: "openai/gpt-5.6-sol" as const,
+    model: "openai/gpt-6.2-sol" as const,
     reasoningEffort: "high" as const,
   },
 };
@@ -290,14 +290,14 @@ describe("handleTargetSelection", () => {
     vi.mocked(getLegacyPendingRequest).mockResolvedValue({
       message: "Fix the deploy",
       userId: "U123",
-      inlinePromptOptions: { model: "openai/gpt-5.6-sol", reasoningEffort: "high" },
+      inlinePromptOptions: { model: "openai/gpt-6.2-sol", reasoningEffort: "high" },
     });
     const launchSettings = {
       modelSource: "app-home" as const,
-      enabledModels: ["openai/gpt-5.6-sol" as const],
+      enabledModels: ["openai/gpt-6.2-sol" as const],
       slackConfig: { harness: "opencode" as const },
       userPreferences: {
-        model: "anthropic/claude-sonnet-4-6",
+        model: "anthropic/claude-sonnet-5-5",
         modelOrigin: "app-home" as const,
         reasoningEffort: "max",
         branch: undefined,
@@ -318,7 +318,7 @@ describe("handleTargetSelection", () => {
       expect.objectContaining({
         launchPlan: {
           sessionDefaults: {
-            model: "openai/gpt-5.6-sol",
+            model: "openai/gpt-6.2-sol",
             reasoningEffort: "high",
           },
         },

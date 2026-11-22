@@ -78,7 +78,8 @@ describe("getLinearConfig", () => {
       const fetch = vi.fn(async () => {
         if (failure === "network") throw new Error("Control plane unavailable");
         if (failure === "invalid-json") return new Response("{not-json");
-        if (failure === "malformed") return Response.json({ config: { model: "openai/gpt-5.4" } });
+        if (failure === "malformed")
+          return Response.json({ config: { model: "openai/gpt-6.2-sol" } });
         return new Response(null, {
           status: failure === "denied" ? 403 : failure === "not-found" ? 404 : 503,
         });

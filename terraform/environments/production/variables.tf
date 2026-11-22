@@ -370,7 +370,7 @@ variable "linear_api_key" {
 variable "linear_bot_default_model" {
   description = "Model the Linear bot starts a session with when neither the repository's integration config, the requesting user's preference, nor a model label selects one. A canonical \"provider/model\" id, or a bare \"claude-\"/\"gpt-\" id the bots normalize into that provider's namespace."
   type        = string
-  default     = "claude-sonnet-4-6"
+  default     = "anthropic/claude-sonnet-5-5"
   nullable    = false
 
   # See github_bot_default_model: a prefix or slash with nothing after it names

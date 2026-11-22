@@ -331,7 +331,7 @@ describe("sandbox boot phase in the subscribe snapshot", () => {
         messageCount: 0,
         createdAt: 1,
         harness: "opencode",
-        model: "anthropic/claude-sonnet-4-5",
+        model: "anthropic/claude-sonnet-5-5",
         isProcessing: false,
         parentSessionId: null,
         totalCost: 0,

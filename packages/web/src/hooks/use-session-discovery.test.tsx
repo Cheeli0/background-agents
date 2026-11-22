@@ -25,7 +25,7 @@ function session(id: string): SessionListSummary {
     status: "completed",
     repoOwner: "acme",
     repoName: "web",
-    model: "anthropic/claude-sonnet-4-6",
+    model: "anthropic/claude-sonnet-5-5",
     reasoningEffort: null,
     baseBranch: null,
     harness: "opencode",

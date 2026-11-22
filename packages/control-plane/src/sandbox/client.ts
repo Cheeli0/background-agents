@@ -516,7 +516,7 @@ export class ModalClient {
           agent_session_id: request.agentSessionId || null,
           harness: request.harness,
           provider: request.provider || "anthropic",
-          model: request.model || "claude-sonnet-4-6",
+          model: request.model || "claude-sonnet-5-5",
           user_env_vars: request.userEnvVars || null,
           repo_image_id: request.prebuiltImageId || null,
           repo_image_sha: request.prebuiltImageSha || null,

@@ -43,17 +43,19 @@ export function resolveStaticTarget(
 // name is ambiguous or unreachable.
 const MODEL_LABEL_ALIASES = {
   haiku: "anthropic/claude-haiku-4-5",
-  sonnet: "anthropic/claude-sonnet-4-5",
-  opus: "anthropic/claude-opus-4-5",
+  sonnet: "anthropic/claude-sonnet-5-5",
+  opus: "anthropic/claude-opus-5-5",
   fable: "anthropic/claude-fable-5-1",
   "glm-5.3-flash": "opencode-go/glm-5.3-flash",
   "deepseek-v4.1-flash": "opencode-go/deepseek-v4.1-flash",
 } satisfies Record<string, ValidModel>;
 
 /**
- * Extract model override from issue labels (e.g., "model:opus" → "anthropic/claude-opus-4-5").
+ * Extract model override from issue labels (e.g., "model:opus" → "anthropic/claude-opus-5-5").
+ * A label naming no supported model (often a retired one) is returned as written,
+ * so the webhook handler refuses it instead of ignoring it.
  */
-export function extractModelFromLabels(labels: Array<{ name: string }>): ValidModel | null {
+export function extractModelFromLabels(labels: Array<{ name: string }>): string | null {
   for (const label of labels) {
     const match = label.name.match(/^model:(.+)$/i);
     if (match) {
@@ -70,9 +72,10 @@ export function extractModelFromLabels(labels: Array<{ name: string }>): ValidMo
 
       // Catalog IDs hyphenate versions (claude-opus-5-5); retry the dotted
       // spelling's hyphenated form. Exact matches above always win first, so
-      // dotted catalog IDs (gpt-5.6-sol, glm-5.3-flash) are unaffected.
+      // dotted catalog IDs (gpt-6.2-sol, glm-5.3-flash) are unaffected.
       const hyphenated = normalizeModelId(candidate.replace(/\./g, "-"));
       if (isValidModel(hyphenated)) return hyphenated;
+      return match[1];
     }
   }
   return null;
@@ -114,7 +117,9 @@ export function resolveSessionAgentSettings(input: ResolveSessionAgentInput): {
     modelSource = "label";
   }
 
-  const normalizedModel = getValidModelOrDefault(model);
+  // A retired model is kept as chosen so the webhook handler refuses it rather
+  // than starting the session on another model.
+  const normalizedModel = model ? normalizeModelId(model) : getValidModelOrDefault(model);
   const harness = input.configHarness ?? DEFAULT_HARNESS;
   return {
     harness,

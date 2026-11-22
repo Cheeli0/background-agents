@@ -231,7 +231,7 @@ describe("getProviderAuthenticationError", () => {
   it("rejects a Grok launch whose legacy fallback has no usable xAI credential", () => {
     expect(
       getProviderAuthenticationError(
-        "xai/grok-4.5",
+        "xai/grok-4.7",
         {},
         {
           openai: "legacy_scoped_oauth",
@@ -252,7 +252,7 @@ describe("getProviderAuthenticationError", () => {
     ["legacy refresh token", { XAI_OAUTH_MANAGED: "1" }, "legacy_scoped_oauth"],
   ] as const)("accepts xAI %s authentication", (_label, sandboxEnv, authMode) => {
     expect(
-      getProviderAuthenticationError("xai/grok-4.5", sandboxEnv, {
+      getProviderAuthenticationError("xai/grok-4.7", sandboxEnv, {
         openai: "legacy_scoped_oauth",
         xai: authMode,
         anthropic: "api_key",
@@ -263,7 +263,7 @@ describe("getProviderAuthenticationError", () => {
   it("rejects explicit OpenAI API-key mode without an API key", () => {
     expect(
       getProviderAuthenticationError(
-        "openai/gpt-5.4",
+        "openai/gpt-6.2-sol",
         {},
         {
           openai: "api_key",
@@ -309,7 +309,7 @@ describe("getProviderAuthenticationError", () => {
   it("does not validate providers outside subscription account routing", () => {
     expect(
       getProviderAuthenticationError(
-        "anthropic/claude-opus-4-6",
+        "anthropic/claude-opus-5-5",
         {},
         {
           openai: "legacy_scoped_oauth",

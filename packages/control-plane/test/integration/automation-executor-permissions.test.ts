@@ -47,7 +47,7 @@ async function saveAutomation(target: string) {
     `INSERT INTO automations
        (id, owner_team_id, name, instructions, schedule_cron, model, created_by, user_id, created_at, updated_at)
      VALUES ('executor-permissions', ?, 'Saved executor permissions', 'Run tests', '0 9 * * *',
-       'anthropic/claude-sonnet-4-6', ?, ?, 1, 1)`
+       'anthropic/claude-sonnet-5-5', ?, ?, 1, 1)`
   )
     .bind(TEAM, EXECUTOR, EXECUTOR)
     .run();

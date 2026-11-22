@@ -3,22 +3,16 @@ import { getReasoningConfig } from "@open-inspect/shared/models";
 import { resolveModelPreference } from "./model-selection";
 import { resolveHarnessModelSelection } from "./session-harness";
 
-const MODEL = "openai/gpt-5.6-sol";
+const MODEL = "openai/gpt-6.2-sol";
 
 describe("harness-aware reasoning preference", () => {
-  it("keeps a Codex-only effort that the generic catalog does not offer", () => {
-    expect(getReasoningConfig(MODEL)?.efforts).not.toContain("max");
+  it("replaces an effort the harness cannot run with that model's default", () => {
+    const model = "anthropic/claude-haiku-4-5";
+    expect(getReasoningConfig(model)?.efforts).not.toContain("xhigh");
     expect(
-      resolveModelPreference({ model: MODEL, reasoningEffort: "max" }, undefined, "codex")
+      resolveModelPreference({ model, reasoningEffort: "xhigh" }, undefined, "claude")
         .reasoningEffort
-    ).toBe("max");
-  });
-
-  it("still replaces an effort the harness cannot run with that harness's default", () => {
-    expect(
-      resolveModelPreference({ model: MODEL, reasoningEffort: "max" }, undefined, "opencode")
-        .reasoningEffort
-    ).toBe(getReasoningConfig(MODEL)?.default);
+    ).toBe(getReasoningConfig(model)?.default);
   });
 
   it("carries the Codex selection through the composer's model selection", () => {

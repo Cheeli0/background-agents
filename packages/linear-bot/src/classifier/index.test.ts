@@ -412,7 +412,7 @@ describe("classifyRepo provider dispatch", () => {
     const { kv } = createFakeKV();
     const env = makeLinearBotEnv(kv, {
       CONTROL_PLANE: twoRepoControlPlane(),
-      CLASSIFICATION_MODEL: "openai/gpt-6.1-sol",
+      CLASSIFICATION_MODEL: "openai/gpt-6.2-sol",
       CLASSIFICATION_REASONING_EFFORT: "low",
       OPENAI_API_KEY: "openai-key",
     });
@@ -438,7 +438,7 @@ describe("classifyRepo provider dispatch", () => {
     await classify(env);
 
     const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
-    expect(body.model).toBe("gpt-6.1-sol");
+    expect(body.model).toBe("gpt-6.2-sol");
     expect(body.reasoning_effort).toBe("low");
   });
 

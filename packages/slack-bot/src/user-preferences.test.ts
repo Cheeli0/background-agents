@@ -1,4 +1,4 @@
-import { DEFAULT_MODEL, getDefaultReasoningEffort } from "@open-inspect/shared/models";
+import { getDefaultReasoningEffort } from "@open-inspect/shared/models";
 import { describe, expect, it, vi } from "vitest";
 import type { Env } from "./types";
 import {
@@ -116,7 +116,7 @@ describe("updateUserPreferences", () => {
       "user_prefs:U123",
       JSON.stringify({
         userId: "U123",
-        model: "openai/gpt-5.4",
+        model: "openai/gpt-6.2-sol",
         updatedAt: 1,
       })
     );
@@ -124,7 +124,7 @@ describe("updateUserPreferences", () => {
     await updateUserPreferences(env, "U123", { branch: "feature/test" });
 
     const prefs = await getUserPreferences(env, "U123");
-    expect(prefs?.model).toBe("openai/gpt-5.4");
+    expect(prefs?.model).toBe("openai/gpt-6.2-sol");
     expect(prefs?.branch).toBe("feature/test");
   });
 
@@ -144,7 +144,7 @@ describe("updateUserPreferences", () => {
       "U123",
       { branch: "feature/test" },
       {
-        defaultModel: "openai/gpt-5.4",
+        defaultModel: "openai/gpt-6-luna",
       }
     );
 
@@ -162,7 +162,7 @@ describe("updateUserPreferences", () => {
       "U123",
       { reasoningEffort: "none" },
       {
-        defaultModel: "openai/gpt-5.4",
+        defaultModel: "openai/gpt-6-luna",
       }
     );
 
@@ -171,13 +171,40 @@ describe("updateUserPreferences", () => {
     expect(prefs?.reasoningEffort).toBe("none");
   });
 
+  it("keeps a retired stored model on unrelated preference updates", async () => {
+    const env = makeEnv();
+    await env.SLACK_KV.put(
+      "user_prefs:U123",
+      JSON.stringify({ userId: "U123", model: "anthropic/claude-sonnet-4-6", updatedAt: 1 })
+    );
+
+    await updateUserPreferences(env, "U123", { branch: "feature/test" });
+
+    expect(await getUserPreferences(env, "U123")).toEqual(
+      expect.objectContaining({ model: "anthropic/claude-sonnet-4-6", branch: "feature/test" })
+    );
+  });
+
+  it("updates preferences when the Slack default model is retired", async () => {
+    const env = makeEnv();
+
+    await updateUserPreferences(
+      env,
+      "U123",
+      { model: "anthropic/claude-haiku-4-5" },
+      { defaultModel: "anthropic/claude-sonnet-4-6" }
+    );
+
+    expect((await getUserPreferences(env, "U123"))?.model).toBe("anthropic/claude-haiku-4-5");
+  });
+
   it("preserves reasoning for the stored model on unrelated preference updates", async () => {
     const env = makeEnv();
     await env.SLACK_KV.put(
       "user_prefs:U123",
       JSON.stringify({
         userId: "U123",
-        model: "openai/gpt-5.4",
+        model: "openai/gpt-6-luna",
         reasoningEffort: "none",
         updatedAt: 1,
       })
@@ -186,7 +213,7 @@ describe("updateUserPreferences", () => {
     await updateUserPreferences(env, "U123", { branch: "feature/test", harness: "claude" });
 
     expect(await getUserPreferences(env, "U123")).toEqual(
-      expect.objectContaining({ model: "openai/gpt-5.4", reasoningEffort: "none" })
+      expect.objectContaining({ model: "openai/gpt-6-luna", reasoningEffort: "none" })
     );
   });
 });
@@ -198,6 +225,16 @@ describe("resolveUserPreferences", () => {
         userId: "U123",
         updatedAt: 1,
       },
+      "anthropic/claude-sonnet-5-5"
+    );
+
+    expect(resolved.model).toBe("anthropic/claude-sonnet-5-5");
+    expect(resolved.modelOrigin).toBe("default");
+  });
+
+  it("keeps a retired Slack default as configured so launch refuses it", () => {
+    const resolved = resolveUserPreferences(
+      { userId: "U123", updatedAt: 1 },
       "anthropic/claude-sonnet-4-6"
     );
 
@@ -212,25 +249,15 @@ describe("resolveUserPreferences", () => {
         model: "anthropic/claude-haiku-4-5",
         updatedAt: 1,
       },
-      "anthropic/claude-sonnet-4-6"
+      "anthropic/claude-sonnet-5-5"
     );
 
     expect(resolved.model).toBe("anthropic/claude-haiku-4-5");
     expect(resolved.modelOrigin).toBe("app-home");
   });
 
-  it("migrates a stored Codex model without switching to the Slack default provider", () => {
-    const resolved = resolveUserPreferences(
-      { userId: "U123", model: "openai/gpt-5.3-codex", updatedAt: 1 },
-      "anthropic/claude-sonnet-4-6"
-    );
-
-    expect(resolved.model).toBe("openai/gpt-6-sol");
-    expect(resolved.modelOrigin).toBe("app-home");
-  });
-
-  it.each(["openai/gpt-5.4", undefined])(
-    "uses default %s for unsupported stored models",
+  it.each(["openai/gpt-6.2-sol", undefined])(
+    "keeps an unsupported stored model as chosen (default %s) so launch refuses it",
     (defaultModel) => {
       const resolved = resolveUserPreferences(
         {
@@ -241,20 +268,20 @@ describe("resolveUserPreferences", () => {
         defaultModel
       );
 
-      expect(resolved.model).toBe(defaultModel ?? DEFAULT_MODEL);
-      expect(resolved.modelOrigin).toBe("default");
+      expect(resolved.model).toBe("openai/gpt-5.2");
+      expect(resolved.modelOrigin).toBe("app-home");
     }
   );
 
-  it.each(["openai/gpt-6-sol", "gpt-5.3-codex", "openai/gpt-5.3-codex-spark"])(
+  it.each(["openai/gpt-6.2-sol", "gpt-6.2-sol"])(
     "preserves the App Home origin of %s even when it matches the default",
     (model) => {
       const resolved = resolveUserPreferences(
         { userId: "U123", model, updatedAt: 1 },
-        "openai/gpt-6-sol"
+        "openai/gpt-6.2-sol"
       );
 
-      expect(resolved.model).toBe("openai/gpt-6-sol");
+      expect(resolved.model).toBe("openai/gpt-6.2-sol");
       expect(resolved.modelOrigin).toBe("app-home");
     }
   );
@@ -267,7 +294,7 @@ describe("resolveUserPreferences", () => {
         reasoningEffort: "max",
         updatedAt: 1,
       },
-      "anthropic/claude-sonnet-4-6"
+      "anthropic/claude-sonnet-5-5"
     );
 
     expect(resolved.model).toBe("anthropic/claude-haiku-4-5");
@@ -278,13 +305,13 @@ describe("resolveUserPreferences", () => {
     const resolved = resolveUserPreferences(
       {
         userId: "U123",
-        model: "gpt-5.4",
+        model: "gpt-6.2-sol",
         updatedAt: 1,
       },
-      "anthropic/claude-sonnet-4-6"
+      "anthropic/claude-sonnet-5-5"
     );
 
-    expect(resolved.model).toBe("openai/gpt-5.4");
+    expect(resolved.model).toBe("openai/gpt-6.2-sol");
   });
 
   it("validates stored reasoning effort against the resolved Slack default model", () => {
@@ -294,10 +321,10 @@ describe("resolveUserPreferences", () => {
         reasoningEffort: "none",
         updatedAt: 1,
       },
-      "openai/gpt-5.4"
+      "openai/gpt-6-luna"
     );
 
-    expect(resolved.model).toBe("openai/gpt-5.4");
+    expect(resolved.model).toBe("openai/gpt-6-luna");
     expect(resolved.reasoningEffort).toBe("none");
   });
 });

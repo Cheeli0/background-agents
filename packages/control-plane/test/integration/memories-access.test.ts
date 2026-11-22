@@ -267,7 +267,7 @@ describe("memory shared-scope authorization", () => {
     await env.DB.prepare(
       `INSERT INTO automations
       (id, name, instructions, schedule_cron, model, next_run_at, created_by, user_id, created_at, updated_at)
-      VALUES ('memory-auto', 'Memory automation', 'Run tests', '0 9 * * *', 'anthropic/claude-sonnet-4-6', 1, ?, ?, 1, 1)`
+      VALUES ('memory-auto', 'Memory automation', 'Run tests', '0 9 * * *', 'anthropic/claude-sonnet-5-5', 1, ?, ?, 1, 1)`
     )
       .bind(OUTSIDER, OUTSIDER)
       .run();

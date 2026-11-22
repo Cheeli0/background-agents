@@ -118,7 +118,7 @@ describe("automation run linked session privacy (real D1)", () => {
     }
     await env.DB.prepare(
       `INSERT INTO automations (id, owner_team_id, name, instructions, model, created_by, user_id, created_at, updated_at)
-       VALUES (?, ?, 'Session privacy', 'Fixture only; never execute', 'anthropic/claude-sonnet-4-6', ?, ?, 1000, 1000)`
+       VALUES (?, ?, 'Session privacy', 'Fixture only; never execute', 'anthropic/claude-sonnet-5-5', ?, ?, 1000, 1000)`
     )
       .bind(AUTOMATION_ID, AUTOMATION_TEAM, SESSION_OWNER, SESSION_OWNER)
       .run();
